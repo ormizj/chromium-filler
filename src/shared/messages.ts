@@ -14,6 +14,8 @@ export const MSG = {
   STATUS: 'CF_STATUS',
   /** content/modal -> content(self): begin click-to-pick for a field. */
   PICK: 'CF_PICK',
+  /** popup/modal -> content: enter on-page picker Setup mode for this site. */
+  SETUP: 'CF_SETUP',
   /** options -> background: open a batch of URLs in new tabs. */
   OPEN_URLS: 'CF_OPEN_URLS',
   /** popup -> background: open the options page (optionally to create a config). */
@@ -36,6 +38,7 @@ export type Message =
   | { type: typeof MSG.RESET }
   | { type: typeof MSG.STATUS }
   | { type: typeof MSG.PICK; field: FieldKey }
+  | { type: typeof MSG.SETUP }
   | { type: typeof MSG.OPEN_URLS; urls: string[] }
   | { type: typeof MSG.OPEN_OPTIONS; createForUrl?: string }
   | { type: typeof MSG.SUBMITTED; url: string };

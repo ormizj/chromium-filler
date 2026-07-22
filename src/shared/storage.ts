@@ -6,6 +6,8 @@
 import type { JobUrlEntry, Profile, Settings, SiteConfig, StoredState } from './types';
 import { DEFAULT_PROFILE, DEFAULT_SETTINGS } from './defaults';
 import { normalizeEntry } from './jobUrls';
+import { configTemplate } from './configTemplate';
+import { findMatchingConfig } from './matcher';
 
 const KEYS = {
   profile: 'profile',
@@ -54,21 +56,79 @@ export async function upsertSiteConfig(config: SiteConfig): Promise<SiteConfig[]
   return configs;
 }
 
+/** Read-modify-write a single config by id (no-op if the id is unknown). */
+export async function mutateSiteConfig(
+  configId: string,
+  fn: (config: SiteConfig) => void,
+): Promise<SiteConfig[]> {
+  const configs = await getSiteConfigs();
+  const cfg = configs.find((c) => c.id === configId);
+  if (cfg) {
+    fn(cfg);
+    await saveSiteConfigs(configs);
+  }
+  return configs;
+}
+
 /** Save an override selector for one field of a config, creating the map as needed. */
 export async function saveFieldOverride(
   configId: string,
   field: string,
   selector: string,
 ): Promise<void> {
+  await mutateSiteConfig(configId, (cfg) => {
+    if (field === 'resume') {
+      cfg.cvUpload = selector;
+    } else {
+      cfg.fieldOverrides = { ...cfg.fieldOverrides, [field]: selector };
+    }
+  });
+}
+
+/** Remove a field's override (or the CV upload selector). */
+export async function clearFieldOverride(configId: string, field: string): Promise<void> {
+  await mutateSiteConfig(configId, (cfg) => {
+    if (field === 'resume') {
+      delete cfg.cvUpload;
+    } else if (cfg.fieldOverrides) {
+      const next = { ...cfg.fieldOverrides };
+      delete next[field as keyof typeof next];
+      cfg.fieldOverrides = next;
+    }
+  });
+}
+
+/** Save one of the job-info container selectors into a config's `extract` map. */
+export async function saveExtractSelector(
+  configId: string,
+  key: 'jobTitle' | 'jobDescription' | 'jobRequirements',
+  selector: string,
+): Promise<void> {
+  await mutateSiteConfig(configId, (cfg) => {
+    cfg.extract = { ...cfg.extract, [key]: selector };
+  });
+}
+
+/** Remove one of the job-info container selectors from a config's `extract` map. */
+export async function clearExtractSelector(
+  configId: string,
+  key: 'jobTitle' | 'jobDescription' | 'jobRequirements',
+): Promise<void> {
+  await mutateSiteConfig(configId, (cfg) => {
+    const { [key]: _drop, ...rest } = cfg.extract;
+    cfg.extract = rest;
+  });
+}
+
+/** Return the config matching `url`, creating and persisting a minimal one if none exists. */
+export async function ensureConfigForUrl(url: string): Promise<SiteConfig> {
   const configs = await getSiteConfigs();
-  const cfg = configs.find((c) => c.id === configId);
-  if (!cfg) return;
-  if (field === 'resume') {
-    cfg.cvUpload = selector;
-  } else {
-    cfg.fieldOverrides = { ...cfg.fieldOverrides, [field]: selector };
-  }
+  const existing = findMatchingConfig(url, configs);
+  if (existing) return existing;
+  const created = configTemplate(url);
+  configs.push(created);
   await saveSiteConfigs(configs);
+  return created;
 }
 
 export async function getSettings(): Promise<Settings> {

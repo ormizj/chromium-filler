@@ -8,7 +8,7 @@ export type PickHandler = (el: Element) => void;
 
 const OWN_ATTR = 'data-cf-picker';
 
-export function startPicker(onPick: PickHandler, fieldLabel: string): () => void {
+export function startPicker(onPick: PickHandler, fieldLabel: string, onCancel?: () => void): () => void {
   const box = document.createElement('div');
   box.setAttribute(OWN_ATTR, 'box');
   Object.assign(box.style, {
@@ -76,7 +76,7 @@ export function startPicker(onPick: PickHandler, fieldLabel: string): () => void
   };
 
   const finish = (el: Element) => { cleanup(); onPick(el); };
-  const cancel = () => cleanup();
+  const cancel = () => { cleanup(); onCancel?.(); };
 
   confirmBtn.addEventListener('click', (e) => {
     e.preventDefault();

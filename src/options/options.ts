@@ -5,6 +5,7 @@
 
 import type { JobUrlEntry, JobUrlStatus, Profile, SiteConfig, TextFieldKey } from '../shared/types';
 import { TEXT_FIELDS, FIELD_LABELS } from '../shared/fieldKeys';
+import { configTemplate } from '../shared/configTemplate';
 import { extractUrls } from '../shared/urlImport';
 import { addUrls, applyStatus, jobUrlStats, removeUrl } from '../shared/jobUrls';
 import { MSG } from '../shared/messages';
@@ -105,22 +106,6 @@ async function initSettings(): Promise<void> {
 }
 
 /* ---------------- Site configs ---------------- */
-
-function configTemplate(url?: string): SiteConfig {
-  let host = 'example.com';
-  try { if (url) host = new URL(url).host; } catch { /* ignore */ }
-  return {
-    id: host.replace(/[^a-z0-9]+/gi, '-').toLowerCase() || `site-${Date.now()}`,
-    name: host,
-    urlPatterns: [`*://${host}/*`],
-    waitFor: 'form',
-    waitTimeoutMs: 15000,
-    prep: [],
-    extract: { jobTitle: 'h1', jobDescription: '[class*="description"]' },
-    fieldOverrides: {},
-    autoDetect: true,
-  };
-}
 
 function validateConfigs(data: unknown): asserts data is SiteConfig[] {
   if (!Array.isArray(data)) throw new Error('Top level must be an array of configs.');

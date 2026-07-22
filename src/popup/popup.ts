@@ -4,14 +4,15 @@
  */
 
 import { MSG, type StatusResponse } from '../shared/messages';
+import { BUILD_ID, BUILD_LABEL } from '../shared/buildId';
 
 const badge = document.getElementById('site-status')!;
 const detail = document.getElementById('detail')!;
 const primary = document.getElementById('primary') as HTMLButtonElement;
+const reconfigure = document.getElementById('reconfigure') as HTMLAnchorElement;
 const openOptions = document.getElementById('open-options') as HTMLAnchorElement;
 
 let tabId: number | undefined;
-let currentUrl = '';
 let status: StatusResponse | undefined;
 
 async function activeTab(): Promise<chrome.tabs.Tab | undefined> {
@@ -46,13 +47,21 @@ function render(): void {
       : `${status.siteName}: ready to fill.`;
     primary.disabled = false;
     primary.textContent = status.hasRun ? 'Reset & Re-run' : 'Fill';
+    reconfigure.hidden = false;
   } else {
     badge.textContent = 'no config';
     badge.className = 'badge none';
-    detail.textContent = 'No site config matches this URL. Create one to enable filling here.';
+    detail.textContent = 'No site config matches this URL. Set it up visually to enable filling here.';
     primary.disabled = false;
-    primary.textContent = 'Create config for this site';
+    primary.textContent = 'Set up this site';
+    reconfigure.hidden = true;
   }
+}
+
+/** Open the on-page visual Setup panel in the active tab, then close the popup. */
+async function enterSetup(): Promise<void> {
+  await send(MSG.SETUP);
+  window.close();
 }
 
 async function refresh(): Promise<void> {
@@ -63,8 +72,7 @@ async function refresh(): Promise<void> {
 primary.addEventListener('click', async () => {
   if (!status) return;
   if (!status.siteMatched) {
-    chrome.runtime.sendMessage({ type: MSG.OPEN_OPTIONS, createForUrl: currentUrl });
-    window.close();
+    await enterSetup();
     return;
   }
   primary.disabled = true;
@@ -77,15 +85,37 @@ primary.addEventListener('click', async () => {
   render();
 });
 
+reconfigure.addEventListener('click', async (e) => {
+  e.preventDefault();
+  await enterSetup();
+});
+
 openOptions.addEventListener('click', (e) => {
   e.preventDefault();
   chrome.runtime.sendMessage({ type: MSG.OPEN_OPTIONS });
   window.close();
 });
 
+{
+  const span = (cls: string, text: string): HTMLSpanElement => {
+    const s = document.createElement('span');
+    s.className = cls;
+    s.textContent = text;
+    return s;
+  };
+  const hash = BUILD_ID.slice(BUILD_LABEL.length).replace(/^ · /, '');
+  const parts = [
+    span('build-version', `v${chrome.runtime.getManifest().version}`),
+    ...(hash ? [span('build-hash', hash)] : []),
+    span('build-label', BUILD_LABEL),
+  ];
+  document.getElementById('build')!.replaceChildren(
+    ...parts.flatMap((p, i) => (i ? [span('build-sep', '·'), p] : [p])),
+  );
+}
+
 (async () => {
   const tab = await activeTab();
   tabId = tab?.id;
-  currentUrl = tab?.url ?? '';
   await refresh();
 })();

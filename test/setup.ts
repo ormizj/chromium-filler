@@ -42,6 +42,7 @@ const chromeMock = {
     sendMessage: vi.fn(),
     onMessage: { addListener: vi.fn(), removeListener: vi.fn() },
     getURL: vi.fn((p: string) => `chrome-extension://test/${p}`),
+    getManifest: vi.fn(() => ({ version: '0.0.0-test' })),
     lastError: undefined,
   },
   tabs: {

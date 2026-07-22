@@ -62,8 +62,8 @@ export interface SiteConfig {
   waitTimeoutMs?: number;
   /** Prerequisite steps run automatically before filling. */
   prep?: PrepStep[];
-  /** Selectors for pulling the job title + description into the modal. */
-  extract: { jobTitle?: string; jobDescription?: string };
+  /** Selectors for pulling the job title, description + requirements into the modal. */
+  extract: { jobTitle?: string; jobDescription?: string; jobRequirements?: string };
   /** Explicit selector overrides per field; these always win over heuristics. */
   fieldOverrides?: Partial<Record<FieldKey, string>>;
   /** Override selector for the CV file input. */

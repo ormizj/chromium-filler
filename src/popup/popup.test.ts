@@ -72,13 +72,13 @@ describe('popup render', () => {
     expect((document.getElementById('primary') as HTMLButtonElement).textContent).toBe('Reset & Re-run');
   });
 
-  it('no config: prompts to create one, button enabled', async () => {
+  it('no config: prompts to set one up visually, button enabled', async () => {
     await mountPopup(matched({ siteMatched: false, siteName: undefined }));
     const badge = document.getElementById('site-status')!;
     const primary = document.getElementById('primary') as HTMLButtonElement;
     expect(badge.textContent).toBe('no config');
     expect(badge.className).toContain('none');
-    expect(primary.textContent).toBe('Create config for this site');
+    expect(primary.textContent).toBe('Set up this site');
     expect(primary.disabled).toBe(false);
   });
 
@@ -91,12 +91,32 @@ describe('popup render', () => {
     expect(primary.disabled).toBe(true);
   });
 
-  it('clicking the button with no config asks the background to open options', async () => {
-    await mountPopup(matched({ siteMatched: false, siteName: undefined }));
+  /** Swap in a recording sendMessage after mount (mountPopup installs its own). */
+  function recordTabMessages(reply: StatusResponse): unknown[] {
+    const sent: unknown[] = [];
+    chrome.tabs.sendMessage = vi.fn((_tabId: number, msg: unknown, cb?: (r: unknown) => void) => {
+      sent.push(msg);
+      cb?.(reply);
+    }) as unknown as typeof chrome.tabs.sendMessage;
+    return sent;
+  }
+
+  it('clicking the button with no config enters on-page setup in the tab', async () => {
+    const noCfg = matched({ siteMatched: false, siteName: undefined });
+    await mountPopup(noCfg);
+    const sent = recordTabMessages(noCfg);
     (document.getElementById('primary') as HTMLButtonElement).click();
     await flush();
-    expect(chrome.runtime.sendMessage).toHaveBeenCalledWith(
-      expect.objectContaining({ type: MSG.OPEN_OPTIONS, createForUrl: 'https://example.com/sample-form.html' }),
-    );
+    expect(sent).toContainEqual(expect.objectContaining({ type: MSG.SETUP }));
+  });
+
+  it('matched: exposes a Reconfigure link that enters setup in the tab', async () => {
+    await mountPopup(matched());
+    const link = document.getElementById('reconfigure') as HTMLAnchorElement;
+    expect(link.hidden).toBe(false);
+    const sent = recordTabMessages(matched());
+    link.click();
+    await flush();
+    expect(sent).toContainEqual(expect.objectContaining({ type: MSG.SETUP }));
   });
 });

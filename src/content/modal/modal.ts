@@ -21,6 +21,7 @@ export interface ModalData {
   siteName: string;
   jobTitle?: string;
   jobDescription?: string;
+  jobRequirements?: string;
   matches: FieldMatch[];
   canSubmitCv: boolean;
 }
@@ -71,6 +72,13 @@ export class FillerModal {
       const d = el('div', 'cf-desc');
       d.textContent = data.jobDescription;
       body.append(d);
+    }
+    if (data.jobRequirements) {
+      const label = el('div', 'cf-req-label');
+      label.textContent = 'Requirements';
+      const r = el('div', 'cf-desc cf-req');
+      r.textContent = data.jobRequirements;
+      body.append(label, r);
     }
 
     const filled = data.matches.filter((m) => m.filled).length;

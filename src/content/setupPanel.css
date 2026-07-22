@@ -5,8 +5,8 @@
   --cf-border: #e5e7eb;
   --cf-surface: #f9fafb;
   --cf-accent: #6366f1;
-  --cf-high: #22c55e;
-  --cf-low: #eab308;
+  --cf-ok: #22c55e;
+  --cf-warn: #eab308;
   --cf-none: #ef4444;
   all: initial;
 }
@@ -26,10 +26,10 @@
 .cf-card {
   position: fixed;
   right: 16px;
-  bottom: 16px;
-  width: 380px;
+  top: 16px;
+  width: 400px;
   max-width: calc(100vw - 32px);
-  max-height: min(80vh, 640px);
+  max-height: min(88vh, 720px);
   display: flex;
   flex-direction: column;
   background: var(--cf-bg);
@@ -42,15 +42,15 @@
   overflow: hidden;
 }
 
-/* Mobile: full-width bottom sheet */
 @media (max-width: 640px) {
   .cf-card {
     right: 0;
     left: 0;
+    top: auto;
     bottom: 0;
     width: 100%;
     max-width: 100%;
-    max-height: 85vh;
+    max-height: 88vh;
     border-radius: 16px 16px 0 0;
   }
 }
@@ -75,14 +75,17 @@
 }
 @media (min-width: 641px) { .cf-grip { display: none; } }
 
-.cf-site {
-  font-weight: 600;
-  font-size: 12px;
-  color: var(--cf-muted);
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
-  flex: 1;
+.cf-heading { font-weight: 700; font-size: 14px; flex: 1; }
+.cf-build {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 10px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  margin-top: 3px;
 }
+.cf-build-version, .cf-build-hash, .cf-build-sep { color: var(--cf-muted); opacity: 0.7; }
+.cf-build-label { font-weight: 700; color: var(--cf-muted); }
 
 .cf-close {
   border: none;
@@ -95,41 +98,49 @@
   min-height: 32px;
 }
 
-.cf-body {
-  padding: 12px;
-  overflow-y: auto;
-  flex: 1;
-}
+.cf-body { padding: 12px; overflow-y: auto; flex: 1; }
 
-.cf-title {
-  font-size: 16px;
-  font-weight: 700;
-  margin: 0 0 6px;
-}
-
-.cf-desc {
-  color: var(--cf-fg);
-  background: var(--cf-surface);
+.cf-identity { display: flex; flex-direction: column; gap: 8px; margin-bottom: 8px; }
+.cf-fld { display: flex; flex-direction: column; gap: 3px; }
+.cf-fld-label { font-size: 11px; color: var(--cf-muted); text-transform: uppercase; letter-spacing: 0.04em; }
+.cf-input {
+  width: 100%;
   border: 1px solid var(--cf-border);
   border-radius: 8px;
-  padding: 8px 10px;
-  max-height: 160px;
-  overflow-y: auto;
-  white-space: pre-wrap;
-  font-size: 13px;
-  margin-bottom: 12px;
+  padding: 7px 9px;
+  background: var(--cf-surface);
+  color: var(--cf-fg);
+  font: 13px system-ui, sans-serif;
 }
 
-.cf-req-label {
+.cf-section {
   font-size: 11px;
   font-weight: 600;
   color: var(--cf-muted);
   text-transform: uppercase;
   letter-spacing: 0.04em;
-  margin-bottom: 4px;
+  margin: 14px 0 6px;
 }
 
-.cf-report { display: flex; flex-direction: column; gap: 6px; }
+.cf-section-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+.cf-section-row .cf-section { margin-bottom: 6px; }
+
+.cf-addbar { display: flex; gap: 6px; flex-wrap: wrap; margin: 6px 0 2px; }
+
+.cf-ms {
+  width: 68px;
+  border: 1px solid var(--cf-border);
+  border-radius: 6px;
+  padding: 4px 6px;
+  background: var(--cf-surface);
+  color: var(--cf-fg);
+  font: 12px system-ui, sans-serif;
+}
 
 .cf-row {
   display: flex;
@@ -139,17 +150,13 @@
   border: 1px solid var(--cf-border);
   border-radius: 8px;
   min-height: 44px;
+  margin-bottom: 6px;
 }
 
-.cf-dot {
-  width: 10px;
-  height: 10px;
-  border-radius: 50%;
-  flex: none;
-}
-.cf-dot.high { background: var(--cf-high); }
-.cf-dot.low { background: var(--cf-low); }
-.cf-dot.none { background: var(--cf-none); }
+.cf-dot { width: 10px; height: 10px; border-radius: 50%; flex: none; }
+.cf-dot.ok { background: var(--cf-ok); }
+.cf-dot.warn { background: var(--cf-warn); }
+.cf-dot.none { background: var(--cf-border); }
 
 .cf-field { flex: 1; min-width: 0; }
 .cf-field b { display: block; font-size: 13px; }
@@ -176,6 +183,7 @@ button.cf-btn {
 }
 button.cf-btn.primary { background: var(--cf-accent); color: #fff; border-color: var(--cf-accent); }
 button.cf-btn:hover { filter: brightness(0.97); }
+button.cf-btn:disabled { opacity: 0.45; cursor: not-allowed; filter: none; }
 
 .cf-footer {
   display: flex;
@@ -184,15 +192,4 @@ button.cf-btn:hover { filter: brightness(0.97); }
   border-top: 1px solid var(--cf-border);
   flex-wrap: wrap;
 }
-.cf-footer button.cf-btn {
-  flex: 1;
-  min-height: 44px;
-  min-width: 96px;
-  font-size: 13px;
-}
-
-.cf-summary {
-  font-size: 12px;
-  color: var(--cf-muted);
-  margin: 0 0 8px;
-}
+.cf-footer button.cf-btn { flex: 1; min-height: 44px; min-width: 96px; font-size: 13px; }
