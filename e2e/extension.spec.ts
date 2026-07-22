@@ -121,6 +121,25 @@ test('ChaosForm: hashed ids + multi-step; disguised city stays unmatched', async
   await page.close();
 });
 
+test('Popup: opens at a usable width (no vw sliver) and renders cleanly', async () => {
+  const page = await context.newPage();
+  const errors: string[] = [];
+  page.on('console', (m) => { if (m.type() === 'error') errors.push(m.text()); });
+  page.on('pageerror', (e) => errors.push(e.message));
+
+  // Mimic the toolbar popup's constrained initial layout viewport: a vw-based
+  // width collapses the panel to a blank sliver here (the original bug).
+  await page.setViewportSize({ width: 40, height: 300 });
+  await page.goto(`chrome-extension://${extId}/src/popup/popup.html`);
+  await expect(page.locator('.wrap')).toBeVisible();
+
+  const box = await page.locator('.wrap').boundingBox();
+  expect(box?.width ?? 0).toBeGreaterThanOrEqual(300); // regression guard for the sliver
+  await expect(page.locator('#primary')).toBeVisible();
+  expect(errors).toEqual([]);
+  await page.close();
+});
+
 test('Auto-close: tab closes once the success selector appears', async () => {
   const page = await context.newPage();
   await page.goto(`${BASE}/sites/slow-boards.html`);

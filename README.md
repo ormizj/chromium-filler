@@ -37,7 +37,8 @@ npm install
 npm test          # unit + integration tests (Vitest, TDD)
 npm run typecheck # tsc --noEmit
 npm run build     # -> dist/
-npm run dev       # Vite dev server with HMR
+npm run dev       # Vite dev server (also serves the UI dev harness, below)
+npm run dev:ext   # rebuild dist/ on every change (for load-unpacked, below)
 
 # End-to-end: loads the built extension into real Chromium and drives the
 # three hard test sites. Requires the browser once: `npx playwright install chromium`.
@@ -46,16 +47,49 @@ npm run build && npm run test:e2e
 
 The E2E suite (`e2e/extension.spec.ts`) is the confidence signal: it runs the
 whole pipeline (wait → prep → detect → fill → CV → auto-close) against three
-deliberately nasty fixture sites (see below). If it's green, real boards should
-behave.
+deliberately nasty fixture sites (see below), plus a popup render/size check. If
+it's green, real boards should behave.
 
-## Load in Chrome (desktop)
+## Two ways to run it while developing
 
-1. `npm run build`
+Pick based on what you're iterating on. **Start with the harness** for UI work;
+use load-unpacked to verify against real pages and real messaging.
+
+### A. Standalone UI harness — fast, no install (best for popup/options work)
+
+```bash
+npm run dev            # then open http://localhost:5173/dev/
+```
+
+This renders the **real** `popup.ts` and `options.ts` side by side in a normal
+browser tab, driven by a **mocked** `chrome.*` API (`dev/mock-chrome.ts`) whose
+storage is backed by `localStorage` and whose content script is faked so the
+popup's Fill / Reset buttons visibly change state. Instant Vite HMR, no
+extension install.
+
+> ⚠️ The harness is a *simulation*. It exercises the UI only — it does **not**
+> cover real content-script injection, cross-context messaging, or real sites.
+> Use load-unpacked (below) + the E2E suite for those.
+
+### B. Load unpacked in Chrome — the real extension
+
+1. `npm run build` (or `npm run dev:ext` to auto-rebuild `dist/` as you edit).
 2. Go to `chrome://extensions`, enable **Developer mode**.
-3. **Load unpacked** → select the `dist/` folder.
-4. Open the popup, then **Manage profile, configs & URLs** to set your profile
-   and upload your CV.
+3. **Load unpacked** → select the `dist/` folder. (After a rebuild, click the
+   extension's ↻ reload button on that page.)
+4. Click the toolbar icon to open the popup, then **Manage profile, configs &
+   URLs** to set your profile and upload your CV.
+
+Tip: to inspect the popup with full DevTools instead of the cramped panel, open
+it as a normal tab at `chrome-extension://<your-extension-id>/src/popup/popup.html`
+(the id is shown on the `chrome://extensions` card).
+
+> ⚠️ **`npm run dev` writes a *dev* `dist/`** that loads its code from the Vite
+> server — that build only works while `npm run dev` is running, and a
+> load-unpacked copy of it (or the E2E suite) will fail with
+> `ERR_CONNECTION_REFUSED` once the server stops. For a standalone extension,
+> use `npm run dev:ext` (watch) or `npm run build`, which emit a production
+> `dist/`. Always `npm run build` before `npm run test:e2e`.
 
 ## Load on mobile
 

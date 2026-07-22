@@ -1,0 +1,58 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Chromium Filler — UI dev harness</title>
+    <link rel="icon" href="data:," />
+    <style>
+      body {
+        margin: 0;
+        font: 14px/1.5 system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
+        background: #eef1f5;
+        color: #111827;
+      }
+      header {
+        padding: 12px 16px;
+        background: #111827;
+        color: #f9fafb;
+        display: flex;
+        align-items: baseline;
+        gap: 12px;
+        flex-wrap: wrap;
+      }
+      header h1 { font-size: 15px; margin: 0; }
+      header small { color: #9ca3af; }
+      header .warn { color: #fbbf24; }
+      .stage {
+        display: flex;
+        gap: 20px;
+        align-items: flex-start;
+        padding: 20px;
+        flex-wrap: wrap;
+      }
+      .panel { background: #fff; border-radius: 12px; box-shadow: 0 6px 24px rgba(0,0,0,.12); overflow: hidden; }
+      .panel h2 { font-size: 12px; text-transform: uppercase; letter-spacing: .05em; color: #6b7280; margin: 0; padding: 8px 12px; border-bottom: 1px solid #e5e7eb; }
+      .panel.popup iframe { width: 320px; height: 260px; border: 0; display: block; }
+      .panel.options { flex: 1 1 640px; min-width: 420px; }
+      .panel.options iframe { width: 100%; height: 82vh; border: 0; display: block; }
+    </style>
+  </head>
+  <body>
+    <header>
+      <h1>Chromium Filler · UI dev harness</h1>
+      <small>Real popup.ts / options.ts against a <b>mocked</b> chrome API — no extension install.</small>
+      <small class="warn">Mock only: content-script messaging &amp; real sites are not exercised (use load-unpacked + E2E for that).</small>
+    </header>
+    <div class="stage">
+      <div class="panel popup">
+        <h2>Popup</h2>
+        <iframe src="./frame.html?page=popup" title="Popup harness"></iframe>
+      </div>
+      <div class="panel options">
+        <h2>Options</h2>
+        <iframe src="./frame.html?page=options" title="Options harness"></iframe>
+      </div>
+    </div>
+  </body>
+</html>

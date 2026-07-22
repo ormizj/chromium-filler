@@ -17,11 +17,16 @@
 * { box-sizing: border-box; }
 body {
   margin: 0;
+  /* Toolbar popups size to content; the width MUST be a fixed pixel value.
+     Viewport units (vw) resolve against the popup's transient ~0-width layout
+     viewport and collapse the panel to a blank sliver — even inside a
+     `max-width` media query, which matches during that 0-width pass. */
+  width: 320px;
   font: 14px/1.5 system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
   background: var(--bg);
   color: var(--fg);
 }
-.wrap { width: min(320px, 92vw); padding: 14px; }
+.wrap { padding: 14px; }
 header { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
 h1 { font-size: 15px; margin: 0; }
 .badge {
