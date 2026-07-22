@@ -1,0 +1,75 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>ModalLever — Senior Product Designer</title>
+    <style>
+      body { font: 15px/1.6 system-ui, sans-serif; max-width: 640px; margin: 40px auto; padding: 0 16px; }
+      .backdrop { display: none; position: fixed; inset: 0; background: rgba(0,0,0,.4); }
+      .backdrop.open { display: block; }
+      .modal { background: #fff; max-width: 480px; margin: 6vh auto; padding: 20px; border-radius: 12px; }
+      label { display: block; margin: 12px 0 4px; font-weight: 600; }
+      input, textarea { width: 100%; padding: 8px; box-sizing: border-box; font: inherit; }
+      .dropzone { border: 2px dashed #9ca3af; border-radius: 8px; padding: 16px; text-align: center; margin-top: 8px; }
+      .hidden-file { position: absolute; width: 1px; height: 1px; opacity: 0; }
+      #lever-success { display: none; color: #15803d; font-weight: 700; margin-top: 12px; }
+      button { margin-top: 12px; padding: 10px 18px; }
+    </style>
+  </head>
+  <body>
+    <!--
+      HARD CASE #2 — Form behind a modal + custom CV dropzone that is injected on
+      demand. The form only exists after clicking "Apply" (prep click). The CV
+      file input does not exist until "Add résumé" is clicked (prep click).
+      Fields have NO id/name — only aria-labels and wrapping labels, so matching
+      must rely on accessible names.
+    -->
+    <h1 id="posting-title">Senior Product Designer</h1>
+    <div id="posting-body">
+      ModalLever is hiring a Senior Product Designer to shape our design system.
+      Click apply to open the application modal.
+    </div>
+    <button id="apply-btn">Apply for this role</button>
+
+    <div class="backdrop" id="backdrop">
+      <div class="modal" id="modal-root"></div>
+    </div>
+
+    <script>
+      document.getElementById('apply-btn').addEventListener('click', () => {
+        document.getElementById('backdrop').classList.add('open');
+        document.getElementById('modal-root').innerHTML = `
+          <form id="modal-form">
+            <label>Full name
+              <input aria-label="Full name" />
+            </label>
+            <input aria-label="Email address" placeholder="Email address" />
+            <label>Phone number
+              <input />
+            </label>
+            <div class="dropzone" id="dropzone">
+              <button type="button" id="add-resume">Add résumé</button>
+            </div>
+            <button id="lever-submit" type="submit">Submit application</button>
+          </form>
+          <div id="lever-success">✓ Submitted to ModalLever.</div>
+        `;
+        // "Add résumé" injects the real (visually hidden) file input on demand.
+        document.getElementById('add-resume').addEventListener('click', () => {
+          if (document.getElementById('resume-hidden')) return;
+          const input = document.createElement('input');
+          input.type = 'file';
+          input.id = 'resume-hidden';
+          input.className = 'hidden-file';
+          input.setAttribute('aria-label', 'Résumé upload');
+          document.getElementById('dropzone').appendChild(input);
+        });
+        document.getElementById('modal-form').addEventListener('submit', (e) => {
+          e.preventDefault();
+          document.getElementById('lever-success').style.display = 'block';
+        });
+      });
+    </script>
+  </body>
+</html>

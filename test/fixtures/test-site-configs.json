@@ -1,0 +1,38 @@
+[
+  {
+    "id": "slow-boards",
+    "name": "SlowBoards (test)",
+    "urlPatterns": ["*://*/sites/slow-boards.html", "file://*slow-boards.html"],
+    "waitFor": "#application-form",
+    "waitTimeoutMs": 15000,
+    "prep": [{ "action": "click", "selector": "#expand-description", "optional": true }],
+    "extract": { "jobTitle": "#job-title", "jobDescription": "#job-description" },
+    "successSelector": "#app-success",
+    "autoDetect": true
+  },
+  {
+    "id": "modal-lever",
+    "name": "ModalLever (test)",
+    "urlPatterns": ["*://*/sites/modal-lever.html", "file://*modal-lever.html"],
+    "prep": [
+      { "action": "click", "selector": "#apply-btn" },
+      { "action": "waitFor", "selector": "#modal-form", "ms": 8000 },
+      { "action": "click", "selector": "#add-resume", "optional": true }
+    ],
+    "extract": { "jobTitle": "#posting-title", "jobDescription": "#posting-body" },
+    "cvUpload": "#resume-hidden",
+    "successSelector": "#lever-success",
+    "autoDetect": true
+  },
+  {
+    "id": "chaos-form",
+    "name": "ChaosForm (test)",
+    "urlPatterns": ["*://*/sites/chaos-form.html", "file://*chaos-form.html"],
+    "waitFor": "#chaos-form",
+    "waitTimeoutMs": 15000,
+    "prep": [{ "action": "click", "selector": "#next-btn", "optional": true }],
+    "extract": { "jobTitle": "#role-title", "jobDescription": "#role-desc" },
+    "successSelector": "#chaos-success",
+    "autoDetect": true
+  }
+]

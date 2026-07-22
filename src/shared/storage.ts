@@ -1,10 +1,11 @@
 /**
  * Typed wrappers over chrome.storage.local for the extension's persisted state.
- * The CV binary is stored separately in IndexedDB (see cvStore.ts).
+ * The CV binary is stored separately, base64-encoded, in chrome.storage.local (see cvStore.ts).
  */
 
 import type { JobUrlEntry, Profile, Settings, SiteConfig, StoredState } from './types';
 import { DEFAULT_PROFILE, DEFAULT_SETTINGS } from './defaults';
+import { normalizeEntry } from './jobUrls';
 
 const KEYS = {
   profile: 'profile',
@@ -81,11 +82,21 @@ export async function saveSettings(settings: Settings): Promise<void> {
 
 export async function getJobUrls(): Promise<JobUrlEntry[]> {
   const raw = await chrome.storage.local.get(KEYS.jobUrls);
-  return (raw[KEYS.jobUrls] as JobUrlEntry[]) ?? [];
+  const list = (raw[KEYS.jobUrls] as JobUrlEntry[]) ?? [];
+  return list.map(normalizeEntry);
 }
 
 export async function saveJobUrls(urls: JobUrlEntry[]): Promise<void> {
   await chrome.storage.local.set({ [KEYS.jobUrls]: urls });
+}
+
+/** Read-modify-write helper for the job-URL list. */
+export async function mutateJobUrls(
+  fn: (list: JobUrlEntry[]) => JobUrlEntry[],
+): Promise<JobUrlEntry[]> {
+  const next = fn(await getJobUrls());
+  await saveJobUrls(next);
+  return next;
 }
 
 export function onStorageChanged(cb: () => void): void {

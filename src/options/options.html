@@ -22,7 +22,7 @@
 
       <section id="cv-section">
         <h2>CV / Résumé</h2>
-        <p class="hint">Stored on-device (IndexedDB). Attached to file inputs during fill.</p>
+        <p class="hint">Stored on-device (chrome.storage.local). Attached to file inputs during fill.</p>
         <div class="row">
           <input type="file" id="cv-input" />
           <button id="clear-cv">Remove</button>
@@ -33,6 +33,16 @@
       <section id="settings-section">
         <h2>Behavior</h2>
         <label class="check"><input type="checkbox" id="auto-run" /> Auto-run when a matching page loads</label>
+        <label class="check"><input type="checkbox" id="close-on-submit" /> Auto-close the tab after I submit an application</label>
+        <p class="hint" style="margin: 6px 0 0;">
+          "Sent" is detected per site via that config's <code>successSelector</code>
+          (a confirmation element) — the reliable signal. Without one, a plain form
+          submit is used as a fallback (navigation flows only).
+        </p>
+        <label class="fld" style="max-width: 240px; margin-top: 8px;">
+          Close delay (ms)
+          <input type="number" id="close-delay" min="0" step="250" />
+        </label>
       </section>
 
       <section id="configs-section">
@@ -59,10 +69,22 @@
         </div>
         <div id="urls-preview"></div>
 
-        <h3>Saved URLs (<span id="url-count">0</span>)</h3>
+        <h3>Dashboard</h3>
+        <div id="url-stats" class="stats"></div>
+
         <div class="row">
           <button id="open-new">Open all “new” in tabs</button>
           <button id="clear-urls">Clear all</button>
+          <label class="fld inline">
+            Filter
+            <select id="url-filter">
+              <option value="all">All</option>
+              <option value="new">New</option>
+              <option value="opened">Opened</option>
+              <option value="applied">Applied</option>
+              <option value="skipped">Skipped</option>
+            </select>
+          </label>
         </div>
         <ul id="urls-list" class="urls"></ul>
       </section>

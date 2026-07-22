@@ -4,7 +4,8 @@
  */
 
 import { MSG, type Message } from '../shared/messages';
-import { getJobUrls, saveJobUrls } from '../shared/storage';
+import { getSettings, mutateJobUrls } from '../shared/storage';
+import { applyStatus } from '../shared/jobUrls';
 import { DEFAULT_STATE } from '../shared/defaults';
 
 chrome.runtime.onInstalled.addListener(async (details) => {
@@ -23,6 +24,12 @@ chrome.runtime.onMessage.addListener((msg: Message, _sender, sendResponse) => {
       .catch((e) => sendResponse({ ok: false, error: String(e) }));
     return true;
   }
+  if (msg.type === MSG.SUBMITTED) {
+    handleSubmitted(msg.url, _sender.tab?.id)
+      .then(() => sendResponse({ ok: true }))
+      .catch((e) => sendResponse({ ok: false, error: String(e) }));
+    return true;
+  }
   if (msg.type === MSG.OPEN_OPTIONS) {
     const url = msg.createForUrl
       ? `${chrome.runtime.getURL('src/options/options.html')}#create=${encodeURIComponent(msg.createForUrl)}`
@@ -35,13 +42,21 @@ chrome.runtime.onMessage.addListener((msg: Message, _sender, sendResponse) => {
   return false;
 });
 
+async function handleSubmitted(url: string, tabId: number | undefined): Promise<void> {
+  // Mark the matching saved URL applied (records appliedAt + history).
+  await mutateJobUrls((list) => applyStatus(list, url, 'applied'));
+
+  // Optionally close the tab after a short delay so the request completes.
+  const settings = await getSettings();
+  if (settings.closeTabOnSubmit && tabId != null) {
+    const delay = Math.max(0, settings.closeTabDelayMs ?? 1500);
+    setTimeout(() => chrome.tabs.remove(tabId).catch(() => {}), delay);
+  }
+}
+
 async function openUrls(urls: string[]): Promise<void> {
-  const list = await getJobUrls();
-  const byUrl = new Map(list.map((e) => [e.url, e]));
   for (const url of urls) {
     await chrome.tabs.create({ url, active: false });
-    const entry = byUrl.get(url);
-    if (entry && entry.status === 'new') entry.status = 'opened';
   }
-  await saveJobUrls(list);
+  await mutateJobUrls((list) => urls.reduce((acc, url) => applyStatus(acc, url, 'opened'), list));
 }

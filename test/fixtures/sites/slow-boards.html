@@ -1,0 +1,73 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>SlowBoards — Staff Platform Engineer</title>
+    <style>
+      body { font: 15px/1.6 system-ui, sans-serif; max-width: 640px; margin: 40px auto; padding: 0 16px; }
+      .spinner { color: #6b7280; }
+      label { display: block; margin: 12px 0 4px; font-weight: 600; }
+      input, textarea { width: 100%; padding: 8px; box-sizing: border-box; font: inherit; }
+      .desc { display: none; background: #f4f4f5; padding: 12px; border-radius: 8px; margin: 8px 0; }
+      .desc.open { display: block; }
+      #app-success { display: none; color: #15803d; font-weight: 700; margin-top: 16px; }
+      button { margin-top: 16px; padding: 10px 18px; }
+    </style>
+  </head>
+  <body>
+    <!--
+      HARD CASE #1 — Slow-loading form.
+      The application form does not exist at load; it is injected ~2s later,
+      exercising the config's `waitFor`. Description is collapsed behind a button
+      (prep click). Submit is intercepted and shows a success node.
+    -->
+    <h1 id="job-title">Staff Platform Engineer</h1>
+    <button id="expand-description">Show full description</button>
+    <div id="job-description" class="desc">
+      SlowBoards is hiring a Staff Platform Engineer. You will own our build and
+      release platform end to end. This description is intentionally verbose to
+      confirm the modal scrolls long text nicely. Requirements: deep systems
+      experience, patience with slow forms, and a taste for clean automation.
+    </div>
+
+    <p class="spinner" id="spinner">Loading application form…</p>
+    <div id="form-mount"></div>
+
+    <script>
+      document.getElementById('expand-description').addEventListener('click', () => {
+        document.getElementById('job-description').classList.add('open');
+      });
+
+      // Inject the form after a delay to simulate a slow SPA / late XHR.
+      setTimeout(() => {
+        document.getElementById('spinner').remove();
+        document.getElementById('form-mount').innerHTML = `
+          <form id="application-form">
+            <label for="first_name">First name</label>
+            <input id="first_name" name="first_name" />
+
+            <label for="last_name">Last name</label>
+            <input id="last_name" name="last_name" />
+
+            <label for="email">Email</label>
+            <input id="email" name="email" type="email" />
+
+            <label for="phone">Phone</label>
+            <input id="phone" name="phone" placeholder="+1 555 …" />
+
+            <label for="resume-file">Résumé (PDF)</label>
+            <input id="resume-file" name="resume" type="file" />
+
+            <button id="submit" type="submit">Send application</button>
+          </form>
+          <div id="app-success">✓ Application submitted to SlowBoards.</div>
+        `;
+        document.getElementById('application-form').addEventListener('submit', (e) => {
+          e.preventDefault();
+          document.getElementById('app-success').style.display = 'block';
+        });
+      }, 2000);
+    </script>
+  </body>
+</html>

@@ -30,6 +30,8 @@ class Controller {
   private modal?: FillerModal;
   private cancelPicker?: () => void;
   private hasRun = false;
+  private submitReported = false;
+  private successObserver?: MutationObserver;
 
   async init(): Promise<void> {
     const state = await getState();
@@ -41,8 +43,61 @@ class Controller {
       return true; // async response
     });
 
-    if (this.config && state.settings.autoRunOnLoad) {
-      this.run().catch((e) => console.error(LOG, 'auto-run failed', e));
+    if (this.config) {
+      this.setupSubmitDetection();
+      if (state.settings.autoRunOnLoad) {
+        this.run().catch((e) => console.error(LOG, 'auto-run failed', e));
+      }
+    }
+  }
+
+  /**
+   * Detects that the application was *actually sent* — we never submit for the
+   * user, so this watches for their submission completing. Detecting "sent"
+   * reliably is the hard part, so the policy is deliberate:
+   *
+   *  - If the config defines `successSelector`, THAT is the authoritative signal:
+   *    we close only when the confirmation element appears. A bare `submit` event
+   *    is ignored, because AJAX submissions fire it before the server responds
+   *    and may still fail — we must not close a tab on a failed attempt.
+   *  - If no `successSelector` is set, we fall back to the form `submit` event.
+   *    This suits full-page-navigation flows, where the tab leaves before any
+   *    in-page confirmation could render, so the submit event is all we get.
+   *
+   * Either way we report once; the background marks the URL applied and, if the
+   * setting is on, closes the tab after the configured delay.
+   */
+  private setupSubmitDetection(): void {
+    const report = () => {
+      if (this.submitReported) return;
+      this.submitReported = true;
+      this.successObserver?.disconnect();
+      chrome.runtime.sendMessage({ type: MSG.SUBMITTED, url: location.href });
+    };
+
+    const selector = this.config?.successSelector;
+    if (selector) {
+      // Authoritative: wait for the confirmation element to be VISIBLE. Presence
+      // alone is not enough — sites commonly pre-render a hidden success node and
+      // only reveal it after the server confirms.
+      const check = () => {
+        const el = safeQuery(selector);
+        if (el && isVisible(el)) { report(); return true; }
+        return false;
+      };
+      if (check()) return;
+      this.successObserver = new MutationObserver(() => check());
+      // Observe both structure and the attributes that flip visibility, since the
+      // reveal is often a style/class/hidden change on an existing element.
+      this.successObserver.observe(document.documentElement, {
+        childList: true,
+        subtree: true,
+        attributes: true,
+        attributeFilter: ['style', 'class', 'hidden'],
+      });
+    } else {
+      // Fallback: best-effort for navigation flows with no in-page confirmation.
+      document.addEventListener('submit', report, true);
     }
   }
 
@@ -232,6 +287,14 @@ function safeQuery(selector: string): HTMLElement | null {
   } catch {
     return null;
   }
+}
+
+/** True when an element is actually rendered (not display:none/hidden/zero-box). */
+function isVisible(el: HTMLElement): boolean {
+  if (el.hidden) return false;
+  const style = getComputedStyle(el);
+  if (style.display === 'none' || style.visibility === 'hidden' || style.opacity === '0') return false;
+  return el.getClientRects().length > 0;
 }
 
 const controller = new Controller();

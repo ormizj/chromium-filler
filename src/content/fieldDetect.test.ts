@@ -141,4 +141,14 @@ describe('detectFields — resume file input', () => {
     expect(by.get('resume')?.element?.tagName).toBe('INPUT');
     expect(by.get('resume')?.confidence).toBe('low');
   });
+
+  it('matches an accented "Résumé" label (diacritics normalized)', () => {
+    const root = mount(`
+      <label for="cv">Résumé (PDF)</label>
+      <input id="cv" type="file" />
+    `);
+    const by = get(root);
+    expect(by.get('resume')?.element?.id).toBe('cv');
+    expect(by.get('resume')?.confidence).toBe('high');
+  });
 });

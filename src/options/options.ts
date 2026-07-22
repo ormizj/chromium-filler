@@ -3,13 +3,14 @@
  * editor, and the job-URL database with the paste-a-dump importer.
  */
 
-import type { JobUrlEntry, Profile, SiteConfig, TextFieldKey } from '../shared/types';
+import type { JobUrlEntry, JobUrlStatus, Profile, SiteConfig, TextFieldKey } from '../shared/types';
 import { TEXT_FIELDS, FIELD_LABELS } from '../shared/fieldKeys';
 import { extractUrls } from '../shared/urlImport';
+import { addUrls, applyStatus, jobUrlStats, removeUrl } from '../shared/jobUrls';
 import { MSG } from '../shared/messages';
 import {
   getProfile, saveProfile, getSettings, saveSettings,
-  getSiteConfigs, saveSiteConfigs, getJobUrls, saveJobUrls,
+  getSiteConfigs, saveSiteConfigs, getJobUrls, saveJobUrls, mutateJobUrls,
 } from '../shared/storage';
 import { getCv, setCv, clearCv } from '../shared/cvStore';
 
@@ -79,13 +80,28 @@ async function initCv(): Promise<void> {
 /* ---------------- Settings ---------------- */
 
 async function initSettings(): Promise<void> {
-  const box = $<HTMLInputElement>('auto-run');
+  const autoRun = $<HTMLInputElement>('auto-run');
+  const closeOnSubmit = $<HTMLInputElement>('close-on-submit');
+  const closeDelay = $<HTMLInputElement>('close-delay');
+
   const settings = await getSettings();
-  box.checked = settings.autoRunOnLoad;
-  box.addEventListener('change', async () => {
+  autoRun.checked = settings.autoRunOnLoad;
+  closeOnSubmit.checked = settings.closeTabOnSubmit;
+  closeDelay.value = String(settings.closeTabDelayMs);
+
+  const persist = async () => {
     const s = await getSettings();
-    await saveSettings({ ...s, autoRunOnLoad: box.checked });
-  });
+    await saveSettings({
+      ...s,
+      autoRunOnLoad: autoRun.checked,
+      closeTabOnSubmit: closeOnSubmit.checked,
+      closeTabDelayMs: Math.max(0, Number(closeDelay.value) || 0),
+    });
+  };
+
+  autoRun.addEventListener('change', persist);
+  closeOnSubmit.addEventListener('change', persist);
+  closeDelay.addEventListener('change', persist);
 }
 
 /* ---------------- Site configs ---------------- */
@@ -160,16 +176,12 @@ function renderPreview(): void {
 }
 
 async function addParsed(): Promise<void> {
-  const list = await getJobUrls();
-  const known = new Set(list.map((e) => e.url));
   let added = 0;
-  for (const url of previewUrls) {
-    if (known.has(url)) continue;
-    list.push({ id: crypto.randomUUID(), url, status: 'new', addedAt: Date.now() });
-    known.add(url);
-    added++;
-  }
-  await saveJobUrls(list);
+  await mutateJobUrls((list) => {
+    const res = addUrls(list, previewUrls);
+    added = res.added;
+    return res.list;
+  });
   previewUrls = [];
   ($('urls-paste') as HTMLTextAreaElement).value = '';
   renderPreview();
@@ -177,23 +189,53 @@ async function addParsed(): Promise<void> {
   setStatus($('extract-status'), `Added ${added} new URL(s)`, 'ok');
 }
 
+let urlFilter: JobUrlStatus | 'all' = 'all';
+
+function fmtDate(ts?: number): string {
+  if (!ts) return '';
+  return new Date(ts).toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
+}
+
+function renderStats(list: JobUrlEntry[]): void {
+  const s = jobUrlStats(list);
+  const cards: Array<[string, number, string]> = [
+    ['Total', s.total, ''],
+    ['New', s.new, 'new'],
+    ['Opened', s.opened, 'opened'],
+    ['Applied', s.applied, 'applied'],
+    ['Skipped', s.skipped, 'skipped'],
+  ];
+  $('url-stats').innerHTML = cards
+    .map(([k, n, cls]) => `<div class="stat ${cls}"><div class="n">${n}</div><div class="k">${k}</div></div>`)
+    .join('');
+}
+
 async function renderUrlList(): Promise<void> {
   const list = await getJobUrls();
-  $('url-count').textContent = String(list.length);
+  renderStats(list);
+  const shown = urlFilter === 'all' ? list : list.filter((e) => e.status === urlFilter);
   const ul = $('urls-list');
   ul.innerHTML = '';
-  for (const entry of list) {
-    ul.appendChild(urlRow(entry));
-  }
+  for (const entry of shown) ul.appendChild(urlRow(entry));
 }
 
 function urlRow(entry: JobUrlEntry): HTMLElement {
   const li = document.createElement('li');
+
+  const meta = document.createElement('div');
+  meta.className = 'meta';
   const a = document.createElement('a');
   a.href = entry.url;
   a.target = '_blank';
   a.rel = 'noreferrer';
   a.textContent = entry.url;
+  const info = document.createElement('small');
+  const bits = [`added ${fmtDate(entry.addedAt)}`];
+  if (entry.appliedAt) bits.push(`applied ${fmtDate(entry.appliedAt)}`);
+  bits.push(`${entry.history.length} event(s)`);
+  info.textContent = bits.join(' · ');
+  info.title = entry.history.map((h) => `${h.status} @ ${new Date(h.at).toLocaleString()}`).join('\n');
+  meta.append(a, info);
 
   const status = document.createElement('select');
   for (const s of ['new', 'opened', 'applied', 'skipped'] as const) {
@@ -203,20 +245,18 @@ function urlRow(entry: JobUrlEntry): HTMLElement {
     status.appendChild(opt);
   }
   status.addEventListener('change', async () => {
-    const all = await getJobUrls();
-    const e = all.find((x) => x.id === entry.id);
-    if (e) { e.status = status.value as JobUrlEntry['status']; await saveJobUrls(all); }
+    await mutateJobUrls((all) => applyStatus(all, entry.url, status.value as JobUrlStatus));
+    await renderUrlList();
   });
 
   const remove = document.createElement('button');
   remove.textContent = 'Remove';
   remove.addEventListener('click', async () => {
-    const all = (await getJobUrls()).filter((x) => x.id !== entry.id);
-    await saveJobUrls(all);
+    await mutateJobUrls((all) => removeUrl(all, entry.url));
     await renderUrlList();
   });
 
-  li.append(a, status, remove);
+  li.append(meta, status, remove);
   return li;
 }
 
@@ -233,11 +273,16 @@ async function initUrls(): Promise<void> {
     const urls = list.filter((e) => e.status === 'new').map((e) => e.url);
     if (urls.length === 0) { setStatus($('extract-status'), 'No “new” URLs to open', 'err'); return; }
     chrome.runtime.sendMessage({ type: MSG.OPEN_URLS, urls });
-    setTimeout(renderUrlList, 500);
+    setTimeout(renderUrlList, 600);
   });
 
   $('clear-urls').addEventListener('click', async () => {
     await saveJobUrls([]);
+    await renderUrlList();
+  });
+
+  $<HTMLSelectElement>('url-filter').addEventListener('change', async (e) => {
+    urlFilter = (e.target as HTMLSelectElement).value as JobUrlStatus | 'all';
     await renderUrlList();
   });
 

@@ -19,20 +19,35 @@ site's config for next time. It never submits for you.
 - **Field matching** = keyword heuristics + per-site selector overrides. Only
   high-confidence matches auto-fill; the rest are reported for one-click confirm.
 - **Click/tap-to-pick overrides**, persisted to the site config.
-- **CV upload** via `DataTransfer` (stored on-device in IndexedDB).
-- **Job URL database** — paste a messy text blob, every URL is extracted /
-  normalized / deduped; batch-open them and each tab auto-fills on load.
+- **CV upload** via `DataTransfer` (stored on-device in `chrome.storage.local`).
+- **Job URL database + dashboard** — paste a messy text blob, every URL is
+  extracted / normalized / deduped (the **URL is the unique key**); batch-open
+  them and each tab auto-fills on load. Every entry tracks a timestamped status
+  **history** (new → opened → applied, or skipped), with stat cards and a status
+  filter.
+- **Auto-close after submit** (optional) — since the extension never submits,
+  "sent" is detected per site via a `successSelector` (see below), which also
+  marks the URL **applied**.
 - **Mobile friendly** and touch-first (see below).
 
 ## Develop / build
 
 ```bash
 npm install
-npm test          # unit tests (Vitest, TDD)
+npm test          # unit + integration tests (Vitest, TDD)
 npm run typecheck # tsc --noEmit
 npm run build     # -> dist/
 npm run dev       # Vite dev server with HMR
+
+# End-to-end: loads the built extension into real Chromium and drives the
+# three hard test sites. Requires the browser once: `npx playwright install chromium`.
+npm run build && npm run test:e2e
 ```
+
+The E2E suite (`e2e/extension.spec.ts`) is the confidence signal: it runs the
+whole pipeline (wait → prep → detect → fill → CV → auto-close) against three
+deliberately nasty fixture sites (see below). If it's green, real boards should
+behave.
 
 ## Load in Chrome (desktop)
 
@@ -49,13 +64,36 @@ mobile browser that does — primarily **Kiwi Browser**: menu → Extensions →
 enable Developer mode → load the packed/zipped `dist/`. Every surface (modal,
 popup, options) is responsive and touch-first.
 
-## Try it (local fixture)
+## Try it (local fixtures)
 
 1. Open `test/fixtures/sample-form.html` in Chrome (a `file://` URL).
 2. The default config (`Local test fixture`) matches `*/sample-form.html`. With a
    profile + CV saved, the form fills, the modal appears, and fields are
    highlighted. The deliberately mis-named "Where are you based?" field will be
    **unmatched (red)** — click **Pick**, then click that field, and it's saved.
+
+### The three hard test sites
+
+`test/fixtures/sites/` contains deliberately awful pages that mirror real-world
+pain, with ready configs in `test/fixtures/test-site-configs.json` (paste them
+into the options "Site configurations" box, or they're auto-seeded by the E2E):
+
+- **slow-boards.html** — the form is injected ~2s after load (tests `waitFor`).
+- **modal-lever.html** — the form is behind an "Apply" modal, and the CV input is
+  injected only after clicking "Add résumé"; fields have no id/name, only
+  accessible names (tests prep steps + accessible-name matching + CV override).
+- **chaos-form.html** — hashed ids, a multi-step form revealed by "Next" (prep),
+  and a disguised `city` field that stays **unmatched** so you can Pick it.
+
+## Auto-close after submit
+
+The extension never submits — you press the site's Send. Detecting that it was
+*actually sent* is done per site via `SiteConfig.successSelector` (a confirmation
+element that becomes **visible** on success). That is the reliable signal:
+auto-close and "mark applied" fire only when it appears, never on a failed
+attempt. Without a `successSelector`, a plain form `submit` event is the fallback
+(for full-page-navigation flows). Enable auto-close and set the delay in the
+options "Behavior" section.
 
 ## Site config shape
 
@@ -73,6 +111,7 @@ popup, options) is responsive and touch-first.
   "fieldOverrides": { "phone": "#candidate_tel" }, // beat the heuristics
   "cvUpload": "input[type=file]",        // override CV file input
   "submitCv": [ { "action": "click", "selector": "#attach-cv" } ], // "Submit CV" button
+  "successSelector": "#application-confirmation", // reliable "sent" signal (visible)
   "autoDetect": true                     // false = overrides only
 }
 ```
@@ -82,4 +121,4 @@ popup, options) is responsive and touch-first.
 `src/shared` — types, storage, matcher, selector, URL import, field heuristics,
 CV codec (all pure logic is unit-tested). `src/content` — orchestrator + waitFor,
 prep, extract, fieldDetect, fill, picker, modal. `src/popup`, `src/options`,
-`src/background`. See `.claude/plans/robust-napping-rose.md` for the full design.
+`src/background`.

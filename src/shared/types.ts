@@ -31,7 +31,7 @@ export interface Profile {
   custom: Record<string, string>;
 }
 
-/** The stored CV, kept in IndexedDB (bytes) plus its metadata. */
+/** The stored CV, kept in chrome.storage.local (base64-encoded bytes) plus its metadata. */
 export interface CvFile {
   name: string;
   type: string;
@@ -72,6 +72,15 @@ export interface SiteConfig {
   submitCv?: PrepStep[];
   /** When false, heuristics are disabled and only overrides are used. Default true. */
   autoDetect?: boolean;
+  /**
+   * Selector for the site's "submitted successfully" confirmation element
+   * (e.g. a thank-you banner). This is the AUTHORITATIVE "actually sent" signal:
+   * when present, auto-close + mark-applied fire only once this element appears,
+   * never merely on a submit attempt (which can fail). Omit it only for
+   * full-page-navigation flows, where the tab leaves before a confirmation can
+   * render and the form `submit` event is used as a fallback.
+   */
+  successSelector?: string;
 }
 
 export type MatchConfidence = 'high' | 'low' | 'none';
@@ -90,12 +99,33 @@ export interface FieldMatch {
 
 export type JobUrlStatus = 'new' | 'opened' | 'applied' | 'skipped';
 
+export interface JobStatusEvent {
+  status: JobUrlStatus;
+  at: number;
+}
+
 export interface JobUrlEntry {
   id: string;
+  /** The job URL — the unique key for the database. */
   url: string;
   note?: string;
   status: JobUrlStatus;
   addedAt: number;
+  updatedAt: number;
+  /** First time the tab was opened. */
+  openedAt?: number;
+  /** First time a submission was detected for this URL. */
+  appliedAt?: number;
+  /** Full status-transition log (most recent last). */
+  history: JobStatusEvent[];
+}
+
+export interface JobUrlStats {
+  total: number;
+  new: number;
+  opened: number;
+  applied: number;
+  skipped: number;
 }
 
 export interface Settings {
@@ -103,9 +133,13 @@ export interface Settings {
   autoRunOnLoad: boolean;
   /** Confidence threshold below which matches are reported but not auto-filled. */
   autoFillLowConfidence: boolean;
+  /** Close the tab automatically once a submission is detected. */
+  closeTabOnSubmit: boolean;
+  /** Milliseconds to wait after detecting submit before closing the tab. */
+  closeTabDelayMs: number;
 }
 
-/** Everything persisted in chrome.storage.local (CV bytes live in IndexedDB). */
+/** Everything persisted in chrome.storage.local (the CV bytes are stored separately, also in chrome.storage.local). */
 export interface StoredState {
   profile: Profile;
   siteConfigs: SiteConfig[];

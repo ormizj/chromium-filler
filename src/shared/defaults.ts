@@ -8,6 +8,8 @@ export const DEFAULT_PROFILE: Profile = {
 export const DEFAULT_SETTINGS: Settings = {
   autoRunOnLoad: true,
   autoFillLowConfidence: false,
+  closeTabOnSubmit: false,
+  closeTabDelayMs: 1500,
 };
 
 /**

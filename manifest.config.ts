@@ -5,7 +5,7 @@ export default defineManifest({
   name: 'Chromium Filler',
   version: '0.1.0',
   description: 'Auto-fills job application forms with per-site config, a review report, and click-to-pick overrides.',
-  permissions: ['storage', 'tabs', 'scripting', 'activeTab'],
+  permissions: ['storage', 'unlimitedStorage', 'tabs', 'scripting', 'activeTab'],
   host_permissions: ['<all_urls>'],
   action: {
     default_popup: 'src/popup/popup.html',

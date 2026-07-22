@@ -72,6 +72,7 @@ export const FIELD_LABELS: Record<FieldKey, string> = {
 export function normalizeAttr(value: string | null | undefined): string {
   if (!value) return '';
   return value
+    .normalize('NFD').replace(/[\u0300-\u036f]/g, '') // strip diacritics: résumé -> resume
     .replace(/([a-z])([A-Z])/g, '$1 $2') // camelCase -> camel Case
     .replace(/[_\-.]+/g, ' ')
     .replace(/\s+/g, ' ')

@@ -1,13 +1,17 @@
 /**
- * Stores the user's CV as raw bytes in IndexedDB (avoids chrome.storage quota
- * and base64 bloat), plus pure helpers to convert between a File and CvFile.
+ * Stores the user's CV so it is reachable from the CONTENT SCRIPT.
+ *
+ * The CV lives in chrome.storage.local, base64-encoded (chrome.storage can't
+ * round-trip an ArrayBuffer). Why not IndexedDB: content scripts share the host
+ * page's origin, so IndexedDB/`window` storage there is the *page's*, not the
+ * extension's. chrome.storage.local is extension-scoped and readable from
+ * content scripts, options, and background alike. `unlimitedStorage` covers
+ * larger files.
  */
 
 import type { CvFile } from './types';
 
-const DB_NAME = 'chromium-filler';
-const STORE = 'cv';
-const KEY = 'current';
+const KEY = 'cv';
 
 function blobToArrayBuffer(blob: Blob): Promise<ArrayBuffer> {
   if (typeof blob.arrayBuffer === 'function') return blob.arrayBuffer();
@@ -19,6 +23,23 @@ function blobToArrayBuffer(blob: Blob): Promise<ArrayBuffer> {
   });
 }
 
+export function arrayBufferToBase64(buffer: ArrayBuffer): string {
+  const bytes = new Uint8Array(buffer);
+  let binary = '';
+  const chunk = 0x8000;
+  for (let i = 0; i < bytes.length; i += chunk) {
+    binary += String.fromCharCode(...bytes.subarray(i, i + chunk));
+  }
+  return btoa(binary);
+}
+
+export function base64ToArrayBuffer(b64: string): ArrayBuffer {
+  const binary = atob(b64);
+  const bytes = new Uint8Array(binary.length);
+  for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+  return bytes.buffer;
+}
+
 export async function fileToCvFile(file: File): Promise<CvFile> {
   return { name: file.name, type: file.type, data: await blobToArrayBuffer(file) };
 }
@@ -27,45 +48,26 @@ export function cvFileToFile(cv: CvFile): File {
   return new File([cv.data], cv.name, { type: cv.type || 'application/octet-stream' });
 }
 
-function openDb(): Promise<IDBDatabase> {
-  return new Promise((resolve, reject) => {
-    const req = indexedDB.open(DB_NAME, 1);
-    req.onupgradeneeded = () => {
-      const db = req.result;
-      if (!db.objectStoreNames.contains(STORE)) db.createObjectStore(STORE);
-    };
-    req.onsuccess = () => resolve(req.result);
-    req.onerror = () => reject(req.error);
-  });
-}
-
-function tx<T>(mode: IDBTransactionMode, run: (store: IDBObjectStore) => IDBRequest<T>): Promise<T> {
-  return openDb().then(
-    (db) =>
-      new Promise<T>((resolve, reject) => {
-        const store = db.transaction(STORE, mode).objectStore(STORE);
-        const req = run(store);
-        req.onsuccess = () => resolve(req.result);
-        req.onerror = () => reject(req.error);
-      }),
-  );
+interface StoredCv {
+  name: string;
+  type: string;
+  dataBase64: string;
 }
 
 export async function setCv(file: File): Promise<CvFile> {
   const cv = await fileToCvFile(file);
-  await tx('readwrite', (store) => store.put(cv, KEY));
+  const stored: StoredCv = { name: cv.name, type: cv.type, dataBase64: arrayBufferToBase64(cv.data) };
+  await chrome.storage.local.set({ [KEY]: stored });
   return cv;
 }
 
 export async function getCv(): Promise<CvFile | null> {
-  try {
-    const cv = await tx<CvFile | undefined>('readonly', (store) => store.get(KEY));
-    return cv ?? null;
-  } catch {
-    return null;
-  }
+  const raw = await chrome.storage.local.get(KEY);
+  const stored = raw[KEY] as StoredCv | undefined;
+  if (!stored) return null;
+  return { name: stored.name, type: stored.type, data: base64ToArrayBuffer(stored.dataBase64) };
 }
 
 export async function clearCv(): Promise<void> {
-  await tx('readwrite', (store) => store.delete(KEY));
+  await chrome.storage.local.remove(KEY);
 }

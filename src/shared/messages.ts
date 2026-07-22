@@ -18,6 +18,8 @@ export const MSG = {
   OPEN_URLS: 'CF_OPEN_URLS',
   /** popup -> background: open the options page (optionally to create a config). */
   OPEN_OPTIONS: 'CF_OPEN_OPTIONS',
+  /** content -> background: submission detected; mark applied + maybe close tab. */
+  SUBMITTED: 'CF_SUBMITTED',
 } as const;
 
 export interface StatusResponse {
@@ -35,7 +37,8 @@ export type Message =
   | { type: typeof MSG.STATUS }
   | { type: typeof MSG.PICK; field: FieldKey }
   | { type: typeof MSG.OPEN_URLS; urls: string[] }
-  | { type: typeof MSG.OPEN_OPTIONS; createForUrl?: string };
+  | { type: typeof MSG.OPEN_OPTIONS; createForUrl?: string }
+  | { type: typeof MSG.SUBMITTED; url: string };
 
 export interface RunResult {
   status: StatusResponse;

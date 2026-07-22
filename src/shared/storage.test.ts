@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach } from 'vitest';
-import { fileToCvFile, cvFileToFile } from './cvStore';
+import { fileToCvFile, cvFileToFile, setCv, getCv, clearCv } from './cvStore';
 import { upsertSiteConfig, saveJobUrls, getJobUrls, getSiteConfigs, saveFieldOverride } from './storage';
 import type { SiteConfig } from './types';
 
@@ -34,6 +34,17 @@ describe('cv codec (File <-> CvFile)', () => {
     expect(back.type).toBe('application/pdf');
     expect(await readBytes(back)).toEqual(bytes);
   });
+
+  it('setCv/getCv round-trip through chrome.storage (base64)', async () => {
+    const bytes = new Uint8Array([0, 1, 2, 254, 255, 128]);
+    await setCv(new File([bytes], 'me.pdf', { type: 'application/pdf' }));
+    const got = await getCv();
+    expect(got?.name).toBe('me.pdf');
+    expect(got?.type).toBe('application/pdf');
+    expect(new Uint8Array(got!.data)).toEqual(bytes);
+    await clearCv();
+    expect(await getCv()).toBeNull();
+  });
 });
 
 describe('site config upsert', () => {
@@ -64,7 +75,7 @@ describe('site config upsert', () => {
 describe('job urls', () => {
   it('persists and reloads the list', async () => {
     await saveJobUrls([
-      { id: '1', url: 'https://x.com/1', status: 'new', addedAt: 1 },
+      { id: '1', url: 'https://x.com/1', status: 'new', addedAt: 1, updatedAt: 1, history: [{ status: 'new', at: 1 }] },
     ]);
     const list = await getJobUrls();
     expect(list).toHaveLength(1);
