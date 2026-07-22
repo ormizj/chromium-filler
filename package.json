@@ -6,7 +6,7 @@
   "scripts": {
     "dev": "vite",
     "dev:ext": "vite build --watch",
-    "dev:all": "concurrently -n vite,ext -c blue,green \"vite\" \"vite build --watch\"",
+    "dev:all": "concurrently -n ext,sites -c green,magenta \"vite build --watch\" \"OPEN_SITES=1 node e2e/server.mjs\"",
     "build": "tsc --noEmit && vite build",
     "package": "bash scripts/package.sh",
     "test": "vitest",
