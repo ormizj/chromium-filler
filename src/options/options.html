@@ -1,0 +1,72 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Chromium Filler — Settings</title>
+    <link rel="stylesheet" href="./options.css" />
+  </head>
+  <body>
+    <main>
+      <h1>Chromium Filler</h1>
+
+      <section id="profile-section">
+        <h2>Your profile</h2>
+        <p class="hint">Values used to auto-fill forms. Leave blank to skip a field.</p>
+        <div id="profile-fields" class="grid"></div>
+        <div class="row">
+          <button id="save-profile" class="primary">Save profile</button>
+          <span id="profile-status" class="status"></span>
+        </div>
+      </section>
+
+      <section id="cv-section">
+        <h2>CV / Résumé</h2>
+        <p class="hint">Stored on-device (IndexedDB). Attached to file inputs during fill.</p>
+        <div class="row">
+          <input type="file" id="cv-input" />
+          <button id="clear-cv">Remove</button>
+        </div>
+        <p id="cv-current" class="status"></p>
+      </section>
+
+      <section id="settings-section">
+        <h2>Behavior</h2>
+        <label class="check"><input type="checkbox" id="auto-run" /> Auto-run when a matching page loads</label>
+      </section>
+
+      <section id="configs-section">
+        <h2>Site configurations</h2>
+        <p class="hint">
+          Per-site rules as JSON (array of configs). Detection, prep steps, extract
+          selectors, field overrides, CV upload selector, submit-CV steps.
+        </p>
+        <textarea id="configs-json" spellcheck="false" rows="18"></textarea>
+        <div class="row">
+          <button id="save-configs" class="primary">Save configs</button>
+          <button id="add-template">Add template</button>
+          <span id="configs-status" class="status"></span>
+        </div>
+      </section>
+
+      <section id="urls-section">
+        <h2>Job URL database</h2>
+        <p class="hint">Paste a messy blob of text — every URL in it is extracted, normalized and deduped.</p>
+        <textarea id="urls-paste" rows="6" placeholder="Paste anything containing links…"></textarea>
+        <div class="row">
+          <button id="extract-urls" class="primary">Extract URLs</button>
+          <span id="extract-status" class="status"></span>
+        </div>
+        <div id="urls-preview"></div>
+
+        <h3>Saved URLs (<span id="url-count">0</span>)</h3>
+        <div class="row">
+          <button id="open-new">Open all “new” in tabs</button>
+          <button id="clear-urls">Clear all</button>
+        </div>
+        <ul id="urls-list" class="urls"></ul>
+      </section>
+    </main>
+    <script type="module" src="./options.ts"></script>
+  </body>
+</html>

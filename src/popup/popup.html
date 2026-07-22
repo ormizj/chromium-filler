@@ -1,0 +1,25 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <link rel="stylesheet" href="./popup.css" />
+  </head>
+  <body>
+    <div class="wrap">
+      <header>
+        <h1>Chromium Filler</h1>
+        <span id="site-status" class="badge">…</span>
+      </header>
+
+      <p id="detail" class="detail">Checking this page…</p>
+
+      <button id="primary" class="primary" disabled>Fill</button>
+
+      <div class="links">
+        <a id="open-options" href="#">Manage profile, configs &amp; URLs →</a>
+      </div>
+    </div>
+    <script type="module" src="./popup.ts"></script>
+  </body>
+</html>

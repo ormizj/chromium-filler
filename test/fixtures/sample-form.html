@@ -1,0 +1,60 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Sample Job — Senior Widget Engineer</title>
+    <style>
+      body { font: 15px/1.6 system-ui, sans-serif; max-width: 640px; margin: 40px auto; padding: 0 16px; }
+      label { display: block; margin: 12px 0 4px; font-weight: 600; }
+      input, textarea, select { width: 100%; padding: 8px; font: inherit; box-sizing: border-box; }
+      .desc { display: none; background: #f4f4f5; padding: 12px; border-radius: 8px; }
+      .desc.open { display: block; }
+      button { margin-top: 16px; padding: 10px 18px; }
+    </style>
+  </head>
+  <body>
+    <h1 id="job-title">Senior Widget Engineer</h1>
+    <button id="expand-description" onclick="document.getElementById('job-description').classList.add('open')">
+      Show full description
+    </button>
+    <div id="job-description" class="desc">
+      We are hiring a Senior Widget Engineer to build and scale our widget
+      platform. You will own the widget pipeline end to end, mentor engineers,
+      and collaborate across teams. Requirements: 5+ years building widgets,
+      strong TypeScript, and a love for tidy forms. This description is
+      deliberately long so you can verify the modal scrolls it nicely on both
+      desktop and mobile viewports. Lorem ipsum widget dolor sit amet.
+    </div>
+
+    <form>
+      <label for="first_name">First name</label>
+      <input id="first_name" name="first_name" />
+
+      <label for="last_name">Last name</label>
+      <input id="last_name" name="last_name" />
+
+      <label for="email">Email</label>
+      <input id="email" name="email" type="email" />
+
+      <label>Phone number
+        <input name="candidate_phone" placeholder="+1 555 000 0000" />
+      </label>
+
+      <label for="li">LinkedIn</label>
+      <input id="li" autocomplete="url" placeholder="LinkedIn profile URL" />
+
+      <!-- Deliberately mis-named: heuristics should miss this; use Pick to map it. -->
+      <label for="fld_x9">Where are you based?</label>
+      <input id="fld_x9" name="q_location_1728" />
+
+      <label for="cv">Upload your CV / Résumé</label>
+      <input id="cv" name="resume" type="file" />
+
+      <label for="cover">Cover letter</label>
+      <textarea id="cover" name="cover_letter" rows="4"></textarea>
+
+      <button type="button">Send application</button>
+    </form>
+  </body>
+</html>
