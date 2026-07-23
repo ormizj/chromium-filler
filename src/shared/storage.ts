@@ -145,12 +145,27 @@ export async function clearRedirectSelector(
   });
 }
 
+/**
+ * `id` is what every other writer here resolves a config by, so it has to stay
+ * unique. The template derives it from the host, and a host can legitimately
+ * need a second config — an existing one whose pattern covers only part of the
+ * host does not match the rest of it. Suffix until free.
+ */
+function uniqueId(preferred: string, configs: SiteConfig[]): string {
+  const taken = new Set(configs.map((c) => c.id));
+  if (!taken.has(preferred)) return preferred;
+  let n = 2;
+  while (taken.has(`${preferred}-${n}`)) n++;
+  return `${preferred}-${n}`;
+}
+
 /** Return the config matching `url`, creating and persisting a minimal one if none exists. */
 export async function ensureConfigForUrl(url: string): Promise<SiteConfig> {
   const configs = await getSiteConfigs();
   const existing = findMatchingConfig(url, configs);
   if (existing) return existing;
-  const created = configTemplate(url);
+  const template = configTemplate(url);
+  const created: SiteConfig = { ...template, id: uniqueId(template.id, configs) };
   configs.push(created);
   await saveSiteConfigs(configs);
   return created;

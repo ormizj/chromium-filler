@@ -81,6 +81,24 @@ describe('detectFields — name disambiguation', () => {
     expect(by.get('fullName')?.element).toBeNull();
   });
 
+  it('detects separator-free attribute names ("firstname", not "first_name")', () => {
+    // Nothing in the markup separates the two words, so `normalizeAttr` has
+    // nothing to split on and the keyword table has to match the compound.
+    const root = mount(`
+      <input name="firstname" />
+      <input name="lastname" />
+      <input name="emailaddress" />
+      <input name="phonenumber" />
+    `);
+    const by = get(root);
+    expect(by.get('firstName')?.element?.getAttribute('name')).toBe('firstname');
+    expect(by.get('firstName')?.confidence).toBe('high');
+    expect(by.get('lastName')?.element?.getAttribute('name')).toBe('lastname');
+    expect(by.get('lastName')?.confidence).toBe('high');
+    expect(by.get('email')?.element?.getAttribute('name')).toBe('emailaddress');
+    expect(by.get('phone')?.element?.getAttribute('name')).toBe('phonenumber');
+  });
+
   it('detects a single full-name field', () => {
     const root = mount(`<input id="name" />`);
     const by = get(root);

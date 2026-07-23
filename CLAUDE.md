@@ -35,7 +35,7 @@ driving a real site. `?page=modal&session=1` shows the queue strip and the
 footer overflow menu.
 
 `&state=…` picks which **flow** the surface is showing — modal: `redirect`,
-`redirect-followed`, `landed`, `empty`; setup: `external`. A two-step posting
+`redirect-followed`, `landed`, `empty`, `failed-fill`; setup: `external`. A two-step posting
 renders a different modal body entirely (notice + "Fill this page instead", no
 report), so it needs its own state rather than being inferred from the default
 data. Add a state here whenever a flow gains a distinct rendering.

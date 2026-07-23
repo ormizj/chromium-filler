@@ -10,9 +10,10 @@
  * "Reset & Re-run") wiped every field it had just filled.
  */
 
-import type { FieldMatch } from '../../shared/types';
+import type { FieldMatch, MatchConfidence } from '../../shared/types';
 import type { SessionState } from '../../shared/messages';
 import { FIELD_LABELS } from '../../shared/fieldKeys';
+import { STATUS_LABELS, matchStatus } from '../../shared/fieldStatus';
 import { BASE_CSS } from '../../ui/shadowCss';
 import modalCss from './modal.css?inline';
 
@@ -206,7 +207,9 @@ export class FillerModal {
   private pill(data: ModalData): HTMLElement {
     const pill = el('button', 'cf-pill');
     const filled = data.matches.filter((m) => m.filled).length;
-    const dot = el('span', 'cf-dot high');
+    // Collapsed, the dot is the only status left on screen, so it has to carry
+    // the same meaning as the rows it is hiding.
+    const dot = el('span', `cf-dot ${pillStatus(data, filled)}`);
     pill.setAttribute('aria-label', 'Reopen the fill report');
     const label = el('span');
     label.textContent = data.redirect
@@ -250,11 +253,11 @@ export class FillerModal {
   }
 
   private row(m: FieldMatch): HTMLElement {
+    const status = matchStatus(m);
     const row = el('div', 'cf-row');
-    const dot = el('span', `cf-dot ${m.confidence}`);
+    const dot = el('span', `cf-dot ${status}`);
     dot.setAttribute('role', 'img');
-    dot.setAttribute('aria-label',
-      m.confidence === 'high' ? 'filled' : m.confidence === 'low' ? 'needs review' : 'not found');
+    dot.setAttribute('aria-label', STATUS_LABELS[status]);
     row.append(dot);
 
     const field = el('div', 'cf-field');
@@ -269,7 +272,9 @@ export class FillerModal {
     row.append(field);
 
     const actions = el('div', 'cf-actions');
-    if (m.confidence === 'low' && !m.filled) {
+    // Anything matched but not filled can be retried in place; only a field with
+    // no element at all has nothing for Confirm to act on.
+    if (!m.filled && m.confidence !== 'none') {
       actions.append(btn('Confirm', () => this.cb.onConfirm(m.field), true));
     }
     actions.append(btn('Pick', () => this.cb.onPick(m.field)));
@@ -325,6 +330,17 @@ export class FillerModal {
   destroy(): void {
     this.host.remove();
   }
+}
+
+/**
+ * The pill's dot summarizes the whole report. A redirect notice has no fields to
+ * summarize, so it stays neutral-positive: nothing failed, there was simply
+ * nothing to fill.
+ */
+function pillStatus(data: ModalData, filled: number): MatchConfidence {
+  if (data.redirect || data.matches.length === 0) return 'high';
+  if (filled === data.matches.length) return 'high';
+  return filled > 0 ? 'low' : 'none';
 }
 
 function el(tag: string, className = ''): HTMLElement {

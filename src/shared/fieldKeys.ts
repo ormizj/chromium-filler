@@ -14,13 +14,26 @@ export const TEXT_FIELDS: FieldKey[] = [
   'country', 'coverLetter',
 ];
 
-/** Positive keyword patterns per field (normalized strings). */
+/**
+ * Positive keyword patterns per field (normalized strings).
+ *
+ * Compound words take an optional separator (`first ?name`) because
+ * `normalizeAttr` can only split what the markup separated: `firstName` and
+ * `first_name` both become "first name", but `name="firstname"` — an ordinary
+ * spelling on hand-written application forms — stays one word, and `\bfirst\b`
+ * does not match inside it.
+ */
 export const FIELD_KEYWORDS: Record<FieldKey, RegExp[]> = {
-  firstName: [/\bfirst name\b/, /\bgiven name\b/, /\bforename\b/, /\bfname\b/, /\bfirst\b/],
-  lastName: [/\blast name\b/, /\bfamily name\b/, /\bsurname\b/, /\blname\b/, /\blast\b/],
-  fullName: [/\bfull name\b/, /\byour name\b/, /^name$/, /\bcandidate name\b/, /\bapplicant name\b/],
-  email: [/\be ?mail\b/],
-  phone: [/\bphone\b/, /\btelephone\b/, /\bmobile\b/, /\btel\b/, /\bcell\b/],
+  firstName: [/\bfirst ?name\b/, /\bgiven ?name\b/, /\bforename\b/, /\bfname\b/, /\bfirst\b/],
+  lastName: [/\blast ?name\b/, /\bfamily ?name\b/, /\bsurname\b/, /\blname\b/, /\blast\b/],
+  fullName: [
+    /\bfull ?name\b/, /\byour ?name\b/, /^name$/,
+    /\bcandidate ?name\b/, /\bapplicant ?name\b/,
+  ],
+  email: [/\be ?mail\b/, /\be ?mail ?address\b/],
+  phone: [
+    /\bphone\b/, /\bphone ?number\b/, /\btelephone\b/, /\bmobile\b/, /\btel\b/, /\bcell\b/,
+  ],
   linkedin: [/\blinked ?in\b/],
   github: [/\bgit ?hub\b/],
   website: [/\bwebsite\b/, /\bweb site\b/, /\bpersonal site\b/, /\bhomepage\b/],
@@ -28,9 +41,9 @@ export const FIELD_KEYWORDS: Record<FieldKey, RegExp[]> = {
   address: [/\baddress\b/, /\bstreet\b/],
   city: [/\bcity\b/, /\btown\b/],
   state: [/\bstate\b/, /\bprovince\b/, /\bregion\b/],
-  zip: [/\bzip\b/, /\bpostal\b/, /\bpost ?code\b/],
+  zip: [/\bzip\b/, /\bzip ?code\b/, /\bpostal\b/, /\bpostal ?code\b/, /\bpost ?code\b/],
   country: [/\bcountry\b/],
-  coverLetter: [/\bcover letter\b/, /\bcoverletter\b/, /\bwhy do you\b/, /\bmotivation\b/],
+  coverLetter: [/\bcover ?letter\b/, /\bwhy do you\b/, /\bmotivation\b/],
   resume: [/\bresume\b/, /\bcv\b/, /\bcurriculum vitae\b/, /\bre ?sume\b/],
 };
 

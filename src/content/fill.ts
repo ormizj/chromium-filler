@@ -17,12 +17,38 @@ function dispatch(el: Element, ...types: string[]): void {
   for (const t of types) el.dispatchEvent(new Event(t, { bubbles: true }));
 }
 
+/** The shortest value worth matching on a fragment of an option's text. */
+const MIN_PARTIAL = 3;
+
+/**
+ * Exact value, then exact text, then an *unambiguous* partial. The partial
+ * rules are deliberately strict: a plain `includes` on a short value picks
+ * whatever comes first alphabetically ("US" selects Australia on a country
+ * list), and a wrong selection is worse than none — the report can flag an
+ * unfilled field, but it cannot know the filled one is wrong.
+ */
+function findOption(options: HTMLOptionElement[], wanted: string): HTMLOptionElement | undefined {
+  const text = (o: HTMLOptionElement) => o.text.trim().toLowerCase();
+
+  const byValue = options.find((o) => o.value.toLowerCase() === wanted);
+  if (byValue) return byValue;
+
+  const byText = options.find((o) => text(o) === wanted);
+  if (byText) return byText;
+
+  const prefixed = options.filter((o) => text(o).startsWith(wanted));
+  if (prefixed.length === 1) return prefixed[0];
+  if (prefixed.length > 1) return undefined; // ambiguous — don't guess
+
+  if (wanted.length < MIN_PARTIAL) return undefined;
+  const contained = options.filter((o) => text(o).includes(wanted));
+  return contained.length === 1 ? contained[0] : undefined;
+}
+
 function fillSelect(el: HTMLSelectElement, value: string): boolean {
   const wanted = value.trim().toLowerCase();
-  const options = Array.from(el.options);
-  let match = options.find((o) => o.value.toLowerCase() === wanted);
-  if (!match) match = options.find((o) => o.text.trim().toLowerCase() === wanted);
-  if (!match) match = options.find((o) => o.text.trim().toLowerCase().includes(wanted) && wanted.length > 0);
+  if (!wanted) return false;
+  const match = findOption(Array.from(el.options), wanted);
   if (!match) return false;
   el.value = match.value;
   dispatch(el, 'input', 'change');

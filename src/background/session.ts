@@ -106,17 +106,24 @@ async function topUp(): Promise<void> {
   }
 
   const next = { ...tabs };
+  // Only a posting that actually got a tab counts as opened. Marking one that
+  // failed to open leaves the queue with nothing to close and nothing to top up
+  // from — the posting would silently never be applied to.
+  const opened: string[] = [];
   for (const url of urls) {
     const tab = await chrome.tabs.create({ url, active: false }).catch((e) => {
       console.warn(LOG, 'could not open', url, e);
       return undefined;
     });
-    if (tab?.id != null) next[String(tab.id)] = url;
+    if (tab?.id != null) {
+      next[String(tab.id)] = url;
+      opened.push(url);
+    }
     await delay(STAGGER_MS);
   }
   await setTabs(next);
-  await mutateJobUrls((all) => urls.reduce((acc, url) => applyStatus(acc, url, 'opened'), all));
-  console.info(LOG, `opened ${urls.length}, ${Object.keys(next).length} in flight`);
+  await mutateJobUrls((all) => opened.reduce((acc, url) => applyStatus(acc, url, 'opened'), all));
+  console.info(LOG, `opened ${opened.length}, ${Object.keys(next).length} in flight`);
 }
 
 /** Begin (or resize) a session and fill the first window. */
@@ -200,13 +207,16 @@ export async function sessionState(): Promise<SessionState> {
  * open as one burst.
  */
 export async function openUrls(urls: string[]): Promise<void> {
+  const opened: string[] = [];
   for (const url of urls) {
-    await chrome.tabs.create({ url, active: false }).catch((e) => {
+    const tab = await chrome.tabs.create({ url, active: false }).catch((e) => {
       console.warn(LOG, 'could not open', url, e);
+      return undefined;
     });
+    if (tab) opened.push(url); // a posting with no tab is still waiting
     await delay(STAGGER_MS);
   }
-  await mutateJobUrls((list) => urls.reduce((acc, url) => applyStatus(acc, url, 'opened'), list));
+  await mutateJobUrls((list) => opened.reduce((acc, url) => applyStatus(acc, url, 'opened'), list));
 }
 
 function delay(ms: number): Promise<void> {

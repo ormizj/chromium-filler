@@ -131,6 +131,29 @@ describe('site config upsert', () => {
     expect(await getSiteConfigs()).toHaveLength(1);
   });
 
+  it('ensureConfigForUrl never reuses an id already taken by another config', async () => {
+    // A config narrowed to part of its host (the setup panel's Rename does
+    // exactly this) does not match the host's other pages, so a second config
+    // gets created — and its id is derived from the same host slug. Two configs
+    // sharing an id means every id-keyed writer edits the first one, so a Pick
+    // on the second site silently saves onto the first.
+    await upsertSiteConfig({
+      ...cfg('x-com'),
+      urlPatterns: ['*://x.com/careers/*'],
+      fieldOverrides: { email: '#original' },
+    });
+
+    const created = await ensureConfigForUrl('https://x.com/other/jobs/1');
+    const all = await getSiteConfigs();
+    expect(all).toHaveLength(2);
+    expect(new Set(all.map((c) => c.id)).size).toBe(2);
+
+    await saveFieldOverride(created.id, 'email', '#new-site-email');
+    const after = await getSiteConfigs();
+    expect(after.find((c) => c.id === created.id)?.fieldOverrides?.email).toBe('#new-site-email');
+    expect(after.find((c) => c.id === 'x-com')?.fieldOverrides?.email).toBe('#original');
+  });
+
   it('ensureConfigForUrl creates + persists a new config when none matches', async () => {
     const got = await ensureConfigForUrl('https://newsite.co/careers/42');
     expect(got.name).toBe('newsite.co');

@@ -17,6 +17,7 @@ import {
 import { BUILD_ID } from '../shared/buildId';
 import { getCv, cvFileToFile } from '../shared/cvStore';
 import { TEXT_FIELDS, FIELD_LABELS } from '../shared/fieldKeys';
+import { matchStatus } from '../shared/fieldStatus';
 import {
   MSG, type FollowRedirectResponse, type Message, type SessionState, type StatusResponse,
 } from '../shared/messages';
@@ -338,7 +339,7 @@ class Controller {
       if (d.element) {
         this.elements.set(d.field, d.element);
         if (d.confidence === 'high') match.filled = this.applyFill(d.field, d.element);
-        highlight(d.element, match.filled ? 'high' : d.confidence);
+        highlight(d.element, matchStatus(match));
       }
       return match;
     });

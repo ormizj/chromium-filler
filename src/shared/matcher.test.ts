@@ -33,6 +33,44 @@ describe('urlMatchesPattern', () => {
     expect(urlMatchesPattern('https://xacom/a', '*://x.com/*')).toBe(false);
   });
 
+  it('does not match a URL that merely contains the pattern in its query or path', () => {
+    // The leading `*` stands for the scheme, not "anything at all": a tracker or
+    // search URL carrying another site's URL unencoded must not adopt that
+    // site's config, or its prep steps and overrides run on a foreign page.
+    expect(
+      urlMatchesPattern(
+        'https://evil.com/?next=https://boards.greenhouse.io/acme',
+        '*://boards.greenhouse.io/*',
+      ),
+    ).toBe(false);
+    expect(
+      urlMatchesPattern(
+        'http://127.0.0.1:5200/r/302?to=http://127.0.0.1:5199/ats-form.html',
+        '*://127.0.0.1:5199/*',
+      ),
+    ).toBe(false);
+    expect(
+      urlMatchesPattern(
+        'https://jobs.example.com/redirect/https://boards.greenhouse.io/acme',
+        '*://boards.greenhouse.io/*',
+      ),
+    ).toBe(false);
+  });
+
+  it('still matches every scheme the scheme wildcard stands for', () => {
+    for (const url of ['https://x.com/a', 'http://x.com/a', 'ftp://x.com/a']) {
+      expect(urlMatchesPattern(url, '*://x.com/*'), url).toBe(true);
+    }
+  });
+
+  it('keeps host and path wildcards permissive (the fixture configs rely on it)', () => {
+    // `file://*chaos-form.html*` has to cross path separators to match.
+    expect(urlMatchesPattern('file:///x/y/chaos-form.html', 'file://*chaos-form.html*')).toBe(true);
+    expect(
+      urlMatchesPattern('http://localhost:5199/sites/quick-board.html?job=plain', '*://*/sites/quick-board.html*'),
+    ).toBe(true);
+  });
+
   it('supports /regex/ patterns tested against the full url', () => {
     expect(urlMatchesPattern('https://x.com/careers/9?a=1', '/careers\\/\\d+/')).toBe(true);
     expect(urlMatchesPattern('https://x.com/about', '/careers\\/\\d+/')).toBe(false);

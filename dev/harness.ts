@@ -136,6 +136,18 @@ const MODAL_STATES: Record<string, Partial<ModalData>> = {
     redirect: { host: 'ats.acme.test', reason: 'configured external apply link', followed: true },
   },
   landed: { siteName: 'ats.acme.test', via: 'boards.example' },
+  // A confident match that could not take the value — a <select> with no
+  // matching option, or an override pointing at a wrapper. It reads as "needs
+  // review" with a Confirm, never as filled: the dot is the user's only signal
+  // that a field still needs them.
+  'failed-fill': {
+    matches: [
+      match('fullName', 'high', true, { valueToFill: 'Ada Lovelace', selectorUsed: '#name' }),
+      match('country', 'high', false, { valueToFill: 'US', selectorUsed: 'select[name=country]' }),
+      match('city', 'high', false, { valueToFill: 'London', selectorUsed: '.city-wrapper' }),
+      match('resume', 'high', false, { selectorUsed: '.dropzone' }),
+    ],
+  },
   empty: {
     siteName: 'ListingBoard',
     jobTitle: 'Platform engineering jobs',
