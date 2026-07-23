@@ -1,5 +1,7 @@
 import { describe, it, expect } from 'vitest';
-import { addUrls, applyStatus, jobUrlStats, normalizeEntry, removeUrl } from './jobUrls';
+import {
+  addUrls, applyStatus, applyStatusChain, jobUrlStats, linkRedirect, normalizeEntry, removeUrl,
+} from './jobUrls';
 import type { JobUrlEntry } from './types';
 
 describe('addUrls — unique by URL', () => {
@@ -63,11 +65,94 @@ describe('applyStatus — history + timestamps', () => {
 
 describe('jobUrlStats', () => {
   it('counts by status', () => {
-    let { list } = addUrls([], ['a://1', 'a://2', 'a://3', 'a://4'], 0);
+    let { list } = addUrls([], ['a://1', 'a://2', 'a://3', 'a://4', 'a://5'], 0);
     list = applyStatus(list, 'a://2', 'opened', 1);
     list = applyStatus(list, 'a://3', 'applied', 1);
     list = applyStatus(list, 'a://4', 'skipped', 1);
-    expect(jobUrlStats(list)).toEqual({ total: 4, new: 1, opened: 1, applied: 1, skipped: 1 });
+    list = applyStatus(list, 'a://5', 'redirected', 1);
+    expect(jobUrlStats(list)).toEqual({
+      total: 5, new: 1, opened: 1, redirected: 1, applied: 1, skipped: 1,
+    });
+  });
+});
+
+describe('linkRedirect — two-step postings', () => {
+  const BOARD = 'https://board.com/job/1';
+  const ATS = 'https://boards.greenhouse.io/acme/jobs/7';
+
+  it('links a known posting to a newly-discovered destination', () => {
+    const before = addUrls([], [BOARD], 1000).list;
+    const list = linkRedirect(before, BOARD, ATS, 2000);
+
+    const source = list.find((e) => e.url === BOARD)!;
+    expect(source.status).toBe('redirected');
+    expect(source.redirectUrl).toBe(ATS);
+    expect(source.history.map((h) => h.status)).toEqual(['new', 'redirected']);
+
+    const dest = list.find((e) => e.url === ATS)!;
+    expect(dest.status).toBe('opened');
+    expect(dest.sourceUrl).toBe(BOARD);
+    expect(dest.openedAt).toBe(2000);
+  });
+
+  it('adds the source too when the posting was browsed, not imported', () => {
+    const list = linkRedirect([], BOARD, ATS, 2000);
+    expect(list.map((e) => e.url)).toEqual([BOARD, ATS]);
+    expect(list[0].status).toBe('redirected');
+    expect(list[0].addedAt).toBe(2000);
+  });
+
+  it('does not duplicate a destination that is already in the database', () => {
+    const before = addUrls([], [BOARD, ATS], 1000).list;
+    const list = linkRedirect(before, BOARD, ATS, 2000);
+    expect(list).toHaveLength(2);
+    expect(list.find((e) => e.url === ATS)!.sourceUrl).toBe(BOARD);
+  });
+
+  it('keeps an already-applied destination applied (never demotes it)', () => {
+    let list = addUrls([], [BOARD, ATS], 1000).list;
+    list = applyStatus(list, ATS, 'applied', 1500);
+    list = linkRedirect(list, BOARD, ATS, 2000);
+    const dest = list.find((e) => e.url === ATS)!;
+    expect(dest.status).toBe('applied');
+    expect(dest.sourceUrl).toBe(BOARD);
+  });
+
+  it('is a no-op when the destination is the source (no real redirect)', () => {
+    const before = addUrls([], [BOARD], 1000).list;
+    expect(linkRedirect(before, BOARD, BOARD, 2000)).toEqual(before);
+  });
+});
+
+describe('applyStatusChain — propagate to the originating posting', () => {
+  const BOARD = 'https://board.com/job/1';
+  const ATS = 'https://boards.greenhouse.io/acme/jobs/7';
+
+  it('marks the destination and the board posting applied', () => {
+    let list = linkRedirect([], BOARD, ATS, 1000);
+    list = applyStatusChain(list, ATS, 'applied', 3000);
+    expect(list.find((e) => e.url === ATS)!.status).toBe('applied');
+    expect(list.find((e) => e.url === BOARD)!.status).toBe('applied');
+    expect(list.find((e) => e.url === BOARD)!.appliedAt).toBe(3000);
+  });
+
+  it('walks a multi-hop chain without looping forever', () => {
+    let list = linkRedirect([], 'a://1', 'a://2', 1000);
+    list = linkRedirect(list, 'a://2', 'a://3', 1100);
+    list = applyStatusChain(list, 'a://3', 'applied', 2000);
+    expect(list.every((e) => e.status === 'applied')).toBe(true);
+  });
+
+  it('survives a cyclic sourceUrl chain', () => {
+    let list = addUrls([], ['a://1', 'a://2'], 0).list;
+    list = list.map((e) => ({ ...e, sourceUrl: e.url === 'a://1' ? 'a://2' : 'a://1' }));
+    const out = applyStatusChain(list, 'a://1', 'applied', 5);
+    expect(out.every((e) => e.status === 'applied')).toBe(true);
+  });
+
+  it('behaves like applyStatus for an entry with no source', () => {
+    const base = addUrls([], ['a://1'], 0).list;
+    expect(applyStatusChain(base, 'a://1', 'applied', 5)).toEqual(applyStatus(base, 'a://1', 'applied', 5));
   });
 });
 

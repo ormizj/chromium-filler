@@ -132,6 +132,17 @@
 
 .cf-addbar { display: flex; gap: 6px; flex-wrap: wrap; margin: 6px 0 2px; }
 
+/* Live quick-apply vs. external-redirect verdict for the current page. */
+.cf-verdict {
+  font-size: 12px;
+  color: var(--cf-fg);
+  background: rgba(127, 127, 127, 0.12);
+  border-radius: 6px;
+  padding: 6px 8px;
+  margin-bottom: 4px;
+  overflow-wrap: anywhere;
+}
+
 .cf-ms {
   width: 68px;
   border: 1px solid var(--cf-border);

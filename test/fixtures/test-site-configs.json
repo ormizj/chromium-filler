@@ -25,6 +25,17 @@
     "autoDetect": true
   },
   {
+    "id": "redirect-board",
+    "name": "MixedBoard (test)",
+    "urlPatterns": ["*://*/sites/redirect-board.html*"],
+    "extract": { "jobTitle": "#job-title", "jobDescription": "#job-description" },
+    "redirect": {
+      "beforeFollow": [{ "action": "click", "selector": "#save-job" }]
+    },
+    "successSelector": "#board-success",
+    "autoDetect": true
+  },
+  {
     "id": "chaos-form",
     "name": "ChaosForm (test)",
     "urlPatterns": ["*://*/sites/chaos-form.html", "file://*chaos-form.html"],

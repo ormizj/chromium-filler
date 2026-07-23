@@ -120,6 +120,31 @@ export async function clearExtractSelector(
   });
 }
 
+export type RedirectSelectorKey = 'applySelector' | 'quickApplySelector' | 'markerSelector';
+
+/** Save one of the redirect-classification selectors on a config. */
+export async function saveRedirectSelector(
+  configId: string,
+  key: RedirectSelectorKey,
+  selector: string,
+): Promise<void> {
+  await mutateSiteConfig(configId, (cfg) => {
+    cfg.redirect = { ...cfg.redirect, [key]: selector };
+  });
+}
+
+/** Remove one of the redirect-classification selectors from a config. */
+export async function clearRedirectSelector(
+  configId: string,
+  key: RedirectSelectorKey,
+): Promise<void> {
+  await mutateSiteConfig(configId, (cfg) => {
+    if (!cfg.redirect) return;
+    const { [key]: _drop, ...rest } = cfg.redirect;
+    cfg.redirect = rest;
+  });
+}
+
 /** Return the config matching `url`, creating and persisting a minimal one if none exists. */
 export async function ensureConfigForUrl(url: string): Promise<SiteConfig> {
   const configs = await getSiteConfigs();

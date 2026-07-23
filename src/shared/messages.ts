@@ -22,6 +22,10 @@ export const MSG = {
   OPEN_OPTIONS: 'CF_OPEN_OPTIONS',
   /** content -> background: submission detected; mark applied + maybe close tab. */
   SUBMITTED: 'CF_SUBMITTED',
+  /** content -> background: this posting redirects; watch where the handoff lands. */
+  FOLLOW_REDIRECT: 'CF_FOLLOW_REDIRECT',
+  /** background -> content: this tab is where a tracked redirect landed. */
+  REDIRECT_LANDED: 'CF_REDIRECT_LANDED',
 } as const;
 
 export interface StatusResponse {
@@ -31,6 +35,23 @@ export interface StatusResponse {
   filledCount: number;
   reportedCount: number;
   hasRun: boolean;
+  /** How this posting was classified, once a run has classified it. */
+  postingKind?: 'quickApply' | 'redirect' | 'unknown';
+  /** Destination of an external application, when known. */
+  redirectHref?: string;
+  /** The board posting this page was reached from, for a redirect destination. */
+  landedFrom?: string;
+}
+
+/** Background's answer to FOLLOW_REDIRECT: who performs the navigation. */
+export interface FollowRedirectResponse {
+  /** The background already opened the destination; the page does nothing. */
+  opened?: boolean;
+  /** No URL is known — click the apply control and let the site navigate. */
+  click?: boolean;
+  /** Navigate this tab to this URL. */
+  navigate?: string;
+  error?: string;
 }
 
 export type Message =
@@ -41,7 +62,9 @@ export type Message =
   | { type: typeof MSG.SETUP }
   | { type: typeof MSG.OPEN_URLS; urls: string[] }
   | { type: typeof MSG.OPEN_OPTIONS; createForUrl?: string }
-  | { type: typeof MSG.SUBMITTED; url: string };
+  | { type: typeof MSG.SUBMITTED; url: string }
+  | { type: typeof MSG.FOLLOW_REDIRECT; sourceUrl: string; href?: string }
+  | { type: typeof MSG.REDIRECT_LANDED; sourceUrl: string };
 
 export interface RunResult {
   status: StatusResponse;

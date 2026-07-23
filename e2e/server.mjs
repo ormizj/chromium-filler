@@ -10,7 +10,7 @@ const distDir = path.resolve(dirname, '../dist');
 const port = Number(process.env.PORT) || 5199;
 
 /** The fixture pages to surface when PRINT_URLS is set (dev, not E2E). */
-const SITES = ['slow-boards', 'modal-lever', 'chaos-form'];
+const SITES = ['slow-boards', 'modal-lever', 'chaos-form', 'redirect-board'];
 
 /**
  * The build ID that `stampBuildId` (vite.config.ts) inlines into dist as

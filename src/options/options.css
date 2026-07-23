@@ -84,6 +84,7 @@ label.check input { width: auto; }
 .stat .n { font-size: 22px; font-weight: 700; line-height: 1.1; }
 .stat .k { font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: .04em; }
 .stat.applied .n { color: var(--ok); }
+.stat.redirected .n { color: var(--accent); }
 label.fld.inline { flex-direction: row; align-items: center; gap: 6px; color: var(--fg); font-size: 13px; }
 label.fld.inline select { width: auto; min-height: 40px; }
 .urls { list-style: none; padding: 0; margin: 8px 0 0; }

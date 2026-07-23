@@ -196,3 +196,13 @@ button.cf-btn:hover { filter: brightness(0.97); }
   color: var(--cf-muted);
   margin: 0 0 8px;
 }
+
+/* Why a posting was classified as an external redirect. */
+.cf-why {
+  display: block;
+  font-size: 11px;
+  color: var(--cf-muted);
+  opacity: 0.8;
+  margin: -4px 0 8px;
+  word-break: break-word;
+}

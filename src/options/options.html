@@ -43,6 +43,21 @@
           Close delay (ms)
           <input type="number" id="close-delay" min="0" step="250" />
         </label>
+
+        <h3>Two-step applications</h3>
+        <p class="hint" style="margin: 0 0 8px;">
+          Postings that apply on the employer's own site are followed automatically,
+          after any “before leaving” steps for that site (e.g. clicking its Save job
+          button). Both the posting and the application it leads to are recorded.
+        </p>
+        <label class="fld" style="max-width: 360px;">
+          When following an external application
+          <select id="redirect-target">
+            <option value="newTabCloseSource">Open in a new tab, close the posting</option>
+            <option value="newTab">Open in a new tab, keep the posting</option>
+            <option value="sameTab">Open in the same tab</option>
+          </select>
+        </label>
       </section>
 
       <section id="configs-section">
@@ -81,6 +96,7 @@
               <option value="all">All</option>
               <option value="new">New</option>
               <option value="opened">Opened</option>
+              <option value="redirected">Redirected</option>
               <option value="applied">Applied</option>
               <option value="skipped">Skipped</option>
             </select>

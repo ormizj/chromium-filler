@@ -3,7 +3,9 @@
  * editor, and the job-URL database with the paste-a-dump importer.
  */
 
-import type { JobUrlEntry, JobUrlStatus, Profile, SiteConfig, TextFieldKey } from '../shared/types';
+import type {
+  JobUrlEntry, JobUrlStatus, Profile, RedirectTarget, SiteConfig, TextFieldKey,
+} from '../shared/types';
 import { TEXT_FIELDS, FIELD_LABELS } from '../shared/fieldKeys';
 import { configTemplate } from '../shared/configTemplate';
 import { extractUrls } from '../shared/urlImport';
@@ -84,11 +86,13 @@ async function initSettings(): Promise<void> {
   const autoRun = $<HTMLInputElement>('auto-run');
   const closeOnSubmit = $<HTMLInputElement>('close-on-submit');
   const closeDelay = $<HTMLInputElement>('close-delay');
+  const redirectTarget = $<HTMLSelectElement>('redirect-target');
 
   const settings = await getSettings();
   autoRun.checked = settings.autoRunOnLoad;
   closeOnSubmit.checked = settings.closeTabOnSubmit;
   closeDelay.value = String(settings.closeTabDelayMs);
+  redirectTarget.value = settings.redirectTarget;
 
   const persist = async () => {
     const s = await getSettings();
@@ -97,12 +101,14 @@ async function initSettings(): Promise<void> {
       autoRunOnLoad: autoRun.checked,
       closeTabOnSubmit: closeOnSubmit.checked,
       closeTabDelayMs: Math.max(0, Number(closeDelay.value) || 0),
+      redirectTarget: redirectTarget.value as RedirectTarget,
     });
   };
 
   autoRun.addEventListener('change', persist);
   closeOnSubmit.addEventListener('change', persist);
   closeDelay.addEventListener('change', persist);
+  redirectTarget.addEventListener('change', persist);
 }
 
 /* ---------------- Site configs ---------------- */
@@ -176,6 +182,14 @@ async function addParsed(): Promise<void> {
 
 let urlFilter: JobUrlStatus | 'all' = 'all';
 
+function hostOf(url: string): string {
+  try {
+    return new URL(url).host;
+  } catch {
+    return url;
+  }
+}
+
 function fmtDate(ts?: number): string {
   if (!ts) return '';
   return new Date(ts).toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
@@ -187,6 +201,7 @@ function renderStats(list: JobUrlEntry[]): void {
     ['Total', s.total, ''],
     ['New', s.new, 'new'],
     ['Opened', s.opened, 'opened'],
+    ['Redirected', s.redirected, 'redirected'],
     ['Applied', s.applied, 'applied'],
     ['Skipped', s.skipped, 'skipped'],
   ];
@@ -217,13 +232,20 @@ function urlRow(entry: JobUrlEntry): HTMLElement {
   const info = document.createElement('small');
   const bits = [`added ${fmtDate(entry.addedAt)}`];
   if (entry.appliedAt) bits.push(`applied ${fmtDate(entry.appliedAt)}`);
+  // Two-step postings: show which end of the handoff this row is.
+  if (entry.redirectUrl) bits.push(`→ ${hostOf(entry.redirectUrl)}`);
+  if (entry.sourceUrl) bits.push(`via ${hostOf(entry.sourceUrl)}`);
   bits.push(`${entry.history.length} event(s)`);
   info.textContent = bits.join(' · ');
-  info.title = entry.history.map((h) => `${h.status} @ ${new Date(h.at).toLocaleString()}`).join('\n');
+  info.title = [
+    ...(entry.sourceUrl ? [`from ${entry.sourceUrl}`] : []),
+    ...(entry.redirectUrl ? [`applies at ${entry.redirectUrl}`] : []),
+    ...entry.history.map((h) => `${h.status} @ ${new Date(h.at).toLocaleString()}`),
+  ].join('\n');
   meta.append(a, info);
 
   const status = document.createElement('select');
-  for (const s of ['new', 'opened', 'applied', 'skipped'] as const) {
+  for (const s of ['new', 'opened', 'redirected', 'applied', 'skipped'] as const) {
     const opt = document.createElement('option');
     opt.value = s; opt.textContent = s;
     if (s === entry.status) opt.selected = true;

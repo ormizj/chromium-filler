@@ -118,6 +118,37 @@ into the options "Site configurations" box, or they're auto-seeded by the E2E):
   accessible names (tests prep steps + accessible-name matching + CV override).
 - **chaos-form.html** — hashed ids, a multi-step form revealed by "Next" (prep),
   and a disguised `city` field that stays **unmatched** so you can Pick it.
+- **redirect-board.html** — one board serving both kinds of posting:
+  `?job=quick` fills in place, `?job=external` hands off to `ats-form.html` on
+  another host (tests the two-step flow below).
+
+## Two-step (redirect) applications
+
+Boards mix postings that apply in place with postings whose Apply button leaves
+for the employer's own ATS. Each page is classified before filling:
+
+1. Per-site selectors win — `redirect.quickApplySelector` (form is here),
+   `redirect.markerSelector` (external badge), `redirect.applySelector` (the
+   control to follow). Pick them visually in the on-page **Setup** panel.
+2. Otherwise a narrow heuristic: a control labelled "Apply on company website"
+   (or an `Apply` link opening a new tab) whose href leaves this host. If a page
+   has several such links, or none, it is treated as quick-apply and filled as
+   usual — a wrong guess must never navigate away from a fillable form.
+
+A posting classified as a redirect is followed automatically. Any
+`redirect.beforeFollow` steps run first — typically clicking the board's own
+**Save job**, so its application tracking records the apply too. The background
+then watches the handoff through its tracker/redirect hops and, once it settles:
+
+- the posting is recorded as **redirected** with a link to where it went, and the
+  destination is added as its own entry pointing back at the posting (both ends
+  appear in the URL dashboard, whether or not the posting was imported);
+- the destination gets a site config created automatically if it has none, so the
+  ATS form fills straight away;
+- submitting there marks the destination **and** the board posting **applied**.
+
+Where the application opens — new tab replacing the posting (default), new tab
+beside it, or the same tab — is the "Two-step applications" setting in options.
 
 ## Auto-close after submit
 
@@ -146,7 +177,14 @@ options "Behavior" section.
   "cvUpload": "input[type=file]",        // override CV file input
   "submitCv": [ { "action": "click", "selector": "#attach-cv" } ], // "Submit CV" button
   "successSelector": "#application-confirmation", // reliable "sent" signal (visible)
-  "autoDetect": true                     // false = overrides only
+  "autoDetect": true,                    // false = overrides only
+  "redirect": {                          // two-step postings (see above)
+    "applySelector": ".apply-external",  // control that leaves for the employer
+    "quickApplySelector": "#inline-form", // presence = form is on this page
+    "markerSelector": ".external-badge",
+    "beforeFollow": [ { "action": "click", "selector": "#save-job" } ],
+    "autoDetect": true                   // false = no label/cross-origin heuristic
+  }
 }
 ```
 

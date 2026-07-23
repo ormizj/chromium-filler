@@ -10,6 +10,7 @@ export const DEFAULT_SETTINGS: Settings = {
   autoFillLowConfidence: false,
   closeTabOnSubmit: false,
   closeTabDelayMs: 1500,
+  redirectTarget: 'newTabCloseSource',
 };
 
 /**

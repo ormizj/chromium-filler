@@ -37,14 +37,25 @@ function renderNoContentScript(): void {
   primary.disabled = true;
 }
 
+function hostOf(url: string): string {
+  try {
+    return new URL(url).host;
+  } catch {
+    return url;
+  }
+}
+
 function render(): void {
   if (!status) return renderNoContentScript();
   if (status.siteMatched) {
     badge.textContent = 'matched';
     badge.className = 'badge matched';
-    detail.textContent = status.hasRun
-      ? `${status.siteName}: ${status.filledCount}/${status.reportedCount} fields filled.`
-      : `${status.siteName}: ready to fill.`;
+    const via = status.landedFrom ? ` (via ${hostOf(status.landedFrom)})` : '';
+    detail.textContent = status.postingKind === 'redirect'
+      ? `${status.siteName}: applies on ${status.redirectHref ? hostOf(status.redirectHref) : 'the employer’s site'} — external application.`
+      : status.hasRun
+        ? `${status.siteName}${via}: ${status.filledCount}/${status.reportedCount} fields filled.`
+        : `${status.siteName}${via}: ready to fill.`;
     primary.disabled = false;
     primary.textContent = status.hasRun ? 'Reset & Re-run' : 'Fill';
     reconfigure.hidden = false;

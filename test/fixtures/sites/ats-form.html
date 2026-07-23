@@ -1,0 +1,53 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>AcmeATS — Senior Widget Engineer</title>
+    <style>
+      body { font: 15px/1.6 system-ui, sans-serif; max-width: 640px; margin: 40px auto; padding: 0 16px; }
+      label { display: block; margin: 12px 0 4px; font-weight: 600; }
+      input, textarea { width: 100%; padding: 8px; box-sizing: border-box; font: inherit; }
+      #ats-success { display: none; color: #15803d; font-weight: 700; margin-top: 16px; }
+      button { margin-top: 16px; padding: 10px 18px; }
+    </style>
+  </head>
+  <body>
+    <!--
+      The destination of the two-step handoff: an employer ATS with NO site config
+      of its own. Reached from a tracked redirect, the extension creates one so the
+      ordinary heuristics fill this form.
+    -->
+    <h1 id="ats-title">Senior Widget Engineer — Acme</h1>
+
+    <form id="ats-form">
+      <label for="ats-first">First name</label>
+      <input id="ats-first" name="first_name" />
+
+      <label for="ats-last">Last name</label>
+      <input id="ats-last" name="last_name" />
+
+      <label for="ats-email">Email address</label>
+      <input id="ats-email" name="email" type="email" />
+
+      <label for="ats-phone">Phone</label>
+      <input id="ats-phone" name="phone" />
+
+      <label for="ats-cover">Cover letter</label>
+      <textarea id="ats-cover" name="cover_letter" rows="3"></textarea>
+
+      <label for="ats-resume">Résumé (PDF)</label>
+      <input id="ats-resume" name="resume" type="file" />
+
+      <button id="ats-submit" type="submit">Submit application</button>
+    </form>
+    <div id="ats-success">✓ Application received by Acme.</div>
+
+    <script>
+      document.getElementById('ats-form').addEventListener('submit', (e) => {
+        e.preventDefault();
+        document.getElementById('ats-success').style.display = 'block';
+      });
+    </script>
+  </body>
+</html>

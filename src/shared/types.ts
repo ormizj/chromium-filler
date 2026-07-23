@@ -51,6 +51,28 @@ export interface PrepStep {
   optional?: boolean;
 }
 
+/**
+ * Two-step ("redirect") postings: boards mix quick-apply postings, whose form is
+ * on the page, with postings that hand off to an external ATS. This block tells
+ * the classifier which shape a given posting has and how to follow the handoff.
+ */
+export interface RedirectConfig {
+  /** The control that leaves for the external application (anchor or JS button). */
+  applySelector?: string;
+  /** If this resolves, the posting is quick-apply (in-page form). Checked first. */
+  quickApplySelector?: string;
+  /** A badge/label meaning "external posting", even when the link looks internal. */
+  markerSelector?: string;
+  /**
+   * Steps run on the posting BEFORE following the link — typically clicking the
+   * board's own "Save job" so its application tracking records the apply. These
+   * are always treated as optional: a failure must never block the handoff.
+   */
+  beforeFollow?: PrepStep[];
+  /** When false, the built-in text/cross-origin heuristic is off. Default true. */
+  autoDetect?: boolean;
+}
+
 export interface SiteConfig {
   id: string;
   name: string;
@@ -72,6 +94,8 @@ export interface SiteConfig {
   submitCv?: PrepStep[];
   /** When false, heuristics are disabled and only overrides are used. Default true. */
   autoDetect?: boolean;
+  /** Quick-apply vs. external-redirect classification + handoff for this site. */
+  redirect?: RedirectConfig;
   /**
    * Selector for the site's "submitted successfully" confirmation element
    * (e.g. a thank-you banner). This is the AUTHORITATIVE "actually sent" signal:
@@ -97,7 +121,7 @@ export interface FieldMatch {
   required: boolean;
 }
 
-export type JobUrlStatus = 'new' | 'opened' | 'applied' | 'skipped';
+export type JobUrlStatus = 'new' | 'opened' | 'redirected' | 'applied' | 'skipped';
 
 export interface JobStatusEvent {
   status: JobUrlStatus;
@@ -110,6 +134,10 @@ export interface JobUrlEntry {
   url: string;
   note?: string;
   status: JobUrlStatus;
+  /** For a destination entry: the board posting that redirected here. */
+  sourceUrl?: string;
+  /** For a source posting: the external application URL it redirected to. */
+  redirectUrl?: string;
   addedAt: number;
   updatedAt: number;
   /** First time the tab was opened. */
@@ -124,9 +152,13 @@ export interface JobUrlStats {
   total: number;
   new: number;
   opened: number;
+  redirected: number;
   applied: number;
   skipped: number;
 }
+
+/** Where a followed external application opens. */
+export type RedirectTarget = 'newTabCloseSource' | 'newTab' | 'sameTab';
 
 export interface Settings {
   /** Auto-run the full flow when a matching page finishes loading. */
@@ -137,6 +169,12 @@ export interface Settings {
   closeTabOnSubmit: boolean;
   /** Milliseconds to wait after detecting submit before closing the tab. */
   closeTabDelayMs: number;
+  /**
+   * Where an external ("two-step") application opens when a redirect posting is
+   * followed: a new tab replacing the posting tab (default), a new tab beside
+   * it, or in place.
+   */
+  redirectTarget: RedirectTarget;
 }
 
 /** Everything persisted in chrome.storage.local (the CV bytes are stored separately, also in chrome.storage.local). */

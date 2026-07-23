@@ -14,6 +14,9 @@ import setupCss from './setupPanel.css?inline';
 
 export type ContainerKey = 'jobTitle' | 'jobDescription' | 'jobRequirements';
 
+/** Which step list a prep row belongs to: pre-fill steps, or pre-handoff steps. */
+export type PrepListKey = 'prep' | 'beforeFollow';
+
 /** Dot colour: high = matched (green), low = weak match (yellow), none = nothing (grey). */
 export type RowStatus = 'high' | 'low' | 'none';
 
@@ -45,19 +48,27 @@ export interface SetupData {
   prep: PrepRow[];
   containers: SetupRow[];
   fields: SetupRow[];
+  /** Live quick-apply vs. external-redirect verdict for the page being set up. */
+  verdict: string;
+  /** Redirect-classification selectors (apply link, quick-apply / external markers). */
+  redirect: SetupRow[];
+  /** Steps run on the posting before following an external apply link. */
+  beforeFollow: PrepRow[];
 }
 
 export interface SetupCallbacks {
-  onAddPrep(action: PrepAction): void;
-  onPickPrepTarget(index: number): void;
-  onMovePrep(index: number, dir: -1 | 1): void;
-  onRemovePrep(index: number): void;
-  onSetPrepMs(index: number, ms: number): void;
+  onAddPrep(action: PrepAction, list: PrepListKey): void;
+  onPickPrepTarget(index: number, list: PrepListKey): void;
+  onMovePrep(index: number, dir: -1 | 1, list: PrepListKey): void;
+  onRemovePrep(index: number, list: PrepListKey): void;
+  onSetPrepMs(index: number, ms: number, list: PrepListKey): void;
   onRunPrep(): void;
   onPickContainer(key: ContainerKey): void;
   onClearContainer(key: ContainerKey): void;
   onPickField(field: FieldKey): void;
   onClearField(field: FieldKey): void;
+  onPickRedirect(key: string): void;
+  onClearRedirect(key: string): void;
   onRename(name: string, urlPattern: string): void;
   onOpenOptions(): void;
   onClose(): void;
@@ -144,14 +155,21 @@ export class SetupPanel {
     prepHead.append(sectionHead('Setup steps — run in order before filling'));
     prepHead.append(btn('Run steps ▶', () => this.cb.onRunPrep(), true));
     body.append(prepHead);
-    data.prep.forEach((step, i) => body.append(this.prepRow(step, i, data.prep.length)));
-    const addBar = el('div', 'cf-addbar');
-    addBar.append(
-      btn('+ Click', () => this.cb.onAddPrep('click')),
-      btn('+ Wait for', () => this.cb.onAddPrep('waitFor')),
-      btn('+ Delay', () => this.cb.onAddPrep('delay')),
-    );
-    body.append(addBar);
+    this.appendPrepList(body, data.prep, 'prep');
+
+    // Application type: does this posting apply here, or on the employer's site?
+    body.append(sectionHead('Application type — quick-apply here, or an external handoff'));
+    const verdict = el('div', 'cf-verdict');
+    verdict.textContent = data.verdict;
+    verdict.title = data.verdict;
+    body.append(verdict);
+    for (const row of data.redirect) {
+      body.append(this.row(row,
+        () => this.cb.onPickRedirect(row.key),
+        () => this.cb.onClearRedirect(row.key)));
+    }
+    body.append(sectionHead('Before leaving — run on the posting first, e.g. “Save job”'));
+    this.appendPrepList(body, data.beforeFollow, 'beforeFollow');
 
     // Job info containers
     body.append(sectionHead('Job info — pick each container on the page'));
@@ -184,7 +202,19 @@ export class SetupPanel {
     this.shadow.append(card);
   }
 
-  private prepRow(step: PrepRow, i: number, total: number): HTMLElement {
+  /** A step list plus its "+ step" bar; both prep lists render identically. */
+  private appendPrepList(body: HTMLElement, steps: PrepRow[], list: PrepListKey): void {
+    steps.forEach((step, i) => body.append(this.prepRow(step, i, steps.length, list)));
+    const addBar = el('div', 'cf-addbar');
+    addBar.append(
+      btn('+ Click', () => this.cb.onAddPrep('click', list)),
+      btn('+ Wait for', () => this.cb.onAddPrep('waitFor', list)),
+      btn('+ Delay', () => this.cb.onAddPrep('delay', list)),
+    );
+    body.append(addBar);
+  }
+
+  private prepRow(step: PrepRow, i: number, total: number, list: PrepListKey): HTMLElement {
     const row = el('div', 'cf-row');
     const selectorBased = step.action !== 'delay';
     const status = !selectorBased ? 'ok' : step.selector ? (step.resolves ? 'ok' : 'warn') : 'none';
@@ -208,15 +238,17 @@ export class SetupPanel {
       ms.className = 'cf-ms';
       ms.value = String(step.ms ?? (step.action === 'waitFor' ? 10000 : 500));
       ms.title = step.action === 'waitFor' ? 'timeout (ms)' : 'delay (ms)';
-      ms.onchange = () => this.cb.onSetPrepMs(i, Math.max(0, Number(ms.value) || 0));
+      ms.onchange = () => this.cb.onSetPrepMs(i, Math.max(0, Number(ms.value) || 0), list);
       actions.append(ms);
     }
-    if (selectorBased) actions.append(btn(step.selector ? 'Re-pick' : 'Pick', () => this.cb.onPickPrepTarget(i), true));
-    const up = btn('↑', () => this.cb.onMovePrep(i, -1));
-    const down = btn('↓', () => this.cb.onMovePrep(i, 1));
+    if (selectorBased) {
+      actions.append(btn(step.selector ? 'Re-pick' : 'Pick', () => this.cb.onPickPrepTarget(i, list), true));
+    }
+    const up = btn('↑', () => this.cb.onMovePrep(i, -1, list));
+    const down = btn('↓', () => this.cb.onMovePrep(i, 1, list));
     if (i === 0) up.setAttribute('disabled', 'true');
     if (i === total - 1) down.setAttribute('disabled', 'true');
-    actions.append(up, down, btn('✕', () => this.cb.onRemovePrep(i)));
+    actions.append(up, down, btn('✕', () => this.cb.onRemovePrep(i, list)));
     row.append(actions);
     return row;
   }

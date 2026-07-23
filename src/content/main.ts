@@ -8,28 +8,38 @@
 import type { FieldKey, FieldMatch, PrepAction, PrepStep, Profile, SiteConfig } from '../shared/types';
 import { findMatchingConfig } from '../shared/matcher';
 import { generateSelector } from '../shared/selector';
+import { isExternalUrl } from '../shared/redirect';
 import {
   getState, saveFieldOverride, clearFieldOverride,
   saveExtractSelector, clearExtractSelector, ensureConfigForUrl, mutateSiteConfig,
+  saveRedirectSelector, clearRedirectSelector, type RedirectSelectorKey,
 } from '../shared/storage';
 import { BUILD_ID } from '../shared/buildId';
 import { getCv, cvFileToFile } from '../shared/cvStore';
 import { TEXT_FIELDS, FIELD_LABELS } from '../shared/fieldKeys';
-import { MSG, type Message, type StatusResponse } from '../shared/messages';
+import { MSG, type FollowRedirectResponse, type Message, type StatusResponse } from '../shared/messages';
 import { waitForSelector } from './waitForForm';
 import { runPrepSteps } from './prep';
 import { extractJob, previewContainer } from './extract';
 import { detectFields } from './fieldDetect';
+import { detectRedirect, type RedirectDetection } from './redirectDetect';
 import { fillTextField, fillFileInput, highlight, clearHighlights } from './fill';
 import { startPicker } from './picker';
 import { FillerModal } from './modal/modal';
-import { SetupPanel, type ContainerKey, type SetupRow, type PrepRow } from './setupPanel';
+import { SetupPanel, type ContainerKey, type SetupRow, type PrepRow, type PrepListKey } from './setupPanel';
 
 const CONTAINER_LABELS: Record<ContainerKey, string> = {
   jobTitle: 'Job title',
   jobDescription: 'Description',
   jobRequirements: 'Requirements',
 };
+
+/** Redirect-classification selectors, in the order the setup panel lists them. */
+const REDIRECT_ROWS: Array<{ key: RedirectSelectorKey; label: string }> = [
+  { key: 'applySelector', label: 'External apply link' },
+  { key: 'quickApplySelector', label: 'Quick-apply marker' },
+  { key: 'markerSelector', label: 'External marker' },
+];
 
 const LOG = '[chromium-filler]';
 
@@ -44,7 +54,16 @@ class Controller {
   private cancelPicker?: () => void;
   private hasRun = false;
   private submitReported = false;
+  private submitArmed = false;
   private successObserver?: MutationObserver;
+  /** Latest quick-apply vs. external-redirect verdict for this page. */
+  private detection?: RedirectDetection;
+  /** The handoff has been triggered once; don't fire it again on a re-run. */
+  private followed = false;
+  /** The user overrode a redirect verdict and wants this page filled. */
+  private fillAnyway = false;
+  /** Board posting this page was reached from, when it is a tracked destination. */
+  private landedFrom?: string;
 
   async init(): Promise<void> {
     console.info(`${LOG} content script ready — v${chrome.runtime.getManifest().version} · build ${BUILD_ID}`);
@@ -82,6 +101,8 @@ class Controller {
    * setting is on, closes the tab after the configured delay.
    */
   private setupSubmitDetection(): void {
+    if (this.submitArmed) return;
+    this.submitArmed = true;
     const report = () => {
       if (this.submitReported) return;
       this.submitReported = true;
@@ -123,6 +144,9 @@ class Controller {
       filledCount: this.matches.filter((m) => m.filled).length,
       reportedCount: this.matches.length,
       hasRun: this.hasRun,
+      postingKind: this.detection?.kind,
+      redirectHref: this.detection?.href,
+      landedFrom: this.landedFrom,
     };
   }
 
@@ -147,12 +171,22 @@ class Controller {
         await this.openSetup();
         sendResponse(this.status());
         return;
+      case MSG.REDIRECT_LANDED:
+        await this.onRedirectLanded(msg.sourceUrl);
+        sendResponse(this.status());
+        return;
       default:
         sendResponse(this.status());
     }
   }
 
-  /** Full flow: wait -> prep -> extract -> detect -> fill -> modal. */
+  /**
+   * Full flow: wait -> prep -> classify -> (follow handoff | detect -> fill) -> modal.
+   *
+   * Boards mix two shapes of posting, so the branch is per page: a posting whose
+   * apply button leaves for the employer's own ATS has no form to fill here, and
+   * gets handed off (and recorded) instead.
+   */
   async run(): Promise<void> {
     if (!this.config) return;
     const config = this.config;
@@ -168,9 +202,85 @@ class Controller {
     if (config.waitFor) await waitForSelector(config.waitFor, config.waitTimeoutMs ?? 15000);
     await runPrepSteps(config.prep);
 
+    const detection = detectRedirect({
+      root: document,
+      pageUrl: location.href,
+      config: this.config!.redirect,
+    });
+    this.detection = detection;
+
+    if (this.shouldFollow(detection)) {
+      this.hasRun = true;
+      await this.followRedirect(detection);
+      return;
+    }
+
     this.detectAndFill();
     this.showModal();
     this.hasRun = true;
+  }
+
+  /* ---------------- Two-step (redirect) postings ---------------- */
+
+  private shouldFollow(det: RedirectDetection): boolean {
+    if (det.kind !== 'redirect' || this.fillAnyway) return false;
+    // Setup mode is for inspecting the page, not leaving it.
+    if (this.setupPanel) return false;
+    // Never bounce straight back to the board that sent us here.
+    if (this.landedFrom && det.href && !isExternalUrl(this.landedFrom, det.href)) return false;
+    return true;
+  }
+
+  /**
+   * Hand off to the external application: do the board's own bookkeeping first
+   * (typically clicking "Save job" so the site records the application on its
+   * side), then let the background open + track the destination.
+   */
+  private async followRedirect(det: RedirectDetection): Promise<void> {
+    this.showModal();
+    if (this.followed) return;
+    this.followed = true;
+    console.info(LOG, 'external application —', det.reason);
+
+    // Board-side bookkeeping must never block the handoff: a missing Save button
+    // (not signed in, markup changed) is a warning, not a dead end.
+    const steps = this.config?.redirect?.beforeFollow ?? [];
+    await runPrepSteps(steps.map((s) => ({ ...s, optional: true })));
+
+    let resp: FollowRedirectResponse | undefined;
+    try {
+      resp = await chrome.runtime.sendMessage({
+        type: MSG.FOLLOW_REDIRECT, sourceUrl: location.href, href: det.href,
+      });
+    } catch (e) {
+      console.warn(LOG, 'follow-redirect message failed', e);
+    }
+    this.showModal();
+
+    if (resp?.navigate) { location.href = resp.navigate; return; }
+    if (resp?.click) det.element?.click();
+  }
+
+  /** The user disagrees with the redirect verdict: fill this page after all. */
+  private async fillHere(): Promise<void> {
+    this.fillAnyway = true;
+    await this.run();
+  }
+
+  /**
+   * This tab is where a tracked handoff landed. Adopt the provenance, and if the
+   * destination ATS has no config of its own, create one so the ordinary
+   * heuristics can fill it now and the site is set up for next time.
+   */
+  private async onRedirectLanded(sourceUrl: string): Promise<void> {
+    this.landedFrom = sourceUrl;
+    if (!this.config) {
+      this.config = await ensureConfigForUrl(location.href);
+      this.setupSubmitDetection();
+      console.info(LOG, 'redirect destination — created config', this.config.id);
+    }
+    if (!this.hasRun) await this.run();
+    else this.showModal();
   }
 
   private wantedFields(): FieldKey[] {
@@ -242,10 +352,14 @@ class Controller {
         onSubmitCv: () => this.submitCv(),
         onConfirm: (field) => this.confirmField(field),
         onPick: (field) => this.pick(field),
+        onFollow: () => { this.followed = false; void this.followRedirect(this.detection!); },
+        onFillAnyway: () => this.fillHere(),
         onClose: () => this.modal?.destroy(),
       });
     }
     const job = extractJob(this.config!);
+    const det = this.detection;
+    const isRedirect = det?.kind === 'redirect' && !this.fillAnyway;
     this.modal.render({
       siteName: this.config!.name,
       jobTitle: job.title,
@@ -253,6 +367,10 @@ class Controller {
       jobRequirements: job.requirements,
       matches: this.matches,
       canSubmitCv: !!this.config!.submitCv?.length,
+      redirect: isRedirect
+        ? { host: det!.href ? hostOf(det!.href) : undefined, reason: det!.reason, followed: this.followed }
+        : undefined,
+      via: this.landedFrom ? hostOf(this.landedFrom) : undefined,
     });
   }
 
@@ -286,16 +404,18 @@ class Controller {
 
     if (!this.setupPanel) {
       this.setupPanel = new SetupPanel({
-        onAddPrep: (action) => this.addPrep(action),
-        onPickPrepTarget: (i) => this.pickPrepTarget(i),
-        onMovePrep: (i, dir) => this.movePrep(i, dir),
-        onRemovePrep: (i) => this.removePrep(i),
-        onSetPrepMs: (i, ms) => this.setPrepMs(i, ms),
+        onAddPrep: (action, list) => this.addPrep(action, list),
+        onPickPrepTarget: (i, list) => this.pickPrepTarget(i, list),
+        onMovePrep: (i, dir, list) => this.movePrep(i, dir, list),
+        onRemovePrep: (i, list) => this.removePrep(i, list),
+        onSetPrepMs: (i, ms, list) => this.setPrepMs(i, ms, list),
         onRunPrep: () => this.runPrep(),
         onPickContainer: (key) => this.pickContainer(key),
         onClearContainer: (key) => this.clearContainer(key),
         onPickField: (field) => this.pickFieldForSetup(field),
         onClearField: (field) => this.clearFieldForSetup(field),
+        onPickRedirect: (key) => this.pickRedirect(key as RedirectSelectorKey),
+        onClearRedirect: (key) => this.clearRedirect(key as RedirectSelectorKey),
         onRename: (name, pattern) => this.renameConfig(name, pattern),
         onOpenOptions: () => chrome.runtime.sendMessage({ type: MSG.OPEN_OPTIONS }),
         onClose: () => this.closeSetup(),
@@ -327,12 +447,40 @@ class Controller {
     clearHighlights();
 
     // Prerequisite steps, in run order.
-    const prep: PrepRow[] = (config.prep ?? []).map((s) => ({
+    const toPrepRows = (steps: PrepStep[] | undefined): PrepRow[] => (steps ?? []).map((s) => ({
       action: s.action,
       selector: s.selector,
       ms: s.ms,
       resolves: s.selector ? safeQuery(s.selector) != null : undefined,
     }));
+    const prep = toPrepRows(config.prep);
+    const beforeFollow = toPrepRows(config.redirect?.beforeFollow);
+
+    // How this posting applies: quick-apply here, or a handoff to the employer.
+    const detection = detectRedirect({ root: document, pageUrl: location.href, config: config.redirect });
+    this.detection = detection;
+    const verdict = detection.kind === 'redirect'
+      ? `External application — ${detection.reason}`
+      : detection.kind === 'quickApply'
+        ? `Quick apply — ${detection.reason}`
+        : `Quick apply (assumed) — ${detection.reason}`;
+    if (detection.element) highlight(detection.element, detection.kind === 'redirect' ? 'high' : 'low');
+
+    const redirectRows: SetupRow[] = REDIRECT_ROWS.map(({ key, label }) => {
+      const saved = config.redirect?.[key];
+      const el = saved ? safeQuery(saved) : null;
+      const usedHere = detection.source === 'override' && key === 'applySelector' && !!detection.href;
+      return {
+        key,
+        label,
+        status: saved ? (el ? 'high' : 'low') : 'none',
+        note: !saved ? 'not set'
+          : !el ? 'saved selector · no match'
+          : usedHere && detection.href ? `saved · → ${hostOf(detection.href)}`
+          : `saved · ${saved}`,
+        hasSave: !!saved,
+      };
+    });
 
     // Job-info containers: explicit selector, else generic fallback (auto).
     const containers: SetupRow[] = (['jobTitle', 'jobDescription', 'jobRequirements'] as ContainerKey[])
@@ -394,7 +542,21 @@ class Controller {
       prep,
       containers,
       fields,
+      verdict,
+      redirect: redirectRows,
+      beforeFollow,
     });
+  }
+
+  private pickRedirect(key: RedirectSelectorKey): void {
+    this.pickInto(REDIRECT_ROWS.find((r) => r.key === key)!.label, async (el) => {
+      if (this.config) await saveRedirectSelector(this.config.id, key, generateSelector(el));
+    });
+  }
+
+  private async clearRedirect(key: RedirectSelectorKey): Promise<void> {
+    if (this.config) await clearRedirectSelector(this.config.id, key);
+    await this.refreshSetup();
   }
 
   private pickContainer(key: ContainerKey): void {
@@ -432,10 +594,16 @@ class Controller {
 
   /* --- Prerequisite steps --- */
 
-  /** Read-modify-write the config's prep array. */
-  private async mutatePrep(fn: (prep: PrepStep[]) => void): Promise<void> {
+  /** Read-modify-write one of the config's step arrays (pre-fill or pre-handoff). */
+  private async mutatePrep(fn: (prep: PrepStep[]) => void, list: PrepListKey = 'prep'): Promise<void> {
     if (!this.config) return;
     await mutateSiteConfig(this.config.id, (c) => {
+      if (list === 'beforeFollow') {
+        const steps = [...(c.redirect?.beforeFollow ?? [])];
+        fn(steps);
+        c.redirect = { ...c.redirect, beforeFollow: steps };
+        return;
+      }
       const prep = [...(c.prep ?? [])];
       fn(prep);
       c.prep = prep;
@@ -443,36 +611,38 @@ class Controller {
   }
 
   /** Add a step. Selector-based actions launch the picker to choose their target. */
-  private addPrep(action: PrepAction): void {
+  private addPrep(action: PrepAction, list: PrepListKey): void {
     if (action === 'delay') {
-      void this.mutatePrep((p) => { p.push({ action: 'delay', ms: 500 }); }).then(() => this.refreshSetup());
+      void this.mutatePrep((p) => { p.push({ action: 'delay', ms: 500 }); }, list).then(() => this.refreshSetup());
       return;
     }
     this.pickInto(`step target (${action})`, (el) =>
-      this.mutatePrep((p) => { p.push({ action, selector: generateSelector(el) }); }));
+      this.mutatePrep((p) => { p.push({ action, selector: generateSelector(el) }); }, list));
   }
 
-  private pickPrepTarget(index: number): void {
+  private pickPrepTarget(index: number, list: PrepListKey): void {
     this.pickInto('step target', (el) =>
-      this.mutatePrep((p) => { if (p[index]) p[index] = { ...p[index], selector: generateSelector(el) }; }));
+      this.mutatePrep((p) => {
+        if (p[index]) p[index] = { ...p[index], selector: generateSelector(el) };
+      }, list));
   }
 
-  private async movePrep(index: number, dir: -1 | 1): Promise<void> {
+  private async movePrep(index: number, dir: -1 | 1, list: PrepListKey): Promise<void> {
     await this.mutatePrep((p) => {
       const j = index + dir;
       if (j < 0 || j >= p.length) return;
       [p[index], p[j]] = [p[j], p[index]];
-    });
+    }, list);
     await this.refreshSetup();
   }
 
-  private async removePrep(index: number): Promise<void> {
-    await this.mutatePrep((p) => { p.splice(index, 1); });
+  private async removePrep(index: number, list: PrepListKey): Promise<void> {
+    await this.mutatePrep((p) => { p.splice(index, 1); }, list);
     await this.refreshSetup();
   }
 
-  private async setPrepMs(index: number, ms: number): Promise<void> {
-    await this.mutatePrep((p) => { if (p[index]) p[index] = { ...p[index], ms }; });
+  private async setPrepMs(index: number, ms: number, list: PrepListKey): Promise<void> {
+    await this.mutatePrep((p) => { if (p[index]) p[index] = { ...p[index], ms }; }, list);
     await this.refreshSetup();
   }
 
@@ -532,6 +702,15 @@ function safeQuery(selector: string): HTMLElement | null {
     return document.querySelector(selector);
   } catch {
     return null;
+  }
+}
+
+/** Host of a URL, for display; the raw string if it doesn't parse. */
+function hostOf(url: string): string {
+  try {
+    return new URL(url).host;
+  } catch {
+    return url;
   }
 }
 

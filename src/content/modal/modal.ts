@@ -14,7 +14,21 @@ export interface ModalCallbacks {
   onSubmitCv(): void;
   onConfirm(field: FieldMatch['field']): void;
   onPick(field: FieldMatch['field']): void;
+  /** Follow (or re-try) the external application handoff. */
+  onFollow(): void;
+  /** Ignore the redirect verdict and fill this page after all. */
+  onFillAnyway(): void;
   onClose(): void;
+}
+
+/** Set when the posting hands off to an external application instead of a form. */
+export interface RedirectNotice {
+  /** Destination host, when known. */
+  host?: string;
+  /** Why this was classified as a redirect (from the detector). */
+  reason: string;
+  /** True once the handoff has been triggered. */
+  followed: boolean;
 }
 
 export interface ModalData {
@@ -24,6 +38,9 @@ export interface ModalData {
   jobRequirements?: string;
   matches: FieldMatch[];
   canSubmitCv: boolean;
+  redirect?: RedirectNotice;
+  /** Host of the board posting this page was reached from. */
+  via?: string;
 }
 
 export class FillerModal {
@@ -53,7 +70,7 @@ export class FillerModal {
     const header = el('div', 'cf-header');
     header.append(el('div', 'cf-grip'));
     const site = el('span', 'cf-site');
-    site.textContent = data.siteName;
+    site.textContent = data.via ? `${data.siteName} · via ${data.via}` : data.siteName;
     const close = el('button', 'cf-close');
     close.textContent = '×';
     close.setAttribute('aria-label', 'Close');
@@ -81,25 +98,43 @@ export class FillerModal {
       body.append(label, r);
     }
 
-    const filled = data.matches.filter((m) => m.filled).length;
-    const missing = data.matches.filter((m) => m.confidence === 'none').length;
-    const summary = el('p', 'cf-summary');
-    summary.textContent = `${filled} filled · ${data.matches.length - filled} need review · ${missing} not found`;
-    body.append(summary);
-
-    const report = el('div', 'cf-report');
-    for (const m of data.matches) report.append(this.row(m));
-    body.append(report);
-
-    // Footer
     const footer = el('div', 'cf-footer');
-    const submitCv = btn('Submit CV', () => this.cb.onSubmitCv());
-    if (!data.canSubmitCv) submitCv.setAttribute('disabled', 'true');
-    footer.append(
-      submitCv,
-      btn('Re-run', () => this.cb.onRerun()),
-      btn('Reset', () => this.cb.onReset()),
-    );
+
+    if (data.redirect) {
+      // Two-step posting: there is no form here to report on. Say where the
+      // application actually lives and leave a way back to filling in place,
+      // in case the classification was wrong.
+      const notice = el('p', 'cf-summary');
+      notice.textContent = data.redirect.host
+        ? `${data.redirect.followed ? 'Opening' : 'Applies on'} ${data.redirect.host} — external application`
+        : 'External application — this posting applies on the employer’s site';
+      const why = el('small', 'cf-why');
+      why.textContent = data.redirect.reason;
+      body.append(notice, why);
+
+      footer.append(
+        btn('Fill this page instead', () => this.cb.onFillAnyway()),
+        btn(data.redirect.followed ? 'Open again' : 'Open application', () => this.cb.onFollow(), true),
+      );
+    } else {
+      const filled = data.matches.filter((m) => m.filled).length;
+      const missing = data.matches.filter((m) => m.confidence === 'none').length;
+      const summary = el('p', 'cf-summary');
+      summary.textContent = `${filled} filled · ${data.matches.length - filled} need review · ${missing} not found`;
+      body.append(summary);
+
+      const report = el('div', 'cf-report');
+      for (const m of data.matches) report.append(this.row(m));
+      body.append(report);
+
+      const submitCv = btn('Submit CV', () => this.cb.onSubmitCv());
+      if (!data.canSubmitCv) submitCv.setAttribute('disabled', 'true');
+      footer.append(
+        submitCv,
+        btn('Re-run', () => this.cb.onRerun()),
+        btn('Reset', () => this.cb.onReset()),
+      );
+    }
 
     card.append(header, body, footer);
     this.shadow.append(card);
