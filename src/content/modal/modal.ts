@@ -24,8 +24,9 @@ import type { SessionState } from '../../shared/messages';
 import type { JobBlock } from '../../shared/jobText';
 import { FIELD_LABELS } from '../../shared/fieldKeys';
 import { STATUS_LABELS, matchStatus } from '../../shared/fieldStatus';
-import { clampLayout, NARROW_WIDTH } from '../../shared/modalLayout';
+import { clampLayout, layoutLimits, NARROW_WIDTH } from '../../shared/modalLayout';
 import { BASE_CSS } from '../../ui/shadowCss';
+import { clearLimitAttrs, setLimitAttrs } from '../../ui/limits';
 import modalCss from './modal.css?inline';
 
 export interface ModalCallbacks {
@@ -445,6 +446,12 @@ export class FillerModal {
    * `width`. Left in place they silently overrode whatever was chosen in the
    * Options simulator — a card sized to fill the screen came out 820px tall, so
    * the simulator was promising sizes the modal would never render.
+   *
+   * It also publishes which edges the card ended up flush against, because a
+   * corner where two straight screen edges meet must not be rounded, and an edge
+   * lying along the viewport edge must not draw its own border beside it. That is
+   * CSS (`.cf-card[data-limit-…]` in primitives.css) keyed off `layoutLimits` —
+   * the same reading the Options simulator paints its own card with.
    */
   private applyLayout(): void {
     const card = this.shadow.querySelector('.cf-card') as HTMLElement | null;
@@ -452,12 +459,16 @@ export class FillerModal {
 
     if (window.innerWidth <= NARROW || !this.data?.layout) {
       for (const prop of FillerModal.LAYOUT_PROPS) card.style.removeProperty(prop);
+      // The bottom sheet is flush on three edges and keeps its top corners
+      // rounded anyway; a stale attribute here would outrank that rule.
+      clearLimitAttrs(card);
       return;
     }
 
     // The clamp is the only thing keeping the card on screen — the CSS caps that
     // used to do it are being turned off below.
     const l = clampLayout(this.data.layout, window.innerWidth, window.innerHeight);
+    setLimitAttrs(card, layoutLimits(l, window.innerWidth, window.innerHeight));
     card.style.width = `${l.width}px`;
     card.style.height = `${l.height}px`;
     card.style.maxWidth = 'none';

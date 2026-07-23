@@ -550,13 +550,18 @@ label.fld.inline input {
  * here is real CSS pixels divided by that scale, which is what makes dragging in
  * a 600px-wide box mean something on a 1440px screen.
  */
+/**
+ * Square corners, because a browser viewport has square corners — and because
+ * `overflow: hidden` clips to the radius, so a rounded frame rounded the card's
+ * corner back off in exactly the case the card squares it. The model would have
+ * been showing the one thing the modal does not do.
+ */
 .sim {
   position: relative;
   width: 100%;
   max-width: 640px;
   overflow: hidden;
   border: 1px solid var(--border-strong);
-  border-radius: var(--radius-md);
   background: var(--surface);
   touch-action: none;
   user-select: none;
@@ -593,9 +598,16 @@ label.fld.inline input {
  * against. The card's border says "this edge is stuck"; these say "and it is the
  * screen it is stuck against" — which is the difference between "move me" and
  * "there is nowhere left to go".
+ *
+ * Over the card, not under it. A lit guide and the edge it describes are the same
+ * three pixels, and the card is painted later in the DOM — so on the one side that
+ * matters, the side the card is actually flush against, the line was hidden behind
+ * the card. That is also what lets the card drop its own border there: one line,
+ * drawn once, by the thing whose edge it is.
  */
 .sim-guide {
   position: absolute;
+  z-index: 1;
   background: var(--accent);
   opacity: 0;
   transition: opacity 120ms ease;
@@ -645,13 +657,25 @@ label.fld.inline input {
  * this is the smallest the modal gets. The two are answered by opposite moves, so
  * they must not look alike. `box-sizing: border-box` (primitives.css) is what keeps
  * the thicker border from shifting the card as it lights up — it eats the padding.
+ *
+ * A screen edge is drawn by the guide at the frame's edge, NOT by the card: the
+ * card is flush against that guide, so a border of its own would sit directly
+ * beside it and the pair would read as one 6px line. The amber minimums have no
+ * guide, so they carry their own border.
  */
-.sim-card[data-limit-top='screen'] { border-top: 3px solid var(--accent); }
-.sim-card[data-limit-right='screen'] { border-right: 3px solid var(--accent); }
-.sim-card[data-limit-bottom='screen'] { border-bottom: 3px solid var(--accent); }
-.sim-card[data-limit-left='screen'] { border-left: 3px solid var(--accent); }
+.sim-card[data-limit-top='screen'] { border-top-width: 0; }
+.sim-card[data-limit-right='screen'] { border-right-width: 0; }
+.sim-card[data-limit-bottom='screen'] { border-bottom-width: 0; }
+.sim-card[data-limit-left='screen'] { border-left-width: 0; }
 .sim-card[data-limit-top='min'] { border-top: 3px solid var(--warn); }
 .sim-card[data-limit-left='min'] { border-left: 3px solid var(--warn); }
+
+/* And squared where two of those edges meet, exactly as the real card is —
+   the model has to promise what the modal will render. See primitives.css. */
+.sim-card[data-limit-top='screen'][data-limit-left='screen'] { border-top-left-radius: 0; }
+.sim-card[data-limit-top='screen'][data-limit-right='screen'] { border-top-right-radius: 0; }
+.sim-card[data-limit-bottom='screen'][data-limit-left='screen'] { border-bottom-left-radius: 0; }
+.sim-card[data-limit-bottom='screen'][data-limit-right='screen'] { border-bottom-right-radius: 0; }
 .sim-card-head,
 .sim-card-foot {
   flex: none;

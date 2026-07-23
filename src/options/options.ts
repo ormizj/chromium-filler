@@ -40,6 +40,7 @@ import {
   type HelpEntry,
 } from '../shared/help';
 import { helpButton, helpPanel, richText } from '../ui/help';
+import { setLimitAttrs } from '../ui/limits';
 
 const $ = <T extends HTMLElement = HTMLElement>(id: string) => document.getElementById(id) as T;
 
@@ -446,8 +447,8 @@ async function initModalLayout(initial: ModalLayout): Promise<void> {
     // Which edges have run out of room, on the card and on the screen it is stuck
     // against. Without this a drag that hit a wall looks like one that stopped.
     const limits = layoutLimits(shown, vp.width, vp.height);
+    setLimitAttrs(card, limits);
     for (const [side, state] of Object.entries(limits)) {
-      card.dataset[`limit${side[0].toUpperCase()}${side.slice(1)}`] = state;
       guides[side as keyof typeof limits].classList.toggle('on', state === 'screen');
     }
     sizeChip.textContent = `${shown.width} × ${shown.height}`;

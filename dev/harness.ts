@@ -184,6 +184,15 @@ const MODAL_STATES: Record<string, Partial<ModalData>> = {
     redirect: { host: 'ats.acme.test', reason: 'configured external apply link', followed: true },
   },
   landed: { siteName: 'ats.acme.test', via: 'boards.example' },
+  // Dragged into the right-hand edge, and tall enough that `clampLayout` pins it
+  // top and bottom too: the two right corners come out square and lose their
+  // border while the left ones stay rounded — the whole flush rule in one
+  // screenshot. Only visible at desktop width; the phone panel is a bottom sheet.
+  flush: {
+    jobDescription: LONG_DESCRIPTION,
+    jobRequirements: [],
+    layout: { right: 0, bottom: 0, width: 460, height: 4000 },
+  },
   // A confident match that could not take the value — a <select> with no
   // matching option, or an override pointing at a wrapper. It reads as "needs
   // review" with a Confirm, never as filled: the dot is the user's only signal

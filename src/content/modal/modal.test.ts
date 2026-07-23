@@ -9,6 +9,7 @@
 import { describe, it, expect, afterEach, vi } from 'vitest';
 import { FillerModal, type ModalCallbacks, type ModalData } from './modal';
 import type { FieldMatch } from '../../shared/types';
+import type { ModalLayout } from '../../shared/modalLayout';
 
 const noop = () => {};
 
@@ -377,6 +378,59 @@ describe('FillerModal — stored geometry', () => {
     setViewport(1440, 900); // room again
     expect(card.style.height).toBe('720px');
     expect(card.style.width).toBe('460px');
+  });
+});
+
+/**
+ * A corner where two straight screen edges meet must not be rounded, and a card
+ * edge lying along the viewport edge must not draw its own border there. Both are
+ * CSS, keyed off these attributes — which is all jsdom can see, and all the modal
+ * is responsible for.
+ */
+describe('FillerModal — flush edges', () => {
+  const at = (over: Partial<ModalLayout>) => data([match()], {
+    jobTitle: 'A job',
+    layout: { right: 16, bottom: 16, width: 460, height: 720, ...over },
+  });
+
+  const limits = () => {
+    const card = shadow().querySelector('.cf-card') as HTMLElement;
+    const { limitTop, limitRight, limitBottom, limitLeft } = card.dataset;
+    return { top: limitTop, right: limitRight, bottom: limitBottom, left: limitLeft };
+  };
+
+  it('marks nothing flush when the card sits in the gutter', () => {
+    setViewport(1440, 900);
+    modal = new FillerModal(callbacks());
+    modal.render(at({}));
+    expect(limits()).toEqual({ top: 'free', right: 'free', bottom: 'free', left: 'free' });
+  });
+
+  it('marks the two edges of a bottom-right corner it is jammed into', () => {
+    setViewport(1440, 900);
+    modal = new FillerModal(callbacks());
+    modal.render(at({ right: 0, bottom: 0 }));
+    expect(limits()).toEqual({ top: 'free', right: 'screen', bottom: 'screen', left: 'free' });
+  });
+
+  it('follows the card as it is dragged off the edge', () => {
+    setViewport(1440, 900);
+    modal = new FillerModal(callbacks());
+    modal.render(at({ right: 0, bottom: 0 }));
+    modal.place({ right: 16, bottom: 16, width: 460, height: 720 });
+    expect(limits().right).toBe('free');
+  });
+
+  it('drops the attributes on a phone, so the bottom sheet keeps its own corners', () => {
+    // Load-bearing: `.cf-card[data-limit-…]` outranks the plain `.cf-card` rule in
+    // the narrow media query, so a leftover attribute would square the sheet's top
+    // corners — the one place a rounded corner survives a flush edge on purpose.
+    setViewport(390, 800);
+    modal = new FillerModal(callbacks());
+    modal.render(at({ right: 0, bottom: 0 }));
+    const card = shadow().querySelector('.cf-card') as HTMLElement;
+    expect(card.hasAttribute('data-limit-right')).toBe(false);
+    expect(limits()).toEqual({ top: undefined, right: undefined, bottom: undefined, left: undefined });
   });
 });
 

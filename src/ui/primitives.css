@@ -249,6 +249,33 @@ button.cf-btn:disabled {
   overflow: hidden;
 }
 
+/**
+ * A card dragged flush against the viewport, squared off where it meets it.
+ *
+ * `modal.ts` publishes `data-limit-<side>="screen"` for every edge that has run
+ * out of screen (the same reading the Options simulator draws its own card
+ * from). A corner is only squared when BOTH its edges are flush: one flush edge
+ * leaves the corner rounded over the page, which is right — it is still a card
+ * floating over someone else's site. Two flush edges make a corner of the window,
+ * and a curve there just leaks a sliver of page inside it.
+ *
+ * The border goes on a flush edge for the same reason: it would otherwise run
+ * alongside whatever the card is pressed against and read as one thicker line.
+ * `box-sizing: border-box` above means dropping it moves nothing.
+ *
+ * These are more specific than the narrow-viewport rules below, which is why
+ * `applyLayout` removes the attributes rather than merely not updating them.
+ */
+.cf-card[data-limit-top='screen'][data-limit-left='screen'] { border-top-left-radius: 0; }
+.cf-card[data-limit-top='screen'][data-limit-right='screen'] { border-top-right-radius: 0; }
+.cf-card[data-limit-bottom='screen'][data-limit-left='screen'] { border-bottom-left-radius: 0; }
+.cf-card[data-limit-bottom='screen'][data-limit-right='screen'] { border-bottom-right-radius: 0; }
+
+.cf-card[data-limit-top='screen'] { border-top-width: 0; }
+.cf-card[data-limit-right='screen'] { border-right-width: 0; }
+.cf-card[data-limit-bottom='screen'] { border-bottom-width: 0; }
+.cf-card[data-limit-left='screen'] { border-left-width: 0; }
+
 @media (max-width: 640px) {
   .cf-card {
     right: 0;
