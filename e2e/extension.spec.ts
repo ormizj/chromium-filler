@@ -555,3 +555,52 @@ test('Session: holds the batch size and opens the next posting as one closes', a
     await Promise.all(jobTabs().map((p) => p.close()));
   }
 });
+
+/* ---------------- Review-modal layout simulator ---------------- */
+
+test('Options: resizing the window leaves the configured layout and its ratios alone', async () => {
+  // The simulator's frame is a scale model of the user's screen, and the card is a
+  // fraction of it. Neither is a fact about the options window — so dragging that
+  // window to a new size must move nothing. It used to write the clamped layout
+  // back on every repaint, so one short window permanently shrank a card that had
+  // been configured on a big screen.
+  const chosen = { right: 24, bottom: 32, width: 520, height: 700 };
+  await patchSettings({ modalLayout: chosen });
+
+  const page = await context.newPage();
+  try {
+    await page.setViewportSize({ width: 1440, height: 900 });
+    await page.goto(`chrome-extension://${extId}/src/options/options.html`);
+    await page.locator('#tab-settings').click();
+    await expect(page.locator('#sim-card')).toBeVisible();
+
+    const shape = () => page.evaluate(() => {
+      const f = document.getElementById('sim')!.getBoundingClientRect();
+      const c = document.getElementById('sim-card')!.getBoundingClientRect();
+      return {
+        frame: f.width / f.height,
+        cardW: c.width / f.width,
+        cardH: c.height / f.height,
+      };
+    });
+    const before = await shape();
+
+    for (const [w, h] of [[1100, 900], [820, 620], [1600, 1000], [1440, 900]]) {
+      await page.setViewportSize({ width: w, height: h });
+      await page.waitForTimeout(250);
+      const now = await shape();
+      // 3 decimal places would be asking the browser for sub-pixel identity; 2 is
+      // still far tighter than the swings this test was written for.
+      expect(now.frame, `frame ratio at ${w}×${h}`).toBeCloseTo(before.frame, 2);
+      expect(now.cardW, `card width fraction at ${w}×${h}`).toBeCloseTo(before.cardW, 2);
+      expect(now.cardH, `card height fraction at ${w}×${h}`).toBeCloseTo(before.cardH, 2);
+    }
+
+    const stored = await page.evaluate(
+      async () => (await chrome.storage.local.get('settings')).settings?.modalLayout,
+    );
+    expect(stored, 'a resize is not a decision, so nothing may be saved').toEqual(chosen);
+  } finally {
+    await page.close();
+  }
+});

@@ -588,6 +588,39 @@ label.fld.inline input {
 .sim-bar.w85 { width: 85%; }
 .sim-bar.w90 { width: 90%; }
 
+/**
+ * The screen's own edges, lit on whichever side the card has run out of room
+ * against. The card's border says "this edge is stuck"; these say "and it is the
+ * screen it is stuck against" — which is the difference between "move me" and
+ * "there is nowhere left to go".
+ */
+.sim-guide {
+  position: absolute;
+  background: var(--accent);
+  opacity: 0;
+  transition: opacity 120ms ease;
+  pointer-events: none;
+}
+.sim-guide.top,
+.sim-guide.bottom {
+  left: 0;
+  right: 0;
+  height: 3px;
+}
+.sim-guide.left,
+.sim-guide.right {
+  top: 0;
+  bottom: 0;
+  width: 3px;
+}
+.sim-guide.top { top: 0; }
+.sim-guide.bottom { bottom: 0; }
+.sim-guide.left { left: 0; }
+.sim-guide.right { right: 0; }
+.sim-guide.on {
+  opacity: 1;
+}
+
 /* The card. Anchored bottom-right exactly as the real one is, so `right`/`bottom`
    mean the same thing here as they do in the modal's inline styles. */
 .sim-card {
@@ -606,6 +639,19 @@ label.fld.inline input {
 .sim-card:active {
   cursor: grabbing;
 }
+
+/**
+ * An edge that cannot go further, and why: indigo = the screen ends here, amber =
+ * this is the smallest the modal gets. The two are answered by opposite moves, so
+ * they must not look alike. `box-sizing: border-box` (primitives.css) is what keeps
+ * the thicker border from shifting the card as it lights up — it eats the padding.
+ */
+.sim-card[data-limit-top='screen'] { border-top: 3px solid var(--accent); }
+.sim-card[data-limit-right='screen'] { border-right: 3px solid var(--accent); }
+.sim-card[data-limit-bottom='screen'] { border-bottom: 3px solid var(--accent); }
+.sim-card[data-limit-left='screen'] { border-left: 3px solid var(--accent); }
+.sim-card[data-limit-top='min'] { border-top: 3px solid var(--warn); }
+.sim-card[data-limit-left='min'] { border-left: 3px solid var(--warn); }
 .sim-card-head,
 .sim-card-foot {
   flex: none;
@@ -617,6 +663,63 @@ label.fld.inline input {
   flex: 1;
   border-radius: 2px;
   background: var(--surface);
+}
+
+/**
+ * The live size, on the card rather than under the frame: during a drag the eyes
+ * are on the card, and a number they have to look away to read is a number they
+ * do not read.
+ */
+.sim-size {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: var(--radius-sm);
+  background: color-mix(in srgb, var(--bg) 78%, transparent);
+  color: var(--fg);
+  font-size: var(--text-xs);
+  font-variant-numeric: tabular-nums;
+  font-weight: 600;
+  white-space: nowrap;
+  opacity: 0;
+  transition: opacity 120ms ease;
+  pointer-events: none;
+}
+.sim.is-dragging .sim-size,
+.sim-card:focus-within .sim-size {
+  opacity: 1;
+}
+
+/**
+ * One-axis resize handles, on the two edges the bottom-right anchor lets move.
+ * Once the card is roughly the right shape, "a bit wider" should not also cost a
+ * few pixels of height. They stay visible rather than appearing on hover, because
+ * a handle nobody finds is a handle nobody uses — and there is no hover on touch.
+ */
+.sim-handle {
+  position: absolute;
+  min-height: 0;
+  padding: 0;
+  border: none;
+  border-radius: var(--radius-pill);
+  background: var(--accent);
+  touch-action: none;
+}
+.sim-handle.x {
+  top: 25%;
+  bottom: 25%;
+  left: -3px;
+  width: 6px;
+  cursor: ew-resize;
+}
+.sim-handle.y {
+  left: 25%;
+  right: 25%;
+  top: -3px;
+  height: 6px;
+  cursor: ns-resize;
 }
 
 /**
@@ -638,6 +741,23 @@ label.fld.inline input {
   cursor: nwse-resize;
   touch-action: none;
 }
+
+/* All three resize handles recede until wanted: they sit on top of the card the
+   user is judging, and at this scale three solid accent marks read as part of the
+   modal rather than as controls of the model. */
+.sim-grip,
+.sim-handle {
+  opacity: 0.5;
+  transition: opacity 120ms ease;
+}
+.sim-grip:hover,
+.sim-grip:focus-visible,
+.sim-handle:hover,
+.sim-handle:focus-visible,
+.sim-card:hover .sim-grip,
+.sim-card:hover .sim-handle {
+  opacity: 1;
+}
 @media (pointer: coarse) {
   .sim-grip {
     top: -22px;
@@ -650,4 +770,47 @@ label.fld.inline input {
     padding: 14px;
     border: none;
   }
+  /* Same trick, and centred on the edge for the same reason the grip is centred on
+     the corner: half the finger-sized target hangs outside the card, so it does not
+     swallow the area the card is dragged by. */
+  .sim-handle.x {
+    left: -22px;
+    width: var(--tap);
+    padding: 0 19px;
+    background-clip: content-box;
+  }
+  .sim-handle.y {
+    top: -22px;
+    height: var(--tap);
+    padding: 19px 0;
+    background-clip: content-box;
+  }
+}
+
+/**
+ * The readout and its limit chips sit still.
+ *
+ * Both are written on every pointermove, so anything whose size depends on their
+ * content moves the buttons underneath while the user is dragging. The sentence
+ * gets tabular figures and room for two lines; the chips get a grid whose shape
+ * depends only on the panel's width, and are hidden in place rather than removed.
+ */
+.sim-readout {
+  margin: var(--space-3) 0 0;
+  min-height: 2.6em;
+  font-variant-numeric: tabular-nums;
+}
+.sim-limits {
+  display: grid;
+  /* Narrow enough that all six fit one row on a desktop panel: the row is always
+     reserved, so a second one is empty space the user stares at. */
+  grid-template-columns: repeat(auto-fill, minmax(124px, 1fr));
+  gap: var(--space-2);
+  margin-top: var(--space-2);
+}
+.sim-limits .chip {
+  justify-content: center;
+}
+.sim-limits .chip.is-off {
+  visibility: hidden;
 }

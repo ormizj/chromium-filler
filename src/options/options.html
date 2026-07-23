@@ -136,11 +136,20 @@
 
           <h3>Review modal — size &amp; position</h3>
           <p class="hint" style="margin: 0 0 8px;">
-            Drag the card to move it, drag its top-left corner to resize. The frame
-            below is a screen to scale, so what you set here is what the modal gets
-            on a real posting. This applies on desktop only — under 640px wide the
-            modal is always a full-width bottom sheet, so on a phone the frame
-            stands in for a desktop screen rather than for this one.
+            Drag the card to move it; drag its top-left corner to resize, or its left
+            or top edge to resize one direction only. Edges snap to the screen edge
+            and to the default gutter, and an edge that has run out of room lights up
+            — indigo against the screen, amber at the smallest usable size. With the
+            keyboard, focus the card and use the arrow keys (hold Shift for 10px);
+            focus a handle to resize with them instead.
+          </p>
+          <p class="hint" style="margin: 0 0 8px;">
+            The frame below is your screen to scale — the display minus the space your
+            browser's own tab strip, address bar and bookmarks bar take, measured when
+            this page loaded — so what you set here is what the modal gets on a real
+            posting. Resizing this window does not change it. This applies on desktop
+            only: under 640px wide the modal is always a full-width bottom sheet, so on
+            a phone the frame stands in for a desktop screen rather than for this one.
           </p>
           <div id="sim" class="sim">
             <!-- A stand-in posting, so the card is judged against a page rather
@@ -153,19 +162,41 @@
               <span class="sim-bar w85"></span>
               <span class="sim-bar w70"></span>
             </div>
-            <div id="sim-card" class="sim-card" role="application"
-                 aria-label="Review modal position and size. Drag to move; use the corner handle to resize.">
+            <!-- Screen edges. They light up on the side the card is flush with, so
+                 the limit reads as the screen's rather than the card's. -->
+            <span class="sim-guide top" aria-hidden="true"></span>
+            <span class="sim-guide right" aria-hidden="true"></span>
+            <span class="sim-guide bottom" aria-hidden="true"></span>
+            <span class="sim-guide left" aria-hidden="true"></span>
+            <div id="sim-card" class="sim-card" role="application" tabindex="0"
+                 aria-label="Review modal position and size. Drag or use the arrow keys to move it; use the corner, left-edge and top-edge handles to resize.">
               <span class="sim-card-head" aria-hidden="true"></span>
               <span class="sim-card-body" aria-hidden="true"></span>
               <span class="sim-card-foot" aria-hidden="true"></span>
+              <span id="sim-size" class="sim-size" aria-hidden="true"></span>
+              <button id="sim-edge-x" class="sim-handle x" aria-label="Resize the modal's width"></button>
+              <button id="sim-edge-y" class="sim-handle y" aria-label="Resize the modal's height"></button>
               <button id="sim-grip" class="sim-grip" aria-label="Resize the modal"></button>
             </div>
           </div>
-          <p id="sim-readout" class="status" role="status" aria-live="polite"></p>
+          <p class="status sim-readout" role="status" aria-live="polite">
+            <span id="sim-readout-text"></span>
+            <!-- A hidden chip is not announced and toggling one is not a text
+                 change, so the words live here for screen readers. -->
+            <span id="sim-readout-sr" class="sr-only"></span>
+          </p>
+          <!-- Every limit chip, always present, shown or hidden in place: chips that
+               came and went reflowed this block and shifted the buttons below it on
+               every drag. -->
+          <div id="sim-limits" class="sim-limits" aria-hidden="true"></div>
           <div class="row" style="margin-top: 8px;">
             <button id="sim-preview" class="btn">Preview at full size</button>
             <button id="sim-reset" class="btn">Restore default</button>
           </div>
+          <p class="hint" style="margin: 8px 0 0;">
+            The preview renders in <em>this</em> window, so if it is smaller than the
+            screen above, the card is clamped to fit it.
+          </p>
         </section>
       </div>
 

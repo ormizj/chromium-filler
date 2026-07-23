@@ -11,7 +11,9 @@ import type {
 } from '../shared/types';
 import type { SessionState } from '../shared/messages';
 import {
-  clampLayout, DEFAULT_MODAL_LAYOUT, NARROW_WIDTH, REFERENCE_VIEWPORT,
+  activeLimits, ALL_LIMITS, clampLayout, DEFAULT_MODAL_LAYOUT, describeLimits, layoutLimits,
+  modelledViewport, sampleScreen, snapLayout,
+  type DragMode, type ModelledViewport, type ScreenMetrics, type ScreenSample,
 } from '../shared/modalLayout';
 // The real review modal, rendered over this page for the full-size preview —
 // the same trick the dev harness uses. A mock of it would only ever be a lie
@@ -202,32 +204,73 @@ async function initSettings(): Promise<void> {
  * trial and error on a live posting means re-running the fill for every nudge, so
  * the choice is made here instead, against a stand-in page.
  *
- * The frame is the real viewport to scale: its aspect ratio and the `scale`
- * factor come from `window.inner*`, so every drag maps 1:1 onto real CSS pixels
- * and the readout can state them plainly. "Preview at full size" then renders the
- * *actual* `FillerModal` over this page — the model is for placing, the preview
- * is for believing.
+ * The frame is the user's own screen to scale — not this window: `modelledViewport`
+ * takes the display minus the OS bars and minus the browser chrome measured from
+ * this very tab, so someone running with a bookmarks bar gets the shorter, wider
+ * frame they actually have. Every drag then maps 1:1 onto real CSS pixels and the
+ * readout can state them plainly. "Preview at full size" renders the *actual*
+ * `FillerModal` over this page — the model is for placing, the preview is for
+ * believing.
  */
 async function initModalLayout(initial: ModalLayout): Promise<void> {
   const frame = $('sim');
   const card = $('sim-card');
   const grip = $('sim-grip');
-  const readout = $('sim-readout');
+  const readout = $('sim-readout-text');
+  const limitsSr = $('sim-readout-sr');
+  const sizeChip = $('sim-size');
+  const guides = {
+    top: frame.querySelector<HTMLElement>('.sim-guide.top')!,
+    right: frame.querySelector<HTMLElement>('.sim-guide.right')!,
+    bottom: frame.querySelector<HTMLElement>('.sim-guide.bottom')!,
+    left: frame.querySelector<HTMLElement>('.sim-guide.left')!,
+  };
 
+  /**
+   * The layout the user chose. Deliberately NOT the layout being displayed: the
+   * frame clamps for painting only, and a viewport-driven repaint must never write
+   * back — `modal.ts` follows the same rule for the same reason. This panel used to
+   * assign the clamped value here, so opening the options window short enough for
+   * one repaint permanently shrank a card configured on a big screen.
+   */
   let layout = initial;
   let scale = 1;
   let preview: FillerModal | undefined;
   let saveTimer: number | undefined;
+  let screenSample: ScreenSample | undefined;
 
   /**
-   * The screen being modelled. On a phone that is NOT this window: the layout is
-   * only ever used above 640px, and clamping it to a 390px viewport — which is
-   * what modelling the real window would do — would silently shrink the user's
-   * desktop card the moment they opened this tab on their phone.
+   * The screen being modelled. Read fresh every time — toggling the bookmarks bar
+   * changes the chrome and only fires `resize` — but through `sampleScreen`, which
+   * holds the reading still while the window itself is being resized. Otherwise the
+   * frame changes shape as the user drags the window edge, which is precisely the
+   * one thing this frame is supposed to be telling the truth about.
    */
-  const viewport = () => (window.innerWidth > NARROW_WIDTH
-    ? { width: window.innerWidth, height: window.innerHeight }
-    : REFERENCE_VIEWPORT);
+  const viewport = () => {
+    const metrics: ScreenMetrics = {
+      availWidth: window.screen?.availWidth ?? window.innerWidth,
+      availHeight: window.screen?.availHeight ?? window.innerHeight,
+      outerWidth: window.outerWidth,
+      outerHeight: window.outerHeight,
+      innerWidth: window.innerWidth,
+      innerHeight: window.innerHeight,
+      framed: window.top !== window.self,
+    };
+    screenSample = sampleScreen(screenSample, metrics);
+    return modelledViewport(screenSample);
+  };
+
+  /**
+   * Every limit chip, rendered once and only ever shown or hidden. Adding and
+   * removing them reflowed the readout and shifted the buttons under it mid-drag.
+   */
+  const chips = new Map(ALL_LIMITS.map(({ key, label, tone }) => {
+    const el = document.createElement('span');
+    el.className = `chip ${tone} is-off`;
+    el.textContent = label;
+    return [key, el] as const;
+  }));
+  $('sim-limits').replaceChildren(...chips.values());
 
   /** The frame stands in for that screen, so it has to have its shape. */
   const measure = () => {
@@ -240,21 +283,39 @@ async function initModalLayout(initial: ModalLayout): Promise<void> {
     return true;
   };
 
-  const paint = () => {
+  /**
+   * `from` says which of the two views the change came from. The preview is not
+   * re-placed from its own drag: it is already where the pointer put it, and
+   * writing back mid-gesture only fights it.
+   */
+  const paint = (from: 'frame' | 'preview' = 'frame') => {
     if (!scale) return;
     const vp = viewport();
-    layout = clampLayout(layout, vp.width, vp.height);
-    card.style.width = `${layout.width * scale}px`;
-    card.style.height = `${layout.height * scale}px`;
-    card.style.right = `${layout.right * scale}px`;
-    card.style.bottom = `${layout.bottom * scale}px`;
-    const modelled = vp === REFERENCE_VIEWPORT
-      ? ` · on a ${vp.width} × ${vp.height} screen`
-      : '';
+    // Clamped for display only — see `layout` above.
+    const shown = clampLayout(layout, vp.width, vp.height);
+    card.style.width = `${shown.width * scale}px`;
+    card.style.height = `${shown.height * scale}px`;
+    card.style.right = `${shown.right * scale}px`;
+    card.style.bottom = `${shown.bottom * scale}px`;
+
+    // Which edges have run out of room, on the card and on the screen it is stuck
+    // against. Without this a drag that hit a wall looks like one that stopped.
+    const limits = layoutLimits(shown, vp.width, vp.height);
+    for (const [side, state] of Object.entries(limits)) {
+      card.dataset[`limit${side[0].toUpperCase()}${side.slice(1)}`] = state;
+      guides[side as keyof typeof limits].classList.toggle('on', state === 'screen');
+    }
+    sizeChip.textContent = `${shown.width} × ${shown.height}`;
+
+    const on = activeLimits(limits);
+    for (const [key, el] of chips) el.classList.toggle('is-off', !on.has(key));
     readout.textContent =
-      `${layout.width} × ${layout.height} px · ${layout.right} from the right`
-      + ` · ${layout.bottom} from the bottom${modelled}`;
-    preview?.render(previewData(layout));
+      `${shown.width} × ${shown.height} px · ${shown.right} from the right`
+      + ` · ${shown.bottom} from the bottom · ${describeScreen(vp)}`;
+    // A hidden chip is not announced, and toggling one is not a text change, so the
+    // live region carries the words itself. Status is never colour alone.
+    limitsSr.textContent = describeLimits(limits).map((l) => l.label).join(', ');
+    if (from === 'frame') preview?.place(shown);
   };
 
   // Debounced: a drag is a stream of pointermoves, and each one would otherwise
@@ -269,29 +330,54 @@ async function initModalLayout(initial: ModalLayout): Promise<void> {
   };
 
   /**
-   * One pointer gesture, in viewport pixels. `mode` decides whether the delta
-   * moves the card or resizes it — and because the card is anchored bottom-right,
-   * both are expressed as changes to `right`/`bottom`/`width`/`height` rather
-   * than to a top-left origin.
+   * Apply a delta in real viewport pixels. Because the card is anchored
+   * bottom-right, every mode is expressed as a change to
+   * `right`/`bottom`/`width`/`height` rather than to a top-left origin — and the
+   * signs invert with it: dragging left grows the width, because it is the *left*
+   * edge that moves.
    */
-  const drag = (el: HTMLElement, mode: 'move' | 'resize') => {
+  const nudge = (from: ModalLayout, mode: DragMode, dx: number, dy: number): ModalLayout => {
+    switch (mode) {
+      case 'move': return { ...from, right: from.right - dx, bottom: from.bottom - dy };
+      case 'resize-x': return { ...from, width: from.width - dx };
+      case 'resize-y': return { ...from, height: from.height - dy };
+      default: return { ...from, width: from.width - dx, height: from.height - dy };
+    }
+  };
+
+  /**
+   * Commit a layout the user actually asked for. This is the only place a clamp is
+   * allowed to stick: a drag is a decision, a repaint is not.
+   */
+  const commit = (next: ModalLayout, from: 'frame' | 'preview' = 'frame') => {
+    const vp = viewport();
+    layout = clampLayout(next, vp.width, vp.height);
+    paint(from);
+  };
+
+  /** One pointer gesture, snapped on the way so "flush" is aimable rather than lucky. */
+  const drag = (el: HTMLElement, mode: DragMode) => {
     el.addEventListener('pointerdown', (e: PointerEvent) => {
       e.preventDefault();
       e.stopPropagation();
-      const start = { x: e.clientX, y: e.clientY, ...layout };
+      const vp0 = viewport();
+      // From what is on screen, not from what is stored: if the stored card is
+      // bigger than this screen it is being *shown* clamped, and a drag that
+      // started from the stored numbers would jump on the first pixel of movement.
+      const start = { x: e.clientX, y: e.clientY, ...clampLayout(layout, vp0.width, vp0.height) };
       el.setPointerCapture(e.pointerId);
+      frame.classList.add('is-dragging');
 
       const onMove = (ev: PointerEvent) => {
+        const vp = viewport();
         const dx = (ev.clientX - start.x) / scale;
         const dy = (ev.clientY - start.y) / scale;
-        layout = mode === 'move'
-          ? { ...start, right: start.right - dx, bottom: start.bottom - dy }
-          : { ...start, width: start.width - dx, height: start.height - dy };
-        paint();
+        commit(snapLayout(nudge(start, mode, dx, dy), vp.width, vp.height, mode));
       };
       const onUp = (ev: PointerEvent) => {
         el.releasePointerCapture(ev.pointerId);
         el.removeEventListener('pointermove', onMove);
+        frame.classList.remove('is-dragging');
         save();
       };
 
@@ -301,20 +387,68 @@ async function initModalLayout(initial: ModalLayout): Promise<void> {
     });
   };
 
-  drag(card, 'move');
-  drag(grip, 'resize');
+  /**
+   * The same gestures from the keyboard. The card was `role="application"` with no
+   * keyboard path at all; now each handle *is* the mode, so arrows need no modifier
+   * to mean different things — Shift only changes the step. No snapping here: the
+   * reason to reach for the keys is to place a pixel exactly.
+   */
+  const keys = (el: HTMLElement, mode: DragMode) => {
+    const deltas: Record<string, [number, number]> = {
+      ArrowLeft: [-1, 0], ArrowRight: [1, 0], ArrowUp: [0, -1], ArrowDown: [0, 1],
+    };
+    el.addEventListener('keydown', (e: KeyboardEvent) => {
+      const d = deltas[e.key];
+      if (!d) return;
+      e.preventDefault();   // the panel would otherwise scroll under the card
+      e.stopPropagation();  // a handle's arrows must not also move the card
+      const step = e.shiftKey ? 10 : 1;
+      commit(nudge(layout, mode, d[0] * step, d[1] * step));
+      save();
+    });
+  };
 
-  $('sim-preview').addEventListener('click', (e) => {
-    const button = e.currentTarget as HTMLButtonElement;
-    if (preview) {
-      preview.destroy();
-      preview = undefined;
-      button.textContent = 'Preview at full size';
-      return;
-    }
-    preview = new FillerModal(PREVIEW_CALLBACKS);
-    preview.render(previewData(layout));
-    button.textContent = 'Close preview';
+  const handles: [HTMLElement, DragMode][] = [
+    [card, 'move'],
+    [grip, 'resize'],
+    [$('sim-edge-x'), 'resize-x'],
+    [$('sim-edge-y'), 'resize-y'],
+  ];
+  for (const [el, mode] of handles) {
+    drag(el, mode);
+    keys(el, mode);
+  }
+
+  /**
+   * The preview is the same control, at 1:1 — so it binds both ways. The frame
+   * already drives it (`paint` re-renders it on every nudge); these two callbacks
+   * are the return leg: dragging the real card moves the model and saves, and its
+   * close button closes it here rather than doing nothing, which is what a dead
+   * `onClose` amounted to. Without the return leg the two disagree the moment the
+   * preview is touched, and the preview is the one the user believes.
+   */
+  const previewButton = $<HTMLButtonElement>('sim-preview');
+  const closePreview = () => {
+    preview?.destroy();
+    preview = undefined;
+    previewButton.textContent = 'Preview at full size';
+    previewButton.setAttribute('aria-pressed', 'false');
+  };
+
+  previewButton.addEventListener('click', () => {
+    if (preview) return closePreview();
+    preview = new FillerModal({
+      ...PREVIEW_CALLBACKS,
+      onClose: closePreview,
+      // Live while it moves, saved when it lands — the same split the modal makes
+      // between reporting and persisting.
+      onLayoutPreview: (l) => commit(l, 'preview'),
+      onLayoutChange: (l) => { commit(l, 'preview'); save(); },
+    });
+    const vp = viewport();
+    preview.render(previewData(clampLayout(layout, vp.width, vp.height)));
+    previewButton.textContent = 'Close preview';
+    previewButton.setAttribute('aria-pressed', 'true');
   });
 
   $('sim-reset').addEventListener('click', () => {
@@ -333,6 +467,22 @@ async function initModalLayout(initial: ModalLayout): Promise<void> {
   window.addEventListener('resize', () => { if (measure()) paint(); });
   measure();
   paint();
+}
+
+/**
+ * Name the screen being modelled, with the arithmetic showing. A user who has just
+ * turned their bookmarks bar on should be able to see where the missing pixels
+ * went rather than wonder why the frame changed shape.
+ */
+function describeScreen(vp: ModelledViewport): string {
+  if (vp.source === 'reference') {
+    return `on a modelled ${vp.width} × ${vp.height} desktop screen`;
+  }
+  const chrome = vp.chromeMeasured
+    ? `${vp.chromeHeight}px of browser chrome`
+    : `about ${vp.chromeHeight}px of browser chrome, estimated`;
+  return `on your ${vp.width + vp.chromeWidth} × ${vp.height + vp.chromeHeight} screen,`
+    + ` ${vp.width} × ${vp.height} visible (${chrome})`;
 }
 
 /** The preview modal is a mannequin: its buttons must not do anything real. */

@@ -350,3 +350,67 @@ describe('FillerModal — stored geometry', () => {
     expect(card.style.width).toBe('460px');
   });
 });
+
+/**
+ * The Options simulator draws the same card at 1/3 scale, and the two are bound
+ * both ways: the frame drives the preview, and dragging or closing the preview
+ * drives the frame. These are the modal's half of that contract.
+ */
+describe('FillerModal — two views of one layout', () => {
+  const laid = (over = {}) => data([match()], {
+    jobTitle: 'A job',
+    layout: { right: 16, bottom: 16, width: 460, height: 720 },
+    ...over,
+  });
+
+  it('re-places the card without rebuilding it', () => {
+    // A rebuild mid-drag would throw away the very element holding the pointer
+    // capture, so the driving view needs a way to move this one in place.
+    setViewport(1440, 900);
+    modal = new FillerModal(callbacks());
+    modal.render(laid());
+    const before = shadow().querySelector('.cf-card') as HTMLElement;
+
+    modal.place({ right: 200, bottom: 100, width: 500, height: 600 });
+
+    const after = shadow().querySelector('.cf-card') as HTMLElement;
+    expect(after).toBe(before);
+    expect(after.style.right).toBe('200px');
+    expect(after.style.width).toBe('500px');
+  });
+
+  it('clamps what it is handed, like any other layout', () => {
+    setViewport(1000, 800);
+    modal = new FillerModal(callbacks());
+    modal.render(laid());
+    modal.place({ right: 0, bottom: 0, width: 4000, height: 4000 });
+    const card = shadow().querySelector('.cf-card') as HTMLElement;
+    expect(parseInt(card.style.width, 10)).toBeLessThanOrEqual(1000);
+  });
+
+  it('reports every step of a drag, but only persists on release', () => {
+    // The split exists because the content script writes storage in
+    // `onLayoutChange`: one write per drag, not one per pointermove.
+    setViewport(1440, 900);
+    const onLayoutPreview = vi.fn();
+    const onLayoutChange = vi.fn();
+    modal = new FillerModal(callbacks({ onLayoutPreview, onLayoutChange }));
+    modal.render(laid());
+
+    const header = shadow().querySelector('.cf-header') as HTMLElement;
+    header.setPointerCapture = noop;
+    header.releasePointerCapture = noop;
+    // jsdom has no PointerEvent; a MouseEvent carries everything the handler reads.
+    const at = (type: string, x: number, y: number) =>
+      header.dispatchEvent(new MouseEvent(type, { clientX: x, clientY: y, bubbles: true }));
+
+    at('pointerdown', 500, 300);
+    at('pointermove', 480, 290);
+    at('pointermove', 460, 280);
+    expect(onLayoutPreview).toHaveBeenCalledTimes(2);
+    expect(onLayoutChange).not.toHaveBeenCalled();
+
+    at('pointerup', 460, 280);
+    expect(onLayoutChange).toHaveBeenCalledTimes(1);
+  });
+});

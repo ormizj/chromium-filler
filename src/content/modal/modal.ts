@@ -43,6 +43,13 @@ export interface ModalCallbacks {
   onClose(): void;
   /** The card was dragged to a new spot; persist it so it stays there. */
   onLayoutChange?(layout: ModalLayout): void;
+  /**
+   * The card is *being* dragged — fired per pointermove, so a second view of the
+   * same layout can follow it live (the Options simulator draws one). Deliberately
+   * separate from `onLayoutChange`: that one persists, and a storage write per
+   * pointermove is what this split exists to avoid.
+   */
+  onLayoutPreview?(layout: ModalLayout): void;
 }
 
 /** Set when the posting hands off to an external application instead of a form. */
@@ -154,6 +161,16 @@ export class FillerModal {
   /** True while collapsed, so the controller can re-open rather than re-run. */
   get isMinimized(): boolean {
     return this.collapsed;
+  }
+
+  /**
+   * Re-place the card without rebuilding it. `render` replaces the whole `.cf-card`
+   * element, which is fine for new data but fatal while the card is being dragged —
+   * the handle holding the pointer capture would be thrown away mid-gesture. A
+   * second view driving this one (the Options simulator) uses this instead.
+   */
+  place(layout: ModalLayout): void {
+    this.setLayout(layout);
   }
 
   /** Which view is showing — the dev harness boots straight into one. */
@@ -492,6 +509,7 @@ export class FillerModal {
         window.innerWidth,
         window.innerHeight,
       ));
+      if (this.data?.layout) this.cb.onLayoutPreview?.(this.data.layout);
     };
 
     const onUp = (e: PointerEvent) => {

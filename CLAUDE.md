@@ -113,9 +113,46 @@ updated when the modal itself is dragged. It is **desktop only** — at or below
 `NARROW_WIDTH` (640px, shared with primitives.css) the modal is a full-width
 bottom sheet and `modal.ts` *clears* the inline styles, because an inline width
 would beat the media query. Every read goes through `clampLayout`, so a layout
-chosen on a big monitor cannot strand the card off the edge of a laptop; the
-Options simulator models a reference 1440×900 screen when the options page is
-itself narrow, so opening that tab on a phone cannot shrink a desktop layout.
+chosen on a big monitor cannot strand the card off the edge of a laptop.
+
+The simulator's frame is the user's **screen**, not the options window:
+`modelledViewport` takes `screen.avail*` and subtracts the browser chrome
+*measured* from the options tab itself (`outerHeight - innerHeight` — tab strip,
+address bar, and the bookmarks bar if one is open), so the frame has the aspect
+ratio and the pixel count the modal will really get. Two paths cannot measure and
+say so instead of guessing silently: an iframe (the dev harness) or an implausible
+delta falls back to `NOMINAL_CHROME`, and a phone-sized result falls back to
+`REFERENCE_VIEWPORT`, because clamping a desktop-only layout to a 390px screen
+would destroy it.
+
+That reading is taken **once per page load** (`sampleScreen`). Every "re-read once
+the window settles" rule fails on the same fact — one resize produces several
+repaints, so "settled" arrives before the window has stopped — and the result is a
+frame that changes shape under the user's hand. Resizing the options window must
+move nothing: the E2E `Options: resizing the window…` asserts the frame ratio, the
+card's fraction of it, *and* the stored layout across four window sizes.
+
+"Preview at full size" renders the real `FillerModal` over the options page, and
+the two views are bound **both ways**: the frame drives the preview through
+`FillerModal.place` (which re-places the card *without* rebuilding it — `render`
+replaces the whole `.cf-card`, which mid-drag would throw away the element holding
+the pointer capture), and the preview drives the frame through `onLayoutPreview`
+(per pointermove, live) and `onLayoutChange` (on release, persists). Those two
+callbacks are deliberately separate: `main.ts` writes storage in `onLayoutChange`,
+so firing it per pointermove would be a storage write per frame. The preview's own
+close button runs the options page's teardown, because a no-op `onClose` left the
+× dead and the button lying.
+
+Two rules that panel breaks easily. `paint()` clamps **for display only** and must
+never assign back to the stored layout — `modal.ts` follows the same rule, and this
+panel did not, so one short options window permanently shrank a card configured on
+a big screen; only a real gesture (`commit`) may clamp. And the limit chips are
+rendered once and toggled with `visibility`, never added and removed: they are
+rewritten on every `pointermove`, so anything that reflows shifts the buttons under
+them mid-drag. `layoutLimits`/`describeLimits`/`activeLimits` say which edges have
+run out of room and why — screen edge (accent) vs minimum size (warn), in colour
+*and* words — and `snapLayout` pulls a drag onto the edge or the 16px gutter,
+without which "flush" is reachable only by luck.
 
 ### Two-step (redirect) postings
 A board mixes quick-apply postings with postings that hand off to an employer
