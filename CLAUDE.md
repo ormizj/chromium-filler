@@ -26,9 +26,13 @@ go wrong there (a crushed row, an off-centre grip, an unreachable control) is
 invisible to a DOM assertion. New MCP servers load on Claude Code restart.
 
 For UI work also start `npm run dev` and open `http://localhost:5173/dev/`, which
-renders the real popup and options against a mocked `chrome.*` — including a
-**390px phone frame** beside the desktop one, so the mobile-first layout is what
-you iterate on rather than an afterthought.
+renders **all four surfaces** against a mocked `chrome.*` — including a **390px
+phone frame**, so the mobile-first layout is what you iterate on rather than an
+afterthought. `dev/frame.html?page=…` takes `popup`, `options`, `modal`, and
+`setup`; the last two render the real shadow-DOM classes over a fake posting,
+because otherwise they are only reachable by loading the built extension and
+driving a real site. `?page=modal&session=1` shows the queue strip and the
+footer overflow menu.
 
 E2E loads the built extension into real Chromium (`npx playwright install chromium`
 once). Always `npm run build` before `npm run test:e2e` — the suite loads `dist/`.

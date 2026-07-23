@@ -111,9 +111,6 @@ export class FillerModal {
     header.append(site, close);
     this.makeDraggable(card, header);
 
-    // Session strip — progress and "next" without a trip to the popup.
-    if (data.session?.active) card.append(this.sessionStrip(data.session));
-
     // Body
     const body = el('div', 'cf-body');
     if (data.jobTitle) {
@@ -180,7 +177,11 @@ export class FillerModal {
       }
     }
 
-    card.append(header, body, footer);
+    // The session strip sits under the header, never above it — the header is
+    // the sheet's title and drag handle and has to stay at the top edge.
+    card.append(header);
+    if (data.session?.active) card.append(this.sessionStrip(data.session));
+    card.append(body, footer);
     this.shadow.append(card);
   }
 
@@ -216,12 +217,17 @@ export class FillerModal {
     return pill;
   }
 
+  /**
+   * Where this posting sits in the queue. Read-only on purpose: the footer's
+   * "Skip → next" is the action, and a second Skip button here just duplicated
+   * it a few pixels away.
+   */
   private sessionStrip(session: SessionState): HTMLElement {
     const strip = el('div', 'cf-session');
     const text = el('span', 'cf-progress');
-    const { done, total, applied } = session.progress;
-    text.textContent = `${done}/${total} done · ${applied} applied`;
-    strip.append(text, btn('Skip', () => this.cb.onSkip()));
+    const { done, total, applied, queued } = session.progress;
+    text.textContent = `${done}/${total} done · ${applied} applied · ${queued} waiting`;
+    strip.append(text);
     return strip;
   }
 

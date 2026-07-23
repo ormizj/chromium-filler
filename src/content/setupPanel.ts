@@ -157,7 +157,11 @@ export class SetupPanel {
     // opens on exactly the work that is left.
     const jobInfoTodo = countTodo(data.containers);
     const fieldsTodo = countTodo(data.fields);
-    const redirectTodo = countTodo(data.redirect);
+    // Redirect selectors are optional overrides — "not set" is the ordinary
+    // state for a quick-apply site, so only a saved selector that no longer
+    // resolves counts as work. Counting them like the other groups labelled
+    // every healthy site "2 to do".
+    const redirectTodo = data.redirect.filter((r) => r.status === 'low').length;
     const nothingTodo = jobInfoTodo + fieldsTodo + redirectTodo === 0;
 
     const site = this.group('Site', 0, false);
@@ -171,7 +175,7 @@ export class SetupPanel {
     this.appendPrepList(steps.body, data.prep, 'prep');
 
     // Application type: does this posting apply here, or on the employer's site?
-    const kind = this.group('Application type', redirectTodo, false);
+    const kind = this.group('Application type', redirectTodo, redirectTodo > 0);
     const verdict = el('div', 'cf-verdict');
     verdict.textContent = data.verdict;
     verdict.title = data.verdict;
@@ -194,7 +198,7 @@ export class SetupPanel {
 
     // Form fields
     const fields = this.group('Form fields', fieldsTodo, fieldsTodo > 0 || nothingTodo);
-    fields.body.append(sectionHead('Heuristics fill the rest — pick only what stays grey'));
+    fields.body.append(sectionHead('Pick only what stays grey'));
     for (const row of data.fields) {
       fields.body.append(this.row(row,
         () => this.cb.onPickField(row.key as FieldKey),

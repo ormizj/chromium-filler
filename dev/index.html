@@ -33,6 +33,8 @@
       }
       .panel { background: #fff; border-radius: 12px; box-shadow: 0 6px 24px rgba(0,0,0,.12); overflow: hidden; }
       .panel h2 { font-size: 12px; text-transform: uppercase; letter-spacing: .05em; color: #6b7280; margin: 0; padding: 8px 12px; border-bottom: 1px solid #e5e7eb; }
+      .panel h2 small { text-transform: none; letter-spacing: 0; }
+      .panel h2 a { color: #6366f1; }
       .panel.popup iframe { width: 360px; height: 320px; border: 0; display: block; }
       /* A real phone viewport, so the mobile-first layout is what you iterate on
          rather than something you remember to check at the end. */
@@ -55,6 +57,14 @@
       <div class="panel phone">
         <h2>Options · phone (390px)</h2>
         <iframe src="./frame.html?page=options" title="Options harness, phone width"></iframe>
+      </div>
+      <div class="panel phone">
+        <h2>Review modal · phone <small>(<a href="./frame.html?page=modal">no session</a> · <a href="./frame.html?page=modal&amp;session=1">session</a>)</small></h2>
+        <iframe src="./frame.html?page=modal&amp;session=1" title="Review modal harness, phone width"></iframe>
+      </div>
+      <div class="panel phone">
+        <h2>Setup panel · phone <small>(<a href="./frame.html?page=setup">open alone</a>)</small></h2>
+        <iframe src="./frame.html?page=setup" title="Setup panel harness, phone width"></iframe>
       </div>
       <div class="panel options">
         <h2>Options · desktop</h2>

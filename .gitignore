@@ -8,3 +8,4 @@ playwright-report
 *.zip
 .pkgtmp
 .claude/settings.local.json
+.playwright-mcp

@@ -66,12 +66,18 @@ use load-unpacked to verify against real pages and real messaging.
 npm run dev            # then open http://localhost:5173/dev/
 ```
 
-This renders the **real** `popup.ts` and `options.ts` side by side in a normal
-browser tab — at both a **390px phone width** and desktop — driven by a **mocked**
-`chrome.*` API (`dev/mock-chrome.ts`) whose storage is backed by `localStorage`,
-whose content script is faked so the popup's Fill / Reset buttons visibly change
-state, and which simulates a queue session so the Start/Stop controls do
-something. Instant Vite HMR, no extension install.
+This renders **all four surfaces** side by side in a normal browser tab — at both
+a **390px phone width** and desktop — driven by a **mocked** `chrome.*` API
+(`dev/mock-chrome.ts`) whose storage is backed by `localStorage`, whose content
+script is faked so the popup's Fill / Reset buttons visibly change state, and
+which simulates a queue session so the Start/Stop controls do something. Instant
+Vite HMR, no extension install.
+
+`dev/frame.html?page=…` opens one surface on its own: `popup`, `options`, `modal`,
+or `setup`. The last two render the real Shadow-DOM classes over a fake posting —
+without them those surfaces are only reachable by building the extension, loading
+it unpacked and driving a real site, which is far too slow to iterate on. Add
+`&session=1` to the modal to see the queue strip and the footer overflow menu.
 
 > ⚠️ The harness is a *simulation*. It exercises the UI only — it does **not**
 > cover real content-script injection, cross-context messaging, or real sites.
