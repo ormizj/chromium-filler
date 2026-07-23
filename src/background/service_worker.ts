@@ -66,8 +66,14 @@ chrome.runtime.onMessage.addListener((msg: Message, _sender, sendResponse) => {
     return true;
   }
   if (msg.type === MSG.OPEN_OPTIONS) {
-    const url = msg.createForUrl
-      ? `${chrome.runtime.getURL('src/options/options.html')}#create=${encodeURIComponent(msg.createForUrl)}`
+    // Either deep link is a hash on the options URL; `openOptionsPage` cannot
+    // carry one, so anything targeted has to go through `tabs.create`.
+    const fragment = msg.createForUrl
+      ? `#create=${encodeURIComponent(msg.createForUrl)}`
+      : msg.hash ? `#${msg.hash}`
+      : undefined;
+    const url = fragment
+      ? `${chrome.runtime.getURL('src/options/options.html')}${fragment}`
       : undefined;
     if (url) chrome.tabs.create({ url });
     else chrome.runtime.openOptionsPage();

@@ -16,6 +16,11 @@
 
       <p id="detail" class="detail">Checking this page…</p>
 
+      <!-- First-run nudge: with no profile and no CV there is nothing to fill
+           with, and reporting "no config matches this page" sends a new user
+           looking in entirely the wrong place. -->
+      <a id="nudge" class="nudge" href="#" hidden></a>
+
       <div id="session" class="session" hidden>
         <div class="progress">
           <b id="session-count"></b>

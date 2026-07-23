@@ -9,7 +9,11 @@
  */
 
 import type { FieldKey, PrepAction } from '../shared/types';
+import {
+  CONCEPT_HELP, DOT_LEGEND, SETUP_GROUP_HELP, SETUP_GROUP_TITLES, type SetupGroupKey,
+} from '../shared/help';
 import { BASE_CSS } from '../ui/shadowCss';
+import { helpButton, helpPanel, richText } from '../ui/help';
 import setupCss from './setupPanel.css?inline';
 
 export type ContainerKey = 'jobTitle' | 'jobDescription' | 'jobRequirements';
@@ -54,6 +58,12 @@ export interface SetupData {
   redirect: SetupRow[];
   /** Steps run on the posting before following an external apply link. */
   beforeFollow: PrepRow[];
+  /**
+   * Whether the user has already dismissed the legend. False opens it, so a
+   * first-time user is told what the dots and the `auto ·` prefixes mean before
+   * being asked to act on them.
+   */
+  helpSeen: boolean;
 }
 
 export interface SetupCallbacks {
@@ -71,6 +81,8 @@ export interface SetupCallbacks {
   onClearRedirect(key: string): void;
   onRename(name: string, urlPattern: string): void;
   onOpenOptions(): void;
+  /** The legend was dismissed — persist it so the next posting stays quiet. */
+  onDismissHelp(): void;
   onClose(): void;
 }
 
@@ -87,6 +99,12 @@ export class SetupPanel {
   private cb: SetupCallbacks;
   /** Groups the user opened by hand; re-renders must not fold them back up. */
   private openGroups = new Set<string>();
+  /** Same for the `?` explanations — a re-scan mid-read must not close one. */
+  private openHelp = new Set<SetupGroupKey>();
+  /** The legend, once dismissed, stays folded for the rest of this page too. */
+  private legendDismissed = false;
+  /** Last data rendered, so opening a `?` can re-render without the Controller. */
+  private last?: SetupData;
 
   constructor(cb: SetupCallbacks) {
     this.cb = cb;
@@ -106,6 +124,7 @@ export class SetupPanel {
   }
 
   render(data: SetupData): void {
+    this.last = data;
     const existing = this.shadow.querySelector('.cf-card');
     if (existing) existing.remove();
 
@@ -124,6 +143,12 @@ export class SetupPanel {
     this.makeDraggable(card, header);
 
     const body = el('div', 'cf-body');
+
+    // One sentence answering "what am I looking at", above everything. The
+    // panel used to open straight onto five jargon headings.
+    const intro = el('p', 'cf-intro');
+    intro.textContent = 'Teach the extension how to read and fill this site. It never presses Send.';
+    body.append(intro, this.legend(data));
 
     // Identity
     const identity = el('div', 'cf-identity');
@@ -146,10 +171,10 @@ export class SetupPanel {
     const redirectTodo = data.redirect.filter((r) => r.status === 'low').length;
     const nothingTodo = jobInfoTodo + fieldsTodo + redirectTodo === 0;
 
-    const site = this.group('Site', 0, false);
+    const site = this.group('site', 0, false);
     site.body.append(identity);
 
-    const steps = this.group('Setup steps', 0, false);
+    const steps = this.group('steps', 0, false);
     const prepHead = el('div', 'cf-section-row');
     prepHead.append(sectionHead('Run in order before filling'));
     prepHead.append(btn('Run steps ▶', () => this.cb.onRunPrep(), true));
@@ -157,7 +182,7 @@ export class SetupPanel {
     this.appendPrepList(steps.body, data.prep, 'prep');
 
     // Application type: does this posting apply here, or on the employer's site?
-    const kind = this.group('Application type', redirectTodo, redirectTodo > 0);
+    const kind = this.group('kind', redirectTodo, redirectTodo > 0);
     const verdict = el('div', 'cf-verdict');
     verdict.textContent = data.verdict;
     verdict.title = data.verdict;
@@ -171,7 +196,7 @@ export class SetupPanel {
     this.appendPrepList(kind.body, data.beforeFollow, 'beforeFollow');
 
     // Job info containers
-    const info = this.group('Job info', jobInfoTodo, jobInfoTodo > 0);
+    const info = this.group('info', jobInfoTodo, jobInfoTodo > 0);
     for (const row of data.containers) {
       info.body.append(this.row(row,
         () => this.cb.onPickContainer(row.key as ContainerKey),
@@ -179,7 +204,7 @@ export class SetupPanel {
     }
 
     // Form fields
-    const fields = this.group('Form fields', fieldsTodo, fieldsTodo > 0 || nothingTodo);
+    const fields = this.group('fields', fieldsTodo, fieldsTodo > 0 || nothingTodo);
     fields.body.append(sectionHead('Pick only what stays grey'));
     for (const row of data.fields) {
       fields.body.append(this.row(row,
@@ -201,10 +226,63 @@ export class SetupPanel {
   }
 
   /**
-   * A collapsible section. `todo` is how many rows still need attention — shown
-   * as a chip so a collapsed group still says whether it can be ignored.
+   * The legend: what the dots, the `auto ·` / `saved ·` prefixes and the "to do"
+   * chip actually mean. Open until dismissed once — none of that vocabulary is
+   * guessable, and all of it is on screen from the first render.
    */
-  private group(title: string, todo: number, open: boolean): { el: HTMLElement; body: HTMLElement } {
+  private legend(data: SetupData): HTMLElement {
+    const details = document.createElement('details');
+    details.className = 'cf-legend';
+    details.open = !data.helpSeen && !this.legendDismissed;
+
+    const summary = document.createElement('summary');
+    const label = el('span');
+    label.textContent = 'What the rows mean';
+    summary.append(label);
+    details.append(summary);
+
+    const body = el('div', 'cf-legend-body');
+
+    // The dots are shown, not described — a colour key made of words is not a
+    // key. Each is the real `.cf-dot`, glyph included.
+    for (const { status, label } of DOT_LEGEND) {
+      const line = el('div', 'cf-legend-dot');
+      const text = el('span');
+      text.textContent = label;
+      line.append(el('span', `cf-dot ${status}`), text);
+      body.append(line);
+    }
+
+    // One line each for the rest of the vocabulary. The full explanations are a
+    // tap away behind each section's `?`; a legend that has to be scrolled past
+    // to reach the work is worse than no legend.
+    for (const key of ['autoVsSaved', 'picker', 'todoChip'] as const) {
+      const entry = CONCEPT_HELP[key];
+      const line = el('p', 'cf-legend-line');
+      line.append(...richText(entry.short ?? entry.body));
+      body.append(line);
+    }
+
+    const dismiss = btn('Got it', () => {
+      this.legendDismissed = true;
+      details.open = false;
+      this.cb.onDismissHelp();
+    });
+    dismiss.className = 'cf-btn cf-legend-dismiss';
+    body.append(dismiss);
+
+    details.append(body);
+    return details;
+  }
+
+  /**
+   * A collapsible section. `todo` is how many rows still need attention — shown
+   * as a chip so a collapsed group still says whether it can be ignored. The `?`
+   * discloses that section's explanation as the first thing inside its body,
+   * which is why it is built here rather than by each caller.
+   */
+  private group(key: SetupGroupKey, todo: number, open: boolean): { el: HTMLElement; body: HTMLElement } {
+    const title = SETUP_GROUP_TITLES[key];
     const details = document.createElement('details');
     details.className = 'cf-group';
     details.open = open || this.openGroups.has(title);
@@ -218,6 +296,21 @@ export class SetupPanel {
       chip.textContent = `${todo} to do`;
       summary.append(chip);
     }
+
+    const helpOpen = this.openHelp.has(key);
+    summary.append(helpButton(title, helpOpen, (next) => {
+      if (next) {
+        this.openHelp.add(key);
+        // Reading the explanation is a reason to see the section, never to lose
+        // it. This goes into the persistent set, not onto `details.open`: the
+        // re-render below replaces this element, and the `toggle` event that
+        // would have recorded it fires too late to be seen by that render.
+        this.openGroups.add(title);
+      } else {
+        this.openHelp.delete(key);
+      }
+      this.refresh();
+    }));
     details.append(summary);
 
     // Remember what the user opened, so a re-scan doesn't collapse it under them.
@@ -227,8 +320,14 @@ export class SetupPanel {
     });
 
     const body = el('div', 'cf-group-body');
+    if (helpOpen) body.append(helpPanel(SETUP_GROUP_HELP[key]));
     details.append(body);
     return { el: details, body };
+  }
+
+  /** Re-render from the last data — the panel is a pure function of it. */
+  private refresh(): void {
+    if (this.last) this.render(this.last);
   }
 
   /** A step list plus its "+ step" bar; both prep lists render identically. */

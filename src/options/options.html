@@ -17,6 +17,7 @@
           <button class="tab" role="tab" id="tab-profile" aria-controls="panel-profile" aria-selected="false">Profile</button>
           <button class="tab" role="tab" id="tab-settings" aria-controls="panel-settings" aria-selected="false">Settings</button>
           <button class="tab" role="tab" id="tab-sites" aria-controls="panel-sites" aria-selected="false">Sites</button>
+          <button class="tab" role="tab" id="tab-help" aria-controls="panel-help" aria-selected="false">Help</button>
         </div>
       </div>
     </div>
@@ -24,6 +25,19 @@
     <main>
       <!-- ---------------- Queue ---------------- -->
       <div id="panel-queue" role="tabpanel" aria-labelledby="tab-queue">
+        <!-- First-run checklist. Built by options.ts because every step's tick
+             is read from storage — a static list would lie the moment one of
+             them is done. -->
+        <section id="start-section" hidden>
+          <div class="startcard">
+            <div class="startcard-head">
+              <h2>Getting started</h2>
+              <button id="start-dismiss" class="btn-ghost" aria-label="Dismiss the getting-started checklist">×</button>
+            </div>
+            <ol id="start-steps" class="startsteps"></ol>
+          </div>
+        </section>
+
         <section id="urls-section">
           <h2>Job queue</h2>
           <p class="hint">
@@ -114,7 +128,9 @@
             submit is used as a fallback (navigation flows only).
           </p>
           <label class="fld" style="max-width: 240px; margin-top: 8px;">
-            Close delay (ms)
+            <!-- The caption is wrapped so the `?` sits on the label's line
+                 rather than below the input, which a column flex would do. -->
+            <span class="fld-label" id="close-delay-label">Close delay (ms)</span>
             <input type="number" id="close-delay" min="0" step="250" />
           </label>
           <p id="settings-status" class="status" role="status" aria-live="polite"></p>
@@ -126,7 +142,7 @@
             button). Both the posting and the application it leads to are recorded.
           </p>
           <label class="fld" style="max-width: 360px;">
-            When following an external application
+            <span class="fld-label" id="redirect-target-label">When following an external application</span>
             <select id="redirect-target">
               <option value="newTabCloseSource">Open in a new tab, close the posting</option>
               <option value="newTab">Open in a new tab, keep the posting</option>
@@ -209,13 +225,46 @@
             selectors, field overrides, CV upload selector, submit-CV steps. Most sites
             are easier to set up visually — open a posting and use “Set up this site”.
           </p>
-          <div id="configs-summary" class="filters"></div>
+          <!-- Every key, explained. Without this the JSON below is the only
+               documentation there is, and it documents nothing. -->
+          <details id="configs-reference" class="reference">
+            <summary>What every setting means</summary>
+            <div id="configs-reference-body" class="reference-body"></div>
+          </details>
+
+          <p class="hint" style="margin: 0 0 8px;">Pick a site to see what it will do:</p>
+          <div id="configs-summary" class="filters" role="group" aria-label="Saved site configurations"></div>
+          <div id="configs-explain" class="explain" hidden></div>
+
           <textarea id="configs-json" spellcheck="false" rows="18"></textarea>
           <div class="row">
             <button id="save-configs" class="primary">Save configs</button>
             <button id="add-template">Add template</button>
             <span id="configs-status" class="status" role="status" aria-live="polite"></span>
           </div>
+        </section>
+      </div>
+      <!-- ---------------- Help ---------------- -->
+      <div id="panel-help" role="tabpanel" aria-labelledby="tab-help" hidden>
+        <section id="help-section">
+          <h2>How this works</h2>
+          <p class="hint">
+            Everything here is also available where you need it — the
+            <code>?</code> buttons in this page and in the on-page “Set up this
+            site” panel show the same explanations in place.
+          </p>
+
+          <h3>The flow</h3>
+          <ol id="help-flow" class="helpflow"></ol>
+
+          <h3>Terms you will see</h3>
+          <div id="help-concepts" class="helplist"></div>
+
+          <h3>Site config reference</h3>
+          <div id="help-reference" class="reference-body"></div>
+
+          <h3>When something goes wrong</h3>
+          <div id="help-trouble" class="helplist"></div>
         </section>
       </div>
     </main>

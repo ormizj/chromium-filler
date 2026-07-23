@@ -258,6 +258,7 @@ function bootSetup(): void {
     onClearRedirect: (k) => console.log('[harness] clear redirect', k),
     onRename: (n, p) => console.log('[harness] rename', n, p),
     onOpenOptions: () => console.log('[harness] open options'),
+    onDismissHelp: () => console.log('[harness] legend dismissed'),
     onClose: () => console.log('[harness] close setup'),
   });
 
@@ -288,6 +289,9 @@ function bootSetup(): void {
       { key: 'markerSelector', label: 'External marker', status: 'none', note: 'not set', hasSave: false },
     ],
     beforeFollow: [{ action: 'click', selector: '#save-job', resolves: true }],
+    // The returning user, whose legend is folded away. `state=help` is the
+    // first-run view.
+    helpSeen: true,
   };
 
   /**
@@ -297,6 +301,13 @@ function bootSetup(): void {
    */
   const SETUP_STATES: Record<string, Partial<SetupData>> = {
     default: {},
+    /**
+     * What a first-time user actually meets: the legend open, before any of the
+     * vocabulary on the rows below it has been explained. This is the state the
+     * whole help layer exists for, and it is the one nobody can reach twice —
+     * dismissing it is persistent.
+     */
+    help: { helpSeen: false },
     external: {
       name: 'ExternalBoard',
       urlPattern: '*://*/sites/external-board.html*',

@@ -473,6 +473,7 @@ class Controller {
         onClearRedirect: (key) => this.clearRedirect(key as RedirectSelectorKey),
         onRename: (name, pattern) => this.renameConfig(name, pattern),
         onOpenOptions: () => chrome.runtime.sendMessage({ type: MSG.OPEN_OPTIONS }),
+        onDismissHelp: () => void this.dismissHelp(),
         onClose: () => this.closeSetup(),
       });
     }
@@ -600,7 +601,19 @@ class Controller {
       verdict,
       redirect: redirectRows,
       beforeFollow,
+      helpSeen: (await getSettings()).helpSeen,
     });
+  }
+
+  /**
+   * The legend was dismissed. Persisted rather than kept in the panel, because
+   * the next posting gets a brand-new panel in a brand-new content script — and
+   * being re-taught the basics sixty times in a session is its own problem.
+   */
+  private async dismissHelp(): Promise<void> {
+    const settings = await getSettings();
+    if (settings.helpSeen) return;
+    await saveSettings({ ...settings, helpSeen: true });
   }
 
   private pickRedirect(key: RedirectSelectorKey): void {

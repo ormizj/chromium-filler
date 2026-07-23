@@ -1,9 +1,14 @@
 /**
  * Options page: the job queue (session control + URL database), profile editor,
- * CV upload, behavior settings, and the site-config JSON editor.
+ * CV upload, behavior settings, the site-config JSON editor, and Help.
  *
- * The four areas are tabs rather than one long scroll — the queue is the only
+ * The five areas are tabs rather than one long scroll — the queue is the only
  * part used daily, and on a phone it used to sit behind everything else.
+ *
+ * Everything explanatory on this page renders from `shared/help.ts`, never from
+ * copy written here: the same words have to reach the on-page setup panel, and
+ * two copies of an explanation is how the old per-surface CSS ended up
+ * contradicting itself.
  */
 
 import type {
@@ -30,6 +35,11 @@ import {
   getSiteConfigs, saveSiteConfigs, getJobUrls, saveJobUrls, mutateJobUrls,
 } from '../shared/storage';
 import { getCv, setCv, clearCv } from '../shared/cvStore';
+import {
+  CONCEPT_HELP, CONFIG_HELP, PREP_HELP, REDIRECT_HELP, SETTINGS_HELP, describeConfig,
+  type HelpEntry,
+} from '../shared/help';
+import { helpButton, helpPanel, richText } from '../ui/help';
 
 const $ = <T extends HTMLElement = HTMLElement>(id: string) => document.getElementById(id) as T;
 
@@ -49,7 +59,7 @@ function setStatus(el: HTMLElement, text: string, kind: 'ok' | 'err' | '' = ''):
 
 /* ---------------- Tabs ---------------- */
 
-const TABS = ['queue', 'profile', 'settings', 'sites'] as const;
+const TABS = ['queue', 'profile', 'settings', 'sites', 'help'] as const;
 type TabName = (typeof TABS)[number];
 
 function selectTab(name: TabName, pushHash = true): void {
@@ -160,6 +170,132 @@ async function initCv(): Promise<void> {
   await show();
 }
 
+/* ---------------- Inline help ---------------- */
+
+/**
+ * Attaches a `?` to a control's label, disclosing that setting's explanation
+ * directly beneath it. The catalog is the copy; this only decides where it goes.
+ */
+function attachHelp(anchor: HTMLElement, entry: HelpEntry, insertAfter: HTMLElement = anchor): void {
+  let panel: HTMLElement | undefined;
+  anchor.append(helpButton(entry.title, false, (open) => {
+    panel?.remove();
+    panel = undefined;
+    if (open) {
+      panel = helpPanel(entry);
+      insertAfter.after(panel);
+    }
+  }));
+}
+
+/** `key — what it does`, the shape used by both the Sites reference and Help. */
+function referenceRow(key: string, entry: HelpEntry): HTMLElement {
+  const row = document.createElement('div');
+  row.className = 'reference-row';
+
+  const name = document.createElement('code');
+  name.className = 'reference-key';
+  name.textContent = key;
+
+  const body = document.createElement('div');
+  body.className = 'reference-text';
+  const p = document.createElement('p');
+  p.append(...richText(entry.body));
+  body.append(p);
+
+  if (entry.when) {
+    const when = document.createElement('p');
+    when.className = 'cf-help-when';
+    when.append(...richText(entry.when));
+    body.append(when);
+  }
+  if (entry.example) {
+    const example = document.createElement('code');
+    example.className = 'cf-help-example';
+    example.textContent = entry.example;
+    body.append(example);
+  }
+
+  row.append(name, body);
+  return row;
+}
+
+/** The whole config schema, key by key. Shared by the Sites tab and Help. */
+function renderReference(into: HTMLElement): void {
+  const groups: Array<[string, Record<string, HelpEntry>]> = [
+    ['Site config', CONFIG_HELP],
+    ['redirect — two-step postings', REDIRECT_HELP],
+    ['Prep step actions', PREP_HELP],
+  ];
+  into.replaceChildren(...groups.flatMap(([title, entries]) => {
+    const head = document.createElement('h4');
+    head.className = 'reference-head';
+    head.textContent = title;
+    return [head, ...Object.entries(entries).map(([key, entry]) => referenceRow(key, entry))];
+  }));
+}
+
+/** The Help tab. Static content, all of it from the catalog. */
+function initHelp(): void {
+  const flow = [
+    'You save your details and your CV once, here.',
+    'You open a job posting — by hand, or from the queue.',
+    'The extension checks whether one of your site configs matches that URL.',
+    'It waits for the form, runs that site’s setup steps, and works out whether the '
+      + 'posting applies here or on the employer’s own site.',
+    'It fills every field it is confident about, CV included, and shows you a review.',
+    'You check the review, fix anything it flagged, and press the site’s own Send.',
+  ];
+  $('help-flow').replaceChildren(...flow.map((text) => {
+    const li = document.createElement('li');
+    li.append(...richText(text));
+    return li;
+  }));
+
+  const concepts: Array<keyof typeof CONCEPT_HELP> = [
+    'howItWorks', 'neverSubmits', 'dots', 'autoVsSaved', 'picker', 'todoChip',
+    'urlPattern', 'twoStep', 'sessions', 'successSelector',
+  ];
+  $('help-concepts').replaceChildren(...concepts.map((key) => helpPanel(CONCEPT_HELP[key])));
+
+  renderReference($('help-reference'));
+
+  // Written here rather than in the catalog: these are symptoms, not settings,
+  // and each one is a pointer at the entry that explains the cause.
+  const trouble: HelpEntry[] = [
+    {
+      title: 'Nothing was filled at all',
+      body: 'Either no site config matches this URL — the popup says “no config” — or '
+        + 'the form had not loaded yet. Open the posting, press “Set up this site”, and '
+        + 'check the URL pattern, then give the site a `waitFor` selector.',
+    },
+    {
+      title: 'One field stayed grey',
+      body: 'The guessing found nothing for it. In the setup panel press Pick on that '
+        + 'row and tap the real input on the page; the selector is saved for this site '
+        + 'and it will be right every time after that.',
+    },
+    {
+      title: 'It navigated away from a posting I wanted to fill',
+      body: 'It classified the posting as applying on the employer’s site. Press “Fill '
+        + 'this page instead” in the modal, then set a quick-apply marker under '
+        + 'Application type so the same board is judged correctly next time.',
+    },
+    {
+      title: 'It never marked a posting applied',
+      body: 'Applied is only recorded once the site’s own confirmation becomes visible. '
+        + 'Give that site a `successSelector` pointing at its thank-you element — '
+        + 'without one, only a full-page-navigation submit counts.',
+    },
+    {
+      title: 'The queue opened far too many tabs',
+      body: 'Lower “Tabs at once” on the Queue tab. A session keeps that many postings '
+        + 'open and opens the next as you finish each one; on a phone use 1–2.',
+    },
+  ];
+  $('help-trouble').replaceChildren(...trouble.map(helpPanel));
+}
+
 /* ---------------- Settings ---------------- */
 
 async function initSettings(): Promise<void> {
@@ -190,6 +326,15 @@ async function initSettings(): Promise<void> {
   closeOnSubmit.addEventListener('change', persist);
   closeDelay.addEventListener('change', persist);
   redirectTarget.addEventListener('change', persist);
+
+  // A `?` on each control, disclosing the same words the setup panel uses. The
+  // panel goes after the control's own <label>, so it reads as an answer to it.
+  attachHelp(autoRun.parentElement!, SETTINGS_HELP.autoRunOnLoad);
+  attachHelp(closeOnSubmit.parentElement!, SETTINGS_HELP.closeTabOnSubmit);
+  // These two are column labels, so the `?` hangs off the caption while the
+  // panel still opens below the whole field.
+  attachHelp($('close-delay-label'), SETTINGS_HELP.closeTabDelayMs, closeDelay.parentElement!);
+  attachHelp($('redirect-target-label'), SETTINGS_HELP.redirectTarget, redirectTarget.parentElement!);
 
   await initModalLayout(settings.modalLayout);
 }
@@ -526,16 +671,34 @@ function validateConfigs(data: unknown): asserts data is SiteConfig[] {
   });
 }
 
-/** Names of the saved configs, so the JSON blob isn't the only way to see them. */
+/** Which config's plain-English summary is showing, by id. */
+let explainedConfig: string | undefined;
+
+/**
+ * The saved configs as selectable chips. Picking one writes out what it will
+ * actually do, in a sentence — until this existed, reading the JSON was the
+ * only way to find out, and the JSON explains nothing about itself.
+ */
 function renderConfigSummary(configs: SiteConfig[]): void {
   const box = $('configs-summary');
   box.replaceChildren(...configs.map((c) => {
-    const chip = document.createElement('span');
-    chip.className = 'chip';
+    const chip = document.createElement('button');
+    chip.type = 'button';
+    chip.className = 'chip chip-btn';
     chip.textContent = c.name || c.id;
     chip.title = c.urlPatterns.join('\n');
+    chip.setAttribute('aria-pressed', String(explainedConfig === c.id));
+    chip.addEventListener('click', () => {
+      explainedConfig = explainedConfig === c.id ? undefined : c.id;
+      renderConfigSummary(configs);
+    });
     return chip;
   }));
+
+  const explain = $('configs-explain');
+  const chosen = configs.find((c) => c.id === explainedConfig);
+  explain.hidden = !chosen;
+  if (chosen) explain.replaceChildren(...richText(describeConfig(chosen)));
 }
 
 async function initConfigs(): Promise<void> {
@@ -543,6 +706,7 @@ async function initConfigs(): Promise<void> {
   const configs = await getSiteConfigs();
   ta.value = JSON.stringify(configs, null, 2);
   renderConfigSummary(configs);
+  renderReference($('configs-reference-body'));
 
   $('save-configs').addEventListener('click', async () => {
     try {
@@ -1006,11 +1170,89 @@ async function initUrls(): Promise<void> {
   await renderQueue();
 }
 
+/* ---------------- Getting started ---------------- */
+
+/**
+ * The first-run checklist. Every step's tick is derived from storage rather
+ * than remembered, so it cannot claim something is done that is not — and the
+ * whole card disappears once the list is finished or dismissed.
+ *
+ * It lives on the Queue tab because that is where the page opens, and a new
+ * user's problem is not "which tab" but "what am I supposed to do first".
+ */
+async function renderGettingStarted(): Promise<void> {
+  const section = $('start-section');
+  const settings = await getSettings();
+  if (settings.helpSeen) { section.hidden = true; return; }
+
+  const [profile, cv, urls, configs] = await Promise.all([
+    getProfile(), getCv(), getJobUrls(), getSiteConfigs(),
+  ]);
+
+  const steps: Array<{ label: string; done: boolean; tab?: TabName }> = [
+    {
+      label: 'Add your details',
+      done: Object.values(profile.values).some((v) => v?.trim()),
+      tab: 'profile',
+    },
+    { label: 'Upload your CV', done: !!cv, tab: 'profile' },
+    { label: 'Paste some job links', done: urls.length > 0, tab: 'queue' },
+    {
+      // The seeded example config matches only the local test fixture, so it is
+      // not evidence that the user has set up a site of their own.
+      label: 'Open a posting and press “Set up this site”',
+      done: configs.some((c) => c.id !== 'example-fixture'),
+    },
+    { label: 'Start a session', done: urls.some((u) => u.status !== 'new'), tab: 'queue' },
+  ];
+
+  // Nothing left to guide: stop taking up the top of the page.
+  section.hidden = steps.every((s) => s.done);
+  if (section.hidden) return;
+
+  $('start-steps').replaceChildren(...steps.map((step) => {
+    const li = document.createElement('li');
+    li.className = `startstep${step.done ? ' done' : ''}`;
+
+    const mark = document.createElement('span');
+    mark.className = 'startstep-mark';
+    mark.textContent = step.done ? '✓' : '';
+    // The tick is a state, not decoration, and the class carrying it is invisible
+    // to a screen reader.
+    mark.setAttribute('aria-label', step.done ? 'done' : 'to do');
+
+    const label = document.createElement('span');
+    label.className = 'startstep-label';
+    label.textContent = step.label;
+
+    li.append(mark, label);
+    if (step.tab && !step.done) {
+      const go = document.createElement('button');
+      go.className = 'btn-ghost startstep-go';
+      go.textContent = 'Go →';
+      go.addEventListener('click', () => selectTab(step.tab!));
+      li.append(go);
+    }
+    return li;
+  }));
+}
+
+function initGettingStarted(): void {
+  $('start-dismiss').addEventListener('click', async () => {
+    $('start-section').hidden = true;
+    const settings = await getSettings();
+    await saveSettings({ ...settings, helpSeen: true });
+  });
+}
+
 /* ---------------- Boot ---------------- */
 
 async function main(): Promise<void> {
   initTabs();
+  initHelp();
+  initGettingStarted();
   await Promise.all([initProfile(), initCv(), initSettings(), initConfigs(), initSession(), initUrls()]);
+  await renderGettingStarted();
 
   // Deep link: `#sites&create=<url>` (and the bare `#create=<url>` the popup and
   // setup panel still send) pre-adds a config template on the Sites tab.
@@ -1023,8 +1265,12 @@ async function main(): Promise<void> {
   }
 
   // The session runs in the background; reflect its progress without a reload.
+  // The checklist ticks off the same events, so it refreshes here too.
   chrome.storage.onChanged.addListener((_changes, area) => {
-    if (area === 'local' || area === 'session') void renderQueue();
+    if (area === 'local' || area === 'session') {
+      void renderQueue();
+      void renderGettingStarted();
+    }
   });
 }
 

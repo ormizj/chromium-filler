@@ -85,7 +85,9 @@ export type Message =
   | { type: typeof MSG.PICK; field: FieldKey }
   | { type: typeof MSG.SETUP }
   | { type: typeof MSG.OPEN_URLS; urls: string[] }
-  | { type: typeof MSG.OPEN_OPTIONS; createForUrl?: string }
+  // `hash` deep-links to a tab (`profile`, `sites`, `help`, …); the options page
+  // already routes on its own hash, so this only has to survive the open.
+  | { type: typeof MSG.OPEN_OPTIONS; createForUrl?: string; hash?: string }
   | { type: typeof MSG.SUBMITTED; url: string }
   | { type: typeof MSG.FOLLOW_REDIRECT; sourceUrl: string; href?: string }
   | { type: typeof MSG.REDIRECT_LANDED; sourceUrl: string }

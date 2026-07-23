@@ -7,6 +7,8 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import type { SessionState, StatusResponse } from '../shared/messages';
 import { MSG } from '../shared/messages';
+import { saveProfile } from '../shared/storage';
+import { setCv, clearCv } from '../shared/cvStore';
 // Inject the REAL popup markup so the render logic runs against production DOM.
 import HTML from './popup.html?raw';
 
@@ -173,6 +175,37 @@ describe('queue session', () => {
     } });
     await mountPopup(matched());
     expect((document.getElementById('open-queue') as HTMLAnchorElement).hidden).toBe(false);
+  });
+});
+
+/**
+ * A brand-new install has no profile and no CV, so every page it opens reports
+ * "no site config matches this URL" — accurate, and the wrong place to look.
+ */
+describe('first-run nudge', () => {
+  const nudge = () => document.getElementById('nudge') as HTMLAnchorElement;
+
+  it('names the missing details rather than only the missing config', async () => {
+    await saveProfile({ values: {}, custom: {} });
+    await clearCv();
+    await mountPopup(matched());
+    expect(nudge().hidden).toBe(false);
+    expect(nudge().textContent).toMatch(/details/i);
+  });
+
+  it('moves on to the CV once the profile is filled in', async () => {
+    await saveProfile({ values: { email: 'ada@example.com' }, custom: {} });
+    await clearCv();
+    await mountPopup(matched());
+    expect(nudge().hidden).toBe(false);
+    expect(nudge().textContent).toMatch(/cv/i);
+  });
+
+  it('stays out of the way once both are set up', async () => {
+    await saveProfile({ values: { email: 'ada@example.com' }, custom: {} });
+    await setCv(new File(['cv'], 'cv.pdf', { type: 'application/pdf' }));
+    await mountPopup(matched());
+    expect(nudge().hidden).toBe(true);
   });
 });
 

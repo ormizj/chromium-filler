@@ -35,12 +35,14 @@ driving a real site. `?page=modal&session=1` shows the queue strip and the
 footer overflow menu.
 
 `&state=…` picks which **flow** the surface is showing — modal: `long`, `redirect`,
-`redirect-followed`, `landed`, `empty`, `failed-fill`; setup: `external`. A two-step posting
+`redirect-followed`, `landed`, `empty`, `failed-fill`; setup: `external`, `help`. A two-step posting
 renders a different modal body entirely (notice + "Fill this page instead", no
 report), so it needs its own state rather than being inferred from the default
 data. Add a state here whenever a flow gains a distinct rendering. `state=long` is
 a full-length posting — the reading typography is the Job view's whole job, and a
-three-line description proves nothing about it.
+three-line description proves nothing about it. `setup&state=help` is the
+first-run panel with the legend open, which is otherwise reachable exactly once
+per profile: dismissing it persists.
 
 `&view=job|fields` picks which of the modal's two views is open. The Job view is
 the default everywhere, so the report is otherwise only reachable by clicking,
@@ -96,6 +98,35 @@ could ever want it.
 Mobile is the priority target (Kiwi). `--tap: 44px` under `@media (pointer:
 coarse)` is the floor for every control; status is never colour alone (dots carry
 a glyph); and the modal/setup sheets become full-width bottom sheets under 640px.
+
+### In-app help
+`src/shared/help.ts` is the **only** place the extension explains itself. Every
+surface that answers "what is this?" renders from it: the setup panel's
+per-section `?` and legend, the options Settings `?` toggles, the Sites-tab key
+reference, the Help tab, and the review modal's dot key. Copy written into a
+surface instead of the catalog is a bug — the setup panel and the page
+documenting it have to say the same thing.
+
+The `Record<keyof …>` types are load-bearing. `CONFIG_HELP`, `REDIRECT_HELP`,
+`SETTINGS_HELP` and `PREP_HELP` are keyed off `SiteConfig`, `RedirectConfig`,
+`Settings` and `PrepAction`, so **adding a config key fails `npm run typecheck`
+until it has an explanation**. That is what stops this going stale the way the
+`types.ts` doc comments did: they were correct, and no user could read them.
+
+`HelpEntry.short` is the one-line form, for places that are a *key* rather than
+an explanation. The setup panel's legend uses it and the full `body` stays behind
+that section's `?`; rendering the bodies there filled a whole 390px screen with
+prose before the user could reach a single row. `DOT_LEGEND` shows the real
+`.cf-dot` beside each meaning — a colour key made of words is not a key.
+
+`describeConfig()` turns a stored `SiteConfig` into a sentence, so the Sites tab
+does not require reading JSON to find out what a site will do. Pure, unit-tested.
+
+`src/ui/help.ts` (`helpButton`/`helpPanel`/`richText`) builds the disclosure for
+both shadow roots and the light-DOM pages; `.cf-help*` lives in primitives.css.
+Disclosure, never `title=` tooltips — a hover tooltip does not exist on a phone.
+`settings.helpSeen` records that the legend was dismissed, and also retires the
+options getting-started checklist.
 
 ### Data model & storage
 `src/shared/types.ts` is the source of truth: `Profile`, `SiteConfig`,

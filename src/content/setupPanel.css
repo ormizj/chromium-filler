@@ -76,6 +76,83 @@
   }
 }
 
+/* ---------------- Intro + legend ---------------- */
+
+/* The panel used to open straight onto five jargon headings. One sentence of
+   orientation costs two lines and answers "what is this thing doing". */
+.cf-intro {
+  margin: 0 0 var(--space-3);
+  font-size: var(--text-md);
+  line-height: 1.5;
+  color: var(--muted);
+}
+
+.cf-legend {
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  margin-bottom: var(--space-5);
+  overflow: hidden;
+}
+
+.cf-legend > summary {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  padding: var(--space-2) var(--space-4);
+  min-height: var(--tap);
+  background: var(--accent-weak);
+  color: var(--accent);
+  cursor: pointer;
+  list-style: none;
+  font-size: var(--text-md);
+  font-weight: 600;
+}
+
+.cf-legend > summary::-webkit-details-marker {
+  display: none;
+}
+
+.cf-legend > summary::after {
+  content: '▾';
+  margin-left: auto;
+  transition: transform 120ms ease;
+}
+.cf-legend[open] > summary::after {
+  transform: rotate(180deg);
+}
+
+.cf-legend-body {
+  padding: var(--space-4);
+  background: var(--surface);
+}
+
+/* The colour key: the real dot beside what it means. */
+.cf-legend-dot {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  margin-bottom: var(--space-2);
+  font-size: var(--text-md);
+  line-height: 1.4;
+  color: var(--muted);
+}
+
+.cf-legend-line {
+  margin: var(--space-2) 0 0;
+  font-size: var(--text-md);
+  line-height: 1.45;
+  color: var(--muted);
+}
+
+.cf-legend-line b {
+  color: var(--fg);
+}
+
+.cf-legend-dismiss {
+  width: 100%;
+  margin-top: var(--space-4);
+}
+
 /* ---------------- Collapsible groups ---------------- */
 
 /**
@@ -130,6 +207,21 @@
   margin-left: auto;
 }
 .cf-group > summary:has(.cf-group-count)::after {
+  margin-left: var(--space-3);
+}
+
+/* The `?` sits between the count and the chevron. Whichever of the two comes
+   first takes the auto margin, so the chevron always stays on the right edge
+   and the gap never collapses onto the heading. */
+.cf-group > summary .cf-help-btn {
+  margin-left: var(--space-2);
+  text-transform: none;
+  letter-spacing: 0;
+}
+.cf-group > summary:not(:has(.cf-group-count)) .cf-help-btn {
+  margin-left: auto;
+}
+.cf-group > summary:has(.cf-help-btn)::after {
   margin-left: var(--space-3);
 }
 

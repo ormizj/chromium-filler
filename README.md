@@ -33,6 +33,14 @@ site's config for next time. It never submits for you.
 - **Auto-close after submit** (optional) — since the extension never submits,
   "sent" is detected per site via a `successSelector` (see below), which also
   marks the URL **applied**.
+- **Explains itself.** Every section of the on-page setup panel carries a `?`
+  that says what it is and whether you need it; a legend keys the dots, the
+  `auto ·` / `saved ·` prefixes and the *N to do* chips on first run; the options
+  page has a **Help** tab, a `?` on each setting, a key-by-key **config
+  reference**, and a plain-English sentence per saved site ("waits up to 15s for
+  `form`, clicks `#expand-description`, then fills…"). A getting-started
+  checklist ticks itself off as you set things up. All of it renders from one
+  catalog, `src/shared/help.ts`, so no two surfaces can disagree.
 - **Mobile friendly** and touch-first (see below).
 
 ## Develop / build
@@ -81,10 +89,12 @@ it unpacked and driving a real site, which is far too slow to iterate on. Add
 
 `&state=…` picks which *flow* the surface is in — the modal takes `redirect`,
 `redirect-followed`, `landed` and `empty` as well as the default filled report,
-and the setup panel takes `external`. A two-step posting renders a completely
-different modal body (a notice and two buttons, no report at all), so without
-these it could only be seen by driving a real board. The harness index links each
-one, and embeds the fixture scenario index alongside them.
+and the setup panel takes `external` and `help`. A two-step posting renders a
+completely different modal body (a notice and two buttons, no report at all), so
+without these it could only be seen by driving a real board; `setup&state=help`
+is the first-run panel with its legend open, which on a real profile you can
+reach exactly once. The harness index links each one, and embeds the fixture
+scenario index alongside them.
 
 > ⚠️ The harness is a *simulation*. It exercises the UI only — it does **not**
 > cover real content-script injection, cross-context messaging, or real sites.

@@ -7,6 +7,8 @@
 import { MSG, type SessionState, type StatusResponse } from '../shared/messages';
 import { BUILD_ID, BUILD_LABEL } from '../shared/buildId';
 import { hostOf } from '../shared/url';
+import { getProfile } from '../shared/storage';
+import { getCv } from '../shared/cvStore';
 
 const badge = document.getElementById('site-status')!;
 const detail = document.getElementById('detail')!;
@@ -19,6 +21,7 @@ const sessionCount = document.getElementById('session-count')!;
 const sessionDetail = document.getElementById('session-detail')!;
 const sessionBar = document.getElementById('session-bar')!;
 const sessionSkip = document.getElementById('session-skip') as HTMLButtonElement;
+const nudge = document.getElementById('nudge') as HTMLAnchorElement;
 
 let tabId: number | undefined;
 let tabUrl: string | undefined;
@@ -117,6 +120,21 @@ async function refresh(): Promise<void> {
   render();
 }
 
+/**
+ * The first thing still missing, named. A brand-new install has no profile and
+ * no CV, so every page it opens reports "no site config matches this URL" —
+ * true, and useless: the work to do is in the options page, not on this page.
+ */
+async function renderNudge(): Promise<void> {
+  const [profile, cv] = await Promise.all([getProfile(), getCv()]);
+  const missing = Object.values(profile.values).some((v) => v?.trim())
+    ? (cv ? undefined : 'Upload your CV →')
+    : 'Add your details first →';
+
+  nudge.hidden = !missing;
+  if (missing) nudge.textContent = missing;
+}
+
 primary.addEventListener('click', async () => {
   if (!status) return;
   if (!status.siteMatched) {
@@ -162,6 +180,12 @@ openOptions.addEventListener('click', (e) => {
   window.close();
 });
 
+nudge.addEventListener('click', (e) => {
+  e.preventDefault();
+  chrome.runtime.sendMessage({ type: MSG.OPEN_OPTIONS, hash: 'profile' });
+  window.close();
+});
+
 {
   const span = (cls: string, text: string): HTMLSpanElement => {
     const s = document.createElement('span');
@@ -181,6 +205,11 @@ openOptions.addEventListener('click', (e) => {
 }
 
 (async () => {
+  // Storage only, so it neither waits for the content script nor for a service
+  // worker that may be asleep — and "add your details first" is exactly what a
+  // brand-new install needs before either of those has anything to say.
+  void renderNudge();
+
   const tab = await activeTab();
   tabId = tab?.id;
   tabUrl = tab?.url;

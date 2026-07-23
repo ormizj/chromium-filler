@@ -138,7 +138,10 @@ export class FillerModal {
     // The session strip sits under the header, never above it — the header is
     // the sheet's title and drag handle and has to stay at the top edge.
     if (data.session?.active) card.append(this.sessionStrip(data.session));
-    card.append(this.view === 'fields' ? this.fieldsBody(data) : this.jobBody(data));
+    // A two-step posting has no report and gets no toggle, so the Fields view
+    // there would be an empty dead end with no way back to the job.
+    const fields = this.view === 'fields' && !data.redirect;
+    card.append(fields ? this.fieldsBody(data) : this.jobBody(data));
     card.append(this.footer(data));
 
     this.shadow.append(card);
@@ -318,6 +321,19 @@ export class FillerModal {
     const report = el('div', 'cf-report');
     for (const m of data.matches) report.append(this.row(m));
     body.append(report);
+
+    // The report is three colours and a set of buttons, and nothing on screen
+    // says what any of them mean — or that sending is still the user's job.
+    const legend = el('p', 'cf-legend-line');
+    for (const [cls, text] of [['ok', 'filled'], ['low', 'check it'], ['none', 'not found']] as const) {
+      const dot = el('span', `cf-dot ${cls}`);
+      const label = el('span');
+      label.textContent = text;
+      legend.append(dot, label);
+    }
+    const sent = el('small', 'cf-legend-send');
+    sent.textContent = 'Nothing is sent — press the site’s own button when you are ready.';
+    body.append(legend, sent);
 
     return body;
   }

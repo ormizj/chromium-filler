@@ -406,6 +406,124 @@ button.cf-btn:disabled {
   color: var(--accent);
 }
 
+/* ---------------- Inline help ---------------- */
+
+/**
+ * A `?` button and the panel it discloses. Disclosure rather than `title=`,
+ * because mobile is the priority target and a hover tooltip does not exist on a
+ * phone — every explanation has to be reachable by tapping something.
+ *
+ * Both the shadow surfaces and the light-DOM pages render these, which is why
+ * they live here; see src/ui/help.ts for the builders.
+ */
+.cf-help-btn {
+  flex: none;
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-pill);
+  background: var(--surface);
+  color: var(--muted);
+  font: 600 var(--text-md) / 1 var(--font);
+  cursor: pointer;
+}
+
+.cf-help-btn:hover {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+/* Pressed = its panel is open, so the button reads as a state, not just an action. */
+.cf-help-btn[aria-expanded='true'] {
+  background: var(--accent-weak);
+  border-color: transparent;
+  color: var(--accent);
+}
+
+@media (pointer: coarse) {
+  .cf-help-btn {
+    width: var(--tap);
+    height: var(--tap);
+  }
+}
+
+.cf-help {
+  border: 1px solid var(--border);
+  border-left: 3px solid var(--accent);
+  border-radius: var(--radius-md);
+  background: var(--surface);
+  padding: var(--space-4);
+  margin: 0 0 var(--space-3);
+  font-size: var(--text-md);
+  line-height: 1.5;
+  color: var(--fg);
+}
+
+.cf-help-title {
+  display: block;
+  font-weight: 700;
+  margin-bottom: var(--space-2);
+}
+
+.cf-help-body {
+  margin: 0;
+  color: var(--muted);
+}
+
+/* The per-row lines: a definition list, laid out as "label — meaning". */
+.cf-help-rows {
+  margin: var(--space-3) 0 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.cf-help-rows > li {
+  color: var(--muted);
+}
+
+.cf-help-rows b {
+  color: var(--fg);
+  font-weight: 600;
+}
+
+.cf-help-when {
+  margin: var(--space-3) 0 0;
+  color: var(--fg);
+  font-size: var(--text-md);
+}
+
+.cf-help-when::before {
+  content: 'When: ';
+  font-weight: 700;
+  color: var(--muted);
+}
+
+.cf-help-example {
+  display: block;
+  margin: var(--space-3) 0 0;
+  padding: var(--space-2) var(--space-3);
+  border-radius: var(--radius-sm);
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  font: var(--text-xs) / 1.5 var(--mono);
+  color: var(--fg);
+  overflow-x: auto;
+  white-space: pre;
+}
+
+/* Inline `code spans` inside help copy — the catalog writes selectors in backticks. */
+.cf-help code {
+  font: 0.95em var(--mono);
+  color: var(--fg);
+  background: var(--surface-2);
+  border-radius: var(--radius-sm);
+  padding: 1px 4px;
+}
+
 /* ---------------- Motion ---------------- */
 
 @media (prefers-reduced-motion: reduce) {

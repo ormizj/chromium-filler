@@ -244,6 +244,35 @@ describe('FillerModal — the posting comes first', () => {
   });
 });
 
+/**
+ * Three colours and a row of buttons explain nothing on their own, and the one
+ * fact a user most needs — that this never presses Send — appeared nowhere they
+ * would actually read it.
+ */
+describe('FillerModal — the report says what it means', () => {
+  it('keys the three dot colours under the rows', () => {
+    const legend = render(data([match()])).querySelector('.cf-legend-line')!;
+    expect(legend.textContent).toContain('filled');
+    expect(legend.textContent).toContain('check it');
+    expect(legend.textContent).toContain('not found');
+    // A colour alone is not a key; each word gets the dot it describes.
+    expect(legend.querySelectorAll('.cf-dot').length).toBe(3);
+  });
+
+  it('says that submitting is still the user’s job', () => {
+    const body = render(data([match()])).querySelector('.cf-legend-send')!;
+    expect(body.textContent).toMatch(/nothing is sent/i);
+  });
+
+  // The two-step body has no report at all, so a report key there would be a lie.
+  it('leaves the key off a posting that hands off elsewhere', () => {
+    const shadow = render(data([], {
+      redirect: { host: 'jobs.acme.com', reason: 'apply link is cross-origin', followed: false },
+    }));
+    expect(shadow.querySelector('.cf-legend-line')).toBeNull();
+  });
+});
+
 describe('FillerModal — the Fields tab advertises what it is hiding', () => {
   const withMatches = (matches: FieldMatch[]) => {
     modal = new FillerModal(callbacks());

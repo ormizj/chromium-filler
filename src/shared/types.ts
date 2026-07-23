@@ -193,6 +193,13 @@ export interface Settings {
    * See `shared/modalLayout.ts` — every read is clamped to the viewport.
    */
   modalLayout: ModalLayout;
+  /**
+   * Whether the user has dismissed the setup panel's legend. The basics (what
+   * the dots mean, auto vs. saved, what Pick does) are explained on top of the
+   * panel until then, and one tap away afterwards — re-explaining them on every
+   * posting would be the same wall of text sixty times in a session.
+   */
+  helpSeen: boolean;
 }
 
 /** Everything persisted in chrome.storage.local (the CV bytes are stored separately, also in chrome.storage.local). */
