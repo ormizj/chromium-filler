@@ -41,6 +41,14 @@
       .panel.phone iframe { width: 390px; height: 82vh; border: 0; display: block; }
       .panel.options { flex: 1 1 560px; min-width: 420px; }
       .panel.options iframe { width: 100%; height: 82vh; border: 0; display: block; }
+      .panel.fixtures { flex: 1 1 100%; }
+      .panel.fixtures .note { margin: 0; padding: 10px 12px; color: #6b7280; border-bottom: 1px solid #e5e7eb; }
+      .panel.fixtures .note code { background: #f3f4f6; padding: 1px 4px; border-radius: 4px; }
+      .panel.fixtures iframe { width: 100%; height: 60vh; border: 0; display: block; }
+      /* Every flow the surface can be in, one link each. */
+      .states { display: flex; flex-wrap: wrap; gap: 6px; padding: 8px 12px; border-bottom: 1px solid #e5e7eb; }
+      .states a { font-size: 12px; padding: 3px 8px; border: 1px solid #e5e7eb; border-radius: 999px; color: #4f46e5; text-decoration: none; }
+      .states a:hover { background: #eef2ff; }
     </style>
   </head>
   <body>
@@ -60,15 +68,40 @@
       </div>
       <div class="panel phone">
         <h2>Review modal · phone <small>(<a href="./frame.html?page=modal">no session</a> · <a href="./frame.html?page=modal&amp;session=1">session</a>)</small></h2>
+        <!-- One link per flow: a two-step posting renders a different body
+             entirely (notice + Fill this page instead), and it is otherwise only
+             reachable by driving a real board with the extension installed. -->
+        <div class="states">
+          <a href="./frame.html?page=modal&amp;session=1">filled</a>
+          <a href="./frame.html?page=modal&amp;state=redirect">hands off</a>
+          <a href="./frame.html?page=modal&amp;state=redirect-followed">handing off</a>
+          <a href="./frame.html?page=modal&amp;state=landed">landed (via)</a>
+          <a href="./frame.html?page=modal&amp;state=empty">nothing found</a>
+        </div>
         <iframe src="./frame.html?page=modal&amp;session=1" title="Review modal harness, phone width"></iframe>
       </div>
       <div class="panel phone">
         <h2>Setup panel · phone <small>(<a href="./frame.html?page=setup">open alone</a>)</small></h2>
+        <div class="states">
+          <a href="./frame.html?page=setup">quick apply</a>
+          <a href="./frame.html?page=setup&amp;state=external">external posting</a>
+        </div>
         <iframe src="./frame.html?page=setup" title="Setup panel harness, phone width"></iframe>
       </div>
       <div class="panel options">
         <h2>Options · desktop</h2>
         <iframe src="./frame.html?page=options" title="Options harness"></iframe>
+      </div>
+      <!-- The other half of the dev environment: real pages, real content script,
+           real messaging. The surfaces above are a simulation; these are not. -->
+      <div class="panel fixtures">
+        <h2>Fixture scenarios <small>(<a href="http://localhost:5199/" target="_blank">open at :5199</a>)</small></h2>
+        <p class="note">
+          Every application flow as a real page, each with its own URL. Needs
+          <code>npm run dev:all</code> (this panel stays blank under a plain
+          <code>npm run dev</code>) and the extension loaded unpacked from <code>dist/</code>.
+        </p>
+        <iframe src="http://localhost:5199/" title="Fixture scenario index"></iframe>
       </div>
     </div>
   </body>

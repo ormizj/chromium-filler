@@ -1,0 +1,71 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>HiddenSuccess — Backend Engineer</title>
+    <style>
+      body { font: 15px/1.6 system-ui, sans-serif; max-width: 640px; margin: 40px auto; padding: 0 16px; }
+      label { display: block; margin: 12px 0 4px; font-weight: 600; }
+      input, textarea { width: 100%; padding: 8px; box-sizing: border-box; font: inherit; }
+      /* Pre-rendered, and hidden until the server actually confirms. */
+      #late-success { display: none; color: #15803d; font-weight: 700; margin-top: 16px; }
+      #pending { color: #b45309; margin-top: 16px; }
+      button { margin-top: 16px; padding: 10px 18px; }
+    </style>
+  </head>
+  <body>
+    <!--
+      HARD CASE #8 — The confirmation element exists before it is true.
+
+      `#late-success` is in the markup from the start, hidden. Pressing Send only
+      shows "Submitting…", exactly like an AJAX flow whose request is still in
+      flight and may yet fail. The application is NOT sent, so the extension must
+      not mark it applied or close the tab — presence of the success node is not
+      the signal, VISIBILITY is.
+
+      "Simulate server confirm" flips it to display:block. That attribute change
+      is what the MutationObserver in main.ts watches for, and only then does the
+      posting count as applied.
+    -->
+    <h1 id="job-title">Backend Engineer, Payments</h1>
+    <div id="job-description">
+      HiddenSuccess confirms applications asynchronously. The success banner ships
+      with the page and is revealed only once the server answers.
+    </div>
+
+    <form id="application-form">
+      <label for="first_name">First name</label>
+      <input id="first_name" name="first_name" />
+
+      <label for="last_name">Last name</label>
+      <input id="last_name" name="last_name" />
+
+      <label for="email">Email</label>
+      <input id="email" name="email" type="email" />
+
+      <label for="resume-file">Résumé (PDF)</label>
+      <input id="resume-file" name="resume" type="file" />
+
+      <button id="submit" type="submit">Send application</button>
+    </form>
+
+    <div id="pending" hidden>Submitting… (the server has not confirmed yet)</div>
+    <div id="late-success">✓ Application received.</div>
+    <button id="confirm-server">Simulate server confirm</button>
+
+    <script>
+      document.getElementById('application-form').addEventListener('submit', (e) => {
+        e.preventDefault();
+        // Deliberately does NOT reveal the success banner: the request is in
+        // flight and might still fail.
+        document.getElementById('pending').hidden = false;
+      });
+
+      document.getElementById('confirm-server').addEventListener('click', () => {
+        document.getElementById('pending').hidden = true;
+        document.getElementById('late-success').style.display = 'block';
+      });
+    </script>
+  </body>
+</html>

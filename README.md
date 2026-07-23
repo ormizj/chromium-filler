@@ -79,6 +79,13 @@ without them those surfaces are only reachable by building the extension, loadin
 it unpacked and driving a real site, which is far too slow to iterate on. Add
 `&session=1` to the modal to see the queue strip and the footer overflow menu.
 
+`&state=…` picks which *flow* the surface is in — the modal takes `redirect`,
+`redirect-followed`, `landed` and `empty` as well as the default filled report,
+and the setup panel takes `external`. A two-step posting renders a completely
+different modal body (a notice and two buttons, no report at all), so without
+these it could only be seen by driving a real board. The harness index links each
+one, and embeds the fixture scenario index alongside them.
+
 > ⚠️ The harness is a *simulation*. It exercises the UI only — it does **not**
 > cover real content-script injection, cross-context messaging, or real sites.
 > Use load-unpacked (below) + the E2E suite for those.
@@ -133,11 +140,24 @@ to a DOM assertion. It loads on Claude Code restart.
    highlighted. The deliberately mis-named "Where are you based?" field will be
    **unmatched (red)** — click **Pick**, then click that field, and it's saved.
 
-### The three hard test sites
+### The hard test sites
 
 `test/fixtures/sites/` contains deliberately awful pages that mirror real-world
 pain, with ready configs in `test/fixtures/test-site-configs.json` (paste them
-into the options "Site configurations" box, or they're auto-seeded by the E2E):
+into the options "Site configurations" box, or they're auto-seeded by the E2E).
+
+```bash
+npm run dev:all        # then open http://localhost:5199/
+```
+
+**`http://localhost:5199/` lists every scenario**, grouped by flow, each with its
+own URL and the outcome you should see. It is generated from
+`test/fixtures/scenarios.mjs` — the same catalog the E2E suite drives — so the
+page and the tests cannot disagree. The server runs on **two ports**, because
+`localhost:5199`, `127.0.0.1:5199` and `127.0.0.1:5200` are three different hosts
+to the extension: that is what makes the cross-origin handoff real.
+
+Filling in place:
 
 - **slow-boards.html** — the form is injected ~2s after load (tests `waitFor`).
 - **modal-lever.html** — the form is behind an "Apply" modal, and the CV input is
@@ -145,9 +165,29 @@ into the options "Site configurations" box, or they're auto-seeded by the E2E):
   accessible names (tests prep steps + accessible-name matching + CV override).
 - **chaos-form.html** — hashed ids, a multi-step form revealed by "Next" (prep),
   and a disguised `city` field that stays **unmatched** so you can Pick it.
-- **redirect-board.html** — one board serving both kinds of posting:
-  `?job=quick` fills in place, `?job=external` hands off to `ats-form.html` on
-  another host (tests the two-step flow below).
+- **quick-board.html** — never hands off, and is adversarial about it: `?job=plain`
+  dangles an "Apply on company website" link in the sidebar that the heuristic
+  would follow, and the config's quick-apply marker has to beat it.
+
+Handing off (the two-step flow below):
+
+- **redirect-board.html** — one board, four postings, all classified by the
+  heuristic: `?job=quick` fills in place, `?job=external` hands off on its label,
+  `?job=blank` on target=_blank + cross-origin alone, and `?job=tracked` through a
+  302 → interstitial chain (the final URL is the one recorded).
+- **external-board.html** — every posting hands off, by *configured* selector:
+  `?job=link` (apply link), `?job=js` (a button with no href — the page opens its
+  own tab), `?job=marker` (only a badge says it is external), `?job=nav`.
+- **listing-board.html** — a search-results page with three different apply links.
+  Ambiguous on purpose: it must follow **nothing**.
+
+Destinations and edge cases:
+
+- **ats-form.html / ats-nav.html** — employer forms with no config until a handoff
+  creates one. The second submits by full-page navigation, so the `submit` event
+  is the only "sent" signal there is.
+- **hidden-success.html** — the confirmation banner ships with the page, hidden.
+  Pressing Send must **not** count as applied; only revealing it does.
 
 ## Working through a batch (queue sessions)
 

@@ -15,11 +15,21 @@
   </head>
   <body>
     <!--
-      HARD CASE #4 — Mixed board: the same site serves both kinds of posting.
-      `?job=external` hands off to an employer ATS on ANOTHER host (127.0.0.1 vs
-      localhost — genuinely cross-origin against the same fixture server), behind
-      a "Save job" button the board uses for its own application tracking.
-      `?job=quick` applies in place and must keep filling normally.
+      HARD CASE #4 — Mixed board: the same site serves both kinds of posting, so
+      the branch is per posting, not per site. Everything here is classified by
+      the HEURISTIC — the config carries no `applySelector` (see external-board
+      for the configured shapes).
+
+        ?job=quick    applies in place and must keep filling normally.
+        ?job=external hands off to an employer ATS on ANOTHER host (127.0.0.1 vs
+                      localhost — genuinely cross-origin against the same fixture
+                      server), behind a "Save job" button the board uses for its
+                      own application tracking.
+        ?job=blank    a bare "Apply now" with target=_blank. No label pattern
+                      matches it; only the new-tab + cross-origin rule does.
+        ?job=tracked  the same handoff through a tracker chain (302 → interstitial
+                      → ATS), so the URL finally recorded is the last one, not the
+                      first hop.
     -->
     <h1 id="job-title">Senior Widget Engineer</h1>
     <div id="job-description">
@@ -30,6 +40,14 @@
     <div id="posting"></div>
 
     <script>
+      const EMPLOYER = 'http://127.0.0.1:5199';
+      const TRACKER = 'http://127.0.0.1:5200';
+      // 302 → interstitial → the real form. Built the same way as scenarios.mjs
+      // builds it, so the catalog URL and this link stay the same chain.
+      const HOP = `${TRACKER}/sites/redirect-hop.html?ms=700&to=`
+        + encodeURIComponent(`${EMPLOYER}/sites/ats-form.html?via=chain`);
+      const TRACKED = `${TRACKER}/r/302?to=${encodeURIComponent(HOP)}`;
+
       const kind = new URLSearchParams(location.search).get('job') ?? 'external';
 
       if (kind === 'quick') {
@@ -57,10 +75,19 @@
           document.getElementById('board-success').style.display = 'block';
         });
       } else {
+        // Only the href differs between these: the point is which heuristic rule
+        // fires. "Apply on company website" matches on its label; "Apply now"
+        // matches only because it is cross-origin AND opens a new tab.
+        const applyLink = kind === 'blank'
+          ? `<a id="apply-external" class="apply" target="_blank"
+                href="${EMPLOYER}/sites/ats-form.html?src=blank">Apply now</a>`
+          : `<a id="apply-external" class="apply"
+                href="${kind === 'tracked' ? TRACKED : `${EMPLOYER}/sites/ats-form.html`}"
+                >Apply on company website</a>`;
+
         document.getElementById('posting').innerHTML = `
           <button id="save-job" data-saved="0">Save job</button>
-          <a id="apply-external" class="apply"
-             href="http://127.0.0.1:5199/sites/ats-form.html">Apply on company website</a>
+          ${applyLink}
         `;
         document.getElementById('save-job').addEventListener('click', (e) => {
           const btn = e.currentTarget;

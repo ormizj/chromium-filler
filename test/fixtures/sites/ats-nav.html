@@ -1,0 +1,52 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>NavATS — Principal Reliability Engineer</title>
+    <style>
+      body { font: 15px/1.6 system-ui, sans-serif; max-width: 640px; margin: 40px auto; padding: 0 16px; }
+      label { display: block; margin: 12px 0 4px; font-weight: 600; }
+      input, textarea { width: 100%; padding: 8px; box-sizing: border-box; font: inherit; }
+      button { margin-top: 16px; padding: 10px 18px; }
+    </style>
+  </head>
+  <body>
+    <!--
+      A handoff destination that submits the old-fashioned way: a real form
+      navigation to thanks.html, with NO in-page confirmation to watch for.
+
+      It has no site config until a tracked handoff creates one, and the created
+      template has no `successSelector` — so this is the page that exercises the
+      `submit`-event fallback. The tab leaves before any banner could render, so
+      the submit event is genuinely all there is.
+
+      Served from the third origin (127.0.0.1:5200) on purpose: the employer-host
+      config an earlier handoff creates matches `*://127.0.0.1:5199/*` and would
+      otherwise cover this page too.
+    -->
+    <h1 id="ats-title">Principal Reliability Engineer — Initech</h1>
+
+    <form id="nav-form" action="thanks.html" method="get">
+      <label for="nav-first">First name</label>
+      <input id="nav-first" name="first_name" />
+
+      <label for="nav-last">Last name</label>
+      <input id="nav-last" name="last_name" />
+
+      <label for="nav-email">Email address</label>
+      <input id="nav-email" name="email" type="email" />
+
+      <label for="nav-phone">Phone</label>
+      <input id="nav-phone" name="phone" />
+
+      <label for="nav-cover">Cover letter</label>
+      <textarea id="nav-cover" name="cover_letter" rows="3"></textarea>
+
+      <label for="nav-resume">Résumé (PDF)</label>
+      <input id="nav-resume" name="resume" type="file" />
+
+      <button id="nav-submit" type="submit">Submit application</button>
+    </form>
+  </body>
+</html>

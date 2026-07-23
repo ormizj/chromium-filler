@@ -1,0 +1,40 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>ListingBoard — search results</title>
+    <style>
+      body { font: 15px/1.6 system-ui, sans-serif; max-width: 640px; margin: 40px auto; padding: 0 16px; }
+      .card { border: 1px solid #e5e7eb; border-radius: 8px; padding: 12px 16px; margin: 12px 0; }
+      .card h2 { font-size: 16px; margin: 0 0 4px; }
+      .card a { color: #4f46e5; }
+    </style>
+  </head>
+  <body>
+    <!--
+      HARD CASE #7 — A search-results page, not a posting. Three cards, three
+      DIFFERENT external apply links, every one of them a perfect heuristic match.
+
+      Following any of them would be a guess about which job the user meant, so
+      `detectRedirect` must return `unknown` ("ambiguous — 3 external apply
+      links") and let the ordinary fill path run. There is no form here, so the
+      report is legitimately all-red — that is the correct, harmless outcome.
+    -->
+    <h1 id="page-title">Platform engineering jobs</h1>
+    <p id="page-blurb">3 results. Each employer takes applications on its own site.</p>
+
+    <div class="card">
+      <h2>Site Reliability Engineer — Acme</h2>
+      <a id="apply-1" href="http://127.0.0.1:5199/sites/ats-form.html?job=1">Apply on company website</a>
+    </div>
+    <div class="card">
+      <h2>Platform Engineer — Globex</h2>
+      <a id="apply-2" href="http://127.0.0.1:5199/sites/ats-form.html?job=2">Apply on company website</a>
+    </div>
+    <div class="card">
+      <h2>Infrastructure Engineer — Initech</h2>
+      <a id="apply-3" href="http://127.0.0.1:5199/sites/ats-form.html?job=3">Apply on company website</a>
+    </div>
+  </body>
+</html>

@@ -1,0 +1,81 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>ExternalBoard — job posting</title>
+    <style>
+      body { font: 15px/1.6 system-ui, sans-serif; max-width: 640px; margin: 40px auto; padding: 0 16px; }
+      .apply { display: inline-block; margin-top: 16px; padding: 10px 18px; background: #6366f1; color: #fff; border-radius: 8px; text-decoration: none; border: 0; font: inherit; cursor: pointer; }
+      #external-badge { display: inline-block; padding: 2px 8px; border-radius: 999px; background: #fef3c7; color: #92400e; font-size: 12px; font-weight: 700; }
+      button#save-job { margin-top: 16px; padding: 10px 18px; }
+    </style>
+  </head>
+  <body>
+    <!--
+      HARD CASE #5 — A board where EVERY posting hands off, classified by the
+      config's `redirect.*` selectors rather than by the heuristic. Each posting
+      is a different *shape* of handoff:
+
+        ?job=link   plain external link, deliberately labelled "Apply for this
+                    role" so ONLY `applySelector` can classify it.
+        ?job=js     a button with no href: the background answers `{click:true}`,
+                    the page opens its own tab, and the watch has to be inherited
+                    through `openerTabId`.
+        ?job=marker an "External posting" badge next to a link that just reads
+                    "Continue" — `markerSelector` is the only signal.
+        ?job=nav    hands off to the ATS that submits by full-page navigation,
+                    on a THIRD origin with no config of its own.
+
+      "Save job" is the board's own bookkeeping and runs as `redirect.beforeFollow`.
+    -->
+    <h1 id="job-title">Principal Reliability Engineer</h1>
+    <div id="job-description">
+      ExternalBoard never hosts an application form. Every posting is completed on
+      the employer's own site, so the extension should hand off rather than fill.
+    </div>
+
+    <div id="posting"></div>
+
+    <script>
+      const EMPLOYER = 'http://127.0.0.1:5199';
+      const TRACKER = 'http://127.0.0.1:5200';
+      const kind = new URLSearchParams(location.search).get('job') ?? 'link';
+
+      const POSTINGS = {
+        link: `
+          <button id="save-job" data-saved="0">Save job</button>
+          <a id="apply-external" class="apply"
+             href="${EMPLOYER}/sites/ats-form.html?src=link">Apply for this role</a>`,
+        // No href anywhere: following means clicking, and the tab the PAGE opens
+        // is the one that has to be tracked.
+        js: `
+          <button id="save-job" data-saved="0">Save job</button>
+          <button id="apply-js" class="apply">Apply for this role</button>`,
+        marker: `
+          <p><span id="external-badge">External posting</span></p>
+          <button id="save-job" data-saved="0">Save job</button>
+          <a id="continue-link" class="apply"
+             href="${EMPLOYER}/sites/ats-form.html?src=marker">Continue</a>`,
+        nav: `
+          <button id="save-job" data-saved="0">Save job</button>
+          <a id="apply-external" class="apply"
+             href="${TRACKER}/sites/ats-nav.html">Apply for this role</a>`,
+      };
+
+      document.getElementById('posting').innerHTML = POSTINGS[kind] ?? POSTINGS.link;
+
+      document.getElementById('save-job')?.addEventListener('click', (e) => {
+        const btn = e.currentTarget;
+        btn.dataset.saved = '1';
+        btn.textContent = 'Saved ✓';
+      });
+
+      // The JS apply button navigates the way a real board does — its own tab,
+      // opened by the page, with this page as the opener.
+      document.getElementById('apply-js')?.addEventListener('click', () => {
+        window.open(`${EMPLOYER}/sites/ats-form.html?src=js`, '_blank');
+      });
+    </script>
+  </body>
+</html>

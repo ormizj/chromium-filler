@@ -1,0 +1,32 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Thanks — Initech</title>
+    <style>
+      body { font: 15px/1.6 system-ui, sans-serif; max-width: 640px; margin: 40px auto; padding: 0 16px; }
+      #thanks { color: #15803d; font-weight: 700; }
+      input, button { padding: 8px; font: inherit; }
+    </style>
+  </head>
+  <body>
+    <!--
+      Where ats-nav.html lands after submitting. The extension has already
+      reported SUBMITTED from the submit event on the previous page — nothing
+      here needs to signal anything.
+
+      The search box is not decoration: the config auto-created for this origin
+      carries the template's `waitFor: 'form'`, and without a form on the page
+      every visit would sit through the full 15s wait timeout.
+    -->
+    <h1 id="thanks">✓ Thanks — your application is in.</h1>
+    <p>Initech will be in touch about the Principal Reliability Engineer role.</p>
+
+    <form id="search-form" action="thanks.html" method="get">
+      <label for="q">Search more jobs</label>
+      <input id="q" name="q" />
+      <button type="submit">Search</button>
+    </form>
+  </body>
+</html>

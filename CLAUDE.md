@@ -34,6 +34,12 @@ because otherwise they are only reachable by loading the built extension and
 driving a real site. `?page=modal&session=1` shows the queue strip and the
 footer overflow menu.
 
+`&state=…` picks which **flow** the surface is showing — modal: `redirect`,
+`redirect-followed`, `landed`, `empty`; setup: `external`. A two-step posting
+renders a different modal body entirely (notice + "Fill this page instead", no
+report), so it needs its own state rather than being inferred from the default
+data. Add a state here whenever a flow gains a distinct rendering.
+
 E2E loads the built extension into real Chromium (`npx playwright install chromium`
 once). Always `npm run build` before `npm run test:e2e` — the suite loads `dist/`.
 
@@ -162,6 +168,25 @@ Vitest runs under jsdom with a small `chrome.*` mock in `test/setup.ts`.
 `*.test.ts` files sit next to the code they cover in `src/shared` and
 `src/content`. The hard fixture sites (`test/fixtures/sites/`, configs in
 `test-site-configs.json`) mirror real-world pain and are the E2E confidence
-signal — keep them green. The redirect fixtures rely on `localhost` vs
-`127.0.0.1` being different hosts on the same fixture server, which is what makes
-the cross-origin handoff real in E2E.
+signal — keep them green.
+
+**`test/fixtures/scenarios.mjs` is the scenario catalog** and the single source
+of URLs: the fixture server prints it, generates its index page at
+`http://localhost:5199/` from it, and `e2e/extension.spec.ts` calls `urlFor(id)`
+rather than building URLs by hand. A posting, not a page, is the unit — one board
+HTML serves several `?job=…` postings because that is the shape the classifier
+exists for. Adding a flow means adding a scenario here, a posting in the fixture,
+and an E2E spec; a scenario nobody can find the URL of is a scenario nobody runs.
+
+The server listens on **two ports** so there are three origins — `localhost:5199`
+(board), `127.0.0.1:5199` (employer ATS), `127.0.0.1:5200` (tracker / third-party
+ATS). `isExternalUrl` compares `URL.host`, which includes the port, so these are
+genuinely different sites to the extension: that is what makes the cross-origin
+handoff, and the tracker chain (`/r/302` → `redirect-hop.html` → ATS), real in
+E2E. `/queue-seed.txt` serves the same URL list the session E2E uses.
+
+Two fixture rules that are easy to break: site-config `urlPatterns` are
+whole-URL globs, so **every pattern needs a trailing `*`** to survive a `?job=…`
+query string; and a destination fixture that must have *no* config of its own
+(so `ensureConfigForUrl` creates one) has to live on an origin no other config
+covers — the auto-created `*://127.0.0.1:5199/*` would otherwise adopt it.

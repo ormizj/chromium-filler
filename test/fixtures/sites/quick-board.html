@@ -1,0 +1,79 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>QuickBoard — apply here</title>
+    <style>
+      body { font: 15px/1.6 system-ui, sans-serif; max-width: 640px; margin: 40px auto; padding: 0 16px; }
+      label { display: block; margin: 12px 0 4px; font-weight: 600; }
+      input, textarea { width: 100%; padding: 8px; box-sizing: border-box; font: inherit; }
+      aside { margin-top: 32px; padding: 12px; border: 1px solid #e5e7eb; border-radius: 8px; color: #6b7280; }
+      #quick-success { display: none; color: #15803d; font-weight: 700; margin-top: 16px; }
+      button { margin-top: 16px; padding: 10px 18px; }
+    </style>
+  </head>
+  <body>
+    <!--
+      HARD CASE #6 — The site that never hands off, and is *adversarial* about it.
+
+        ?job=plain  the posting also links "Apply on company website" from a
+                    "similar jobs" sidebar — a label + cross-origin href the
+                    heuristic would otherwise follow, navigating away from a form
+                    it could have filled. `redirect.quickApplySelector` is checked
+                    first and must win.
+        ?job=nolink the same form with nothing external on the page: the plain
+                    `unknown` verdict that falls through to the fill path.
+
+      `&n=…` is ignored — it just makes each queue-seed posting a distinct URL.
+    -->
+    <h1 id="job-title">Frontend Engineer, Design Systems</h1>
+    <div id="job-description">
+      QuickBoard hosts the application itself. Nothing on this page should ever
+      cause a handoff, however tempting the sidebar looks.
+    </div>
+
+    <form id="application-form">
+      <label for="first_name">First name</label>
+      <input id="first_name" name="first_name" />
+
+      <label for="last_name">Last name</label>
+      <input id="last_name" name="last_name" />
+
+      <label for="email">Email</label>
+      <input id="email" name="email" type="email" />
+
+      <label for="phone">Phone</label>
+      <input id="phone" name="phone" placeholder="+1 555 …" />
+
+      <label for="cover">Cover letter</label>
+      <textarea id="cover" name="cover_letter" rows="3"></textarea>
+
+      <label for="resume-file">Résumé (PDF)</label>
+      <input id="resume-file" name="resume" type="file" />
+
+      <button id="submit" type="submit">Send application</button>
+    </form>
+    <div id="quick-success">✓ Application submitted to QuickBoard.</div>
+
+    <div id="sidebar"></div>
+
+    <script>
+      const EMPLOYER = 'http://127.0.0.1:5199';
+      const kind = new URLSearchParams(location.search).get('job') ?? 'plain';
+
+      if (kind !== 'nolink') {
+        document.getElementById('sidebar').innerHTML = `
+          <aside>
+            <h2>Similar jobs</h2>
+            <a id="decoy-apply" href="${EMPLOYER}/sites/ats-form.html?src=decoy">Apply on company website</a>
+          </aside>`;
+      }
+
+      document.getElementById('application-form').addEventListener('submit', (e) => {
+        e.preventDefault();
+        document.getElementById('quick-success').style.display = 'block';
+      });
+    </script>
+  </body>
+</html>

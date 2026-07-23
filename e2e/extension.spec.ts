@@ -1,13 +1,19 @@
 /**
  * End-to-end: load the real built extension into Chromium and run it against the
- * three hard fixture sites. If these pass, the fill/prep/wait/CV/close pipeline
- * works against genuinely nasty markup — the confidence signal for real sites.
+ * fixture scenarios. If these pass, the fill/prep/wait/CV/close pipeline and the
+ * two-step handoff work against genuinely nasty markup — the confidence signal
+ * for real sites.
+ *
+ * URLs come from `test/fixtures/scenarios.mjs` (via `urlFor`), the same catalog
+ * the fixture server prints and indexes, so a scenario cannot exist in one place
+ * and not the other.
  *
  * Prereq: `npm run build` (loads dist/). Extensions require a persistent context.
  */
 import { test, expect, chromium, type BrowserContext, type Page } from '@playwright/test';
 import type { JobUrlEntry } from '../src/shared/types';
 import { MSG } from '../src/shared/messages';
+import { ATS_URL, HOSTS, queueSeedUrls, urlFor } from '../test/fixtures/scenarios.mjs';
 import path from 'node:path';
 import fs from 'node:fs';
 import { fileURLToPath } from 'node:url';
@@ -15,9 +21,10 @@ import { fileURLToPath } from 'node:url';
 const DIR = path.dirname(fileURLToPath(import.meta.url));
 const DIST = path.resolve(DIR, '../dist');
 const CONFIGS = path.resolve(DIR, '../test/fixtures/test-site-configs.json');
-const BASE = 'http://localhost:5199';
 /** Same fixture server, different host — a genuinely cross-origin ATS destination. */
-const ALT = 'http://127.0.0.1:5199';
+const ALT = HOSTS.employer;
+/** A third origin (second port), so a redirect chain crosses more than one host. */
+const TRACKER = HOSTS.tracker;
 const HEADED = process.env.PW_HEADED === '1';
 
 const PROFILE = {
@@ -129,7 +136,7 @@ async function waitForJobUrl(
 
 test('SlowBoards: fills the late-injected form + attaches CV', async () => {
   const page = await context.newPage();
-  await page.goto(`${BASE}/sites/slow-boards.html`);
+  await page.goto(urlFor('slow-boards'));
 
   await expect(page.locator('#first_name')).toHaveValue('Ada');
   await expect(page.locator('#last_name')).toHaveValue('Lovelace');
@@ -145,7 +152,7 @@ test('SlowBoards: fills the late-injected form + attaches CV', async () => {
 
 test('ModalLever: opens modal (prep), fills accessible-name fields, attaches injected CV', async () => {
   const page = await context.newPage();
-  await page.goto(`${BASE}/sites/modal-lever.html`);
+  await page.goto(urlFor('modal-lever'));
 
   await expect(page.getByLabel('Full name')).toHaveValue('Ada Lovelace');
   await expect(page.getByLabel('Email address')).toHaveValue('ada@example.com');
@@ -156,7 +163,7 @@ test('ModalLever: opens modal (prep), fills accessible-name fields, attaches inj
 
 test('ChaosForm: hashed ids + multi-step; disguised city stays unmatched', async () => {
   const page = await context.newPage();
-  await page.goto(`${BASE}/sites/chaos-form.html`);
+  await page.goto(urlFor('chaos-form'));
 
   await expect(page.getByLabel('Given name')).toHaveValue('Ada');
   await expect(page.getByLabel('Family name')).toHaveValue('Lovelace');
@@ -192,7 +199,7 @@ test('Popup: opens at a usable width (no vw sliver) and renders cleanly', async 
 
 test('Auto-close: tab closes once the success selector appears', async () => {
   const page = await context.newPage();
-  await page.goto(`${BASE}/sites/slow-boards.html`);
+  await page.goto(urlFor('slow-boards'));
   await expect(page.locator('#first_name')).toHaveValue('Ada');
 
   const closed = page.waitForEvent('close', { timeout: 10_000 });
@@ -208,8 +215,8 @@ test('MixedBoard: external posting saves on the board, hands off, and links both
   // the ATS tab survive its own submit.
   await patchSettings({ redirectTarget: 'newTab', closeTabOnSubmit: false });
 
-  const boardUrl = `${BASE}/sites/redirect-board.html?job=external`;
-  const atsUrl = `${ALT}/sites/ats-form.html`;
+  const boardUrl = urlFor('mixed-external');
+  const atsUrl = ATS_URL;
 
   const board = await context.newPage();
   const opened = context.waitForEvent('page', { timeout: 30_000 });
@@ -252,7 +259,7 @@ test('MixedBoard: the posting tab closes once the handoff lands (default setting
   const board = await context.newPage();
   const opened = context.waitForEvent('page', { timeout: 30_000 });
   const closed = board.waitForEvent('close', { timeout: 30_000 });
-  await board.goto(`${BASE}/sites/redirect-board.html?job=external&posting=2`);
+  await board.goto(`${urlFor('mixed-external')}&posting=2`);
 
   const dest = await opened;
   await dest.waitForLoadState();
@@ -267,7 +274,7 @@ test('MixedBoard: the quick-apply posting on the same site still fills in place'
   const countTab = () => { newTabs++; };
   context.on('page', countTab);
 
-  await board.goto(`${BASE}/sites/redirect-board.html?job=quick`);
+  await board.goto(urlFor('mixed-quick'));
 
   await expect(board.locator('#first_name')).toHaveValue('Ada');
   await expect(board.locator('#email')).toHaveValue('ada@example.com');
@@ -275,6 +282,207 @@ test('MixedBoard: the quick-apply posting on the same site still fills in place'
 
   context.off('page', countTab);
   await board.close();
+});
+
+/** Open a posting and return the tab the handoff lands in. */
+async function followHandoff(postingUrl: string): Promise<{ board: Page; dest: Page }> {
+  const board = await context.newPage();
+  const opened = context.waitForEvent('page', { timeout: 30_000 });
+  await board.goto(postingUrl);
+  const dest = await opened;
+  await dest.waitForLoadState();
+  return { board, dest };
+}
+
+test('ExternalBoard: the configured apply link is followed even though its label says nothing', async () => {
+  test.setTimeout(90_000);
+  await patchSettings({ redirectTarget: 'newTab', closeTabOnSubmit: false });
+
+  const boardUrl = urlFor('external-link');
+  const { board, dest } = await followHandoff(boardUrl);
+
+  // The verdict came from the config, not the text: "Apply for this role" matches
+  // no label pattern, so a heuristic-only run would have stayed and filled.
+  await expect(board.locator('.cf-why')).toContainText('configured external apply link');
+  await expect(board.locator('#save-job')).toHaveAttribute('data-saved', '1');
+
+  expect(dest.url()).toBe(`${ALT}/sites/ats-form.html?src=link`);
+  await expect(dest.locator('#ats-first')).toHaveValue('Ada', { timeout: 30_000 });
+
+  const source = await waitForJobUrl(boardUrl, (e) => e.status === 'redirected');
+  expect(source.redirectUrl).toBe(dest.url());
+
+  await dest.close();
+  await board.close();
+});
+
+test('ExternalBoard: an apply button with no href is clicked, and the tab the PAGE opens is tracked', async () => {
+  test.setTimeout(90_000);
+  await patchSettings({ redirectTarget: 'newTab', closeTabOnSubmit: false });
+
+  // Nothing to open: the background answers `click`, the posting opens its own
+  // tab, and the watch has to be inherited through openerTabId — otherwise the
+  // landing is attributed to nothing and the posting is never marked redirected.
+  const boardUrl = urlFor('external-js');
+  const { board, dest } = await followHandoff(boardUrl);
+
+  expect(dest.url()).toBe(`${ALT}/sites/ats-form.html?src=js`);
+  await expect(dest.locator('#ats-email')).toHaveValue('ada@example.com', { timeout: 30_000 });
+
+  const source = await waitForJobUrl(boardUrl, (e) => e.status === 'redirected');
+  expect(source.redirectUrl).toBe(dest.url());
+  const landed = await waitForJobUrl(dest.url(), (e) => !!e.sourceUrl);
+  expect(landed.sourceUrl).toBe(boardUrl);
+
+  await dest.close();
+  await board.close();
+});
+
+test('MixedBoard: a bare "Apply now" is followed on new-tab + cross-origin alone', async () => {
+  test.setTimeout(90_000);
+  await patchSettings({ redirectTarget: 'newTab', closeTabOnSubmit: false });
+
+  // No label pattern matches "Apply now" — a board that words its button this
+  // plainly is only recognisable by where it goes and how it opens.
+  const boardUrl = urlFor('mixed-blank');
+  const { board, dest } = await followHandoff(boardUrl);
+
+  await expect(board.locator('.cf-why')).toContainText('Apply now');
+  expect(dest.url()).toBe(`${ALT}/sites/ats-form.html?src=blank`);
+  await expect(dest.locator('#ats-first')).toHaveValue('Ada', { timeout: 30_000 });
+  await waitForJobUrl(boardUrl, (e) => e.redirectUrl === dest.url());
+
+  await dest.close();
+  await board.close();
+});
+
+test('ExternalBoard: an "External posting" badge classifies a link that reads "Continue"', async () => {
+  test.setTimeout(90_000);
+  await patchSettings({ redirectTarget: 'newTab', closeTabOnSubmit: false });
+
+  const boardUrl = urlFor('external-marker');
+  const { board, dest } = await followHandoff(boardUrl);
+
+  await expect(board.locator('.cf-why')).toContainText('external marker on the page');
+  expect(dest.url()).toBe(`${ALT}/sites/ats-form.html?src=marker`);
+  await waitForJobUrl(boardUrl, (e) => e.redirectUrl === dest.url());
+
+  await dest.close();
+  await board.close();
+});
+
+test('MixedBoard: a tracker chain records where it LANDED, not the hop it started with', async () => {
+  test.setTimeout(90_000);
+  await patchSettings({ redirectTarget: 'newTab', closeTabOnSubmit: false });
+
+  // 302 → interstitial (700ms) → the real form. The settle timer has to restart
+  // on every hop, or the tracker URL is what ends up in the database.
+  const boardUrl = urlFor('mixed-tracked');
+  const finalUrl = `${ALT}/sites/ats-form.html?via=chain`;
+  const { board, dest } = await followHandoff(boardUrl);
+
+  await expect(async () => expect(dest.url()).toBe(finalUrl)).toPass({ timeout: 20_000 });
+  await expect(dest.locator('#ats-first')).toHaveValue('Ada', { timeout: 30_000 });
+
+  const source = await waitForJobUrl(boardUrl, (e) => e.status === 'redirected');
+  expect(source.redirectUrl).toBe(finalUrl);
+  expect(source.redirectUrl).not.toContain('/r/302');
+  expect(source.redirectUrl).not.toContain('redirect-hop');
+
+  await dest.close();
+  await board.close();
+});
+
+test('QuickBoard: the decoy "Apply on company website" link is not followed', async () => {
+  const page = await context.newPage();
+  // Armed after our own tab exists, so only a handoff would register here.
+  let newTabs = 0;
+  const countTab = () => { newTabs++; };
+  context.on('page', countTab);
+
+  await page.goto(urlFor('quick-plain'));
+
+  await expect(page.locator('#first_name')).toHaveValue('Ada');
+  await expect(page.locator('#email')).toHaveValue('ada@example.com');
+  await expect(page.locator('#cover')).toHaveValue('I love building widgets.');
+  expect(newTabs, 'the quick-apply marker must beat the sidebar decoy').toBe(0);
+
+  context.off('page', countTab);
+  await page.close();
+});
+
+test('ListingBoard: several apply links are ambiguous, so nothing is followed', async () => {
+  const page = await context.newPage();
+  let newTabs = 0;
+  const countTab = () => { newTabs++; };
+  context.on('page', countTab);
+
+  await page.goto(urlFor('listing'));
+
+  // It stays on the page and reports honestly: no form here, so every row is red.
+  await expect(page.locator('.cf-card')).toBeVisible({ timeout: 20_000 });
+  await expect(page.locator('.cf-dot.none').first()).toBeVisible();
+  expect(newTabs, 'a listing page must never pick one of its postings').toBe(0);
+
+  context.off('page', countTab);
+  await page.close();
+});
+
+test('NavATS: a destination that submits by navigating still counts as applied', async () => {
+  test.setTimeout(90_000);
+  // The tab has to survive the navigation for us to see where it went.
+  await patchSettings({ redirectTarget: 'newTab', closeTabOnSubmit: false });
+
+  const { board, dest } = await followHandoff(urlFor('external-nav'));
+  const navUrl = `${TRACKER}/sites/ats-nav.html`;
+  expect(dest.url()).toBe(navUrl);
+
+  // A third origin with no config of its own: one is created on landing.
+  await expect(dest.locator('#nav-first')).toHaveValue('Ada', { timeout: 30_000 });
+  await expect(dest.locator('#nav-email')).toHaveValue('ada@example.com');
+
+  // No successSelector exists here, so the submit event is the only "sent"
+  // signal — the tab leaves before any confirmation could render.
+  await dest.locator('#nav-submit').click();
+  await dest.waitForURL(/thanks\.html/, { timeout: 20_000 });
+  await waitForJobUrl(navUrl, (e) => e.status === 'applied');
+
+  await dest.close();
+  await board.close();
+});
+
+test('HiddenSuccess: a pre-rendered confirmation only counts once it is visible', async () => {
+  test.setTimeout(60_000);
+  // Closing on submit is exactly what must NOT happen while the request is in
+  // flight: an AJAX submission fires `submit` before the server has agreed.
+  await patchSettings({ closeTabOnSubmit: true, closeTabDelayMs: 200 });
+
+  const url = urlFor('hidden-success');
+  await onExtensionPage((page) => page.evaluate(async (u) => {
+    const now = Date.now();
+    await chrome.storage.local.set({
+      jobUrls: [{
+        id: 'hidden-1', url: u, status: 'opened', addedAt: now, updatedAt: now,
+        history: [{ status: 'opened', at: now }],
+      }],
+    });
+  }, url));
+
+  const page = await context.newPage();
+  await page.goto(url);
+  await expect(page.locator('#first_name')).toHaveValue('Ada');
+
+  await page.locator('#submit').click({ force: true });
+  await page.waitForTimeout(3000);
+  expect(page.isClosed(), 'an unconfirmed submit must not close the tab').toBe(false);
+  const stillPending = (await readJobUrls()).find((e) => e.url === url);
+  expect(stillPending?.status, 'presence of a hidden success node is not "sent"').toBe('opened');
+
+  // The server answers: the banner is revealed, and NOW it is an application.
+  const closed = page.waitForEvent('close', { timeout: 15_000 });
+  await page.locator('#confirm-server').click();
+  await waitForJobUrl(url, (e) => e.status === 'applied');
+  await closed;
 });
 
 /* ---------------- Queue session ---------------- */
@@ -286,7 +494,9 @@ test('Session: holds the batch size and opens the next posting as one closes', a
   await patchSettings({ closeTabOnSubmit: false, redirectTarget: 'newTab' });
 
   const BATCH = 3;
-  const urls = Array.from({ length: 9 }, (_, i) => `${BASE}/sites/redirect-board.html?job=quick&n=${i}`);
+  // The same list the fixture server hands out at /queue-seed.txt, so a session
+  // driven by hand in the browser and one driven here are the same session.
+  const urls = queueSeedUrls();
   await onExtensionPage((page) => page.evaluate(async (list) => {
     const now = Date.now();
     await chrome.storage.local.set({
@@ -297,7 +507,7 @@ test('Session: holds the batch size and opens the next posting as one closes', a
     });
   }, urls));
 
-  const jobTabs = (): Page[] => context.pages().filter((p) => p.url().includes('job=quick&n='));
+  const jobTabs = (): Page[] => context.pages().filter((p) => p.url().includes('quick-board.html?job=plain&n='));
   const seen = new Set<string>();
   let peak = 0;
   const watch = setInterval(() => {

@@ -1,0 +1,37 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Redirecting…</title>
+    <style>
+      body { font: 15px/1.6 system-ui, sans-serif; max-width: 640px; margin: 80px auto; padding: 0 16px; color: #6b7280; text-align: center; }
+    </style>
+  </head>
+  <body>
+    <!--
+      The client-side hop of a tracker chain: `?to=<url>&ms=<delay>`, then
+      `location.replace`. A server 302 alone is committed before Chrome ever
+      reports a tab URL, so it cannot exercise the background's settle timer —
+      this page can, because the tab genuinely sits here for a moment first.
+
+      `location.replace` (not `assign`) so the hop leaves no history entry, the
+      way a real interstitial behaves.
+    -->
+    <p id="hop-message">Redirecting to the employer’s application…</p>
+
+    <script>
+      const params = new URLSearchParams(location.search);
+      const to = params.get('to') ?? '';
+      const ms = Number(params.get('ms')) || 700;
+
+      // Only ever hop to http(s): a fixture that will happily follow `javascript:`
+      // is a footgun even in a test tree.
+      if (/^https?:\/\//i.test(to)) {
+        setTimeout(() => location.replace(to), ms);
+      } else {
+        document.getElementById('hop-message').textContent = 'No destination given (?to=…).';
+      }
+    </script>
+  </body>
+</html>

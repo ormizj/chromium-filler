@@ -2,7 +2,7 @@
   {
     "id": "slow-boards",
     "name": "SlowBoards (test)",
-    "urlPatterns": ["*://*/sites/slow-boards.html", "file://*slow-boards.html"],
+    "urlPatterns": ["*://*/sites/slow-boards.html*", "file://*slow-boards.html*"],
     "waitFor": "#application-form",
     "waitTimeoutMs": 15000,
     "prep": [{ "action": "click", "selector": "#expand-description", "optional": true }],
@@ -13,7 +13,7 @@
   {
     "id": "modal-lever",
     "name": "ModalLever (test)",
-    "urlPatterns": ["*://*/sites/modal-lever.html", "file://*modal-lever.html"],
+    "urlPatterns": ["*://*/sites/modal-lever.html*", "file://*modal-lever.html*"],
     "prep": [
       { "action": "click", "selector": "#apply-btn" },
       { "action": "waitFor", "selector": "#modal-form", "ms": 8000 },
@@ -36,9 +36,46 @@
     "autoDetect": true
   },
   {
+    "id": "external-board",
+    "name": "ExternalBoard (test)",
+    "urlPatterns": ["*://*/sites/external-board.html*"],
+    "extract": { "jobTitle": "#job-title", "jobDescription": "#job-description" },
+    "redirect": {
+      "applySelector": "#apply-external, #apply-js, #continue-link",
+      "markerSelector": "#external-badge",
+      "beforeFollow": [{ "action": "click", "selector": "#save-job" }]
+    },
+    "autoDetect": true
+  },
+  {
+    "id": "quick-board",
+    "name": "QuickBoard (test)",
+    "urlPatterns": ["*://*/sites/quick-board.html*"],
+    "extract": { "jobTitle": "#job-title", "jobDescription": "#job-description" },
+    "redirect": { "quickApplySelector": "#application-form" },
+    "successSelector": "#quick-success",
+    "autoDetect": true
+  },
+  {
+    "id": "listing-board",
+    "name": "ListingBoard (test)",
+    "urlPatterns": ["*://*/sites/listing-board.html*"],
+    "extract": { "jobTitle": "#page-title", "jobDescription": "#page-blurb" },
+    "autoDetect": true
+  },
+  {
+    "id": "hidden-success",
+    "name": "HiddenSuccess (test)",
+    "urlPatterns": ["*://*/sites/hidden-success.html*"],
+    "waitFor": "#application-form",
+    "extract": { "jobTitle": "#job-title", "jobDescription": "#job-description" },
+    "successSelector": "#late-success",
+    "autoDetect": true
+  },
+  {
     "id": "chaos-form",
     "name": "ChaosForm (test)",
-    "urlPatterns": ["*://*/sites/chaos-form.html", "file://*chaos-form.html"],
+    "urlPatterns": ["*://*/sites/chaos-form.html*", "file://*chaos-form.html*"],
     "waitFor": "#chaos-form",
     "waitTimeoutMs": 15000,
     "prep": [{ "action": "click", "selector": "#next-btn", "optional": true }],
