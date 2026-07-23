@@ -16,6 +16,20 @@ npm run dev              # Vite dev server + HMR
 npm run test:e2e         # Playwright; requires `npm run build` first
 ```
 
+### UI validation
+
+`.mcp.json` registers the Playwright MCP server with `--caps=vision`, for driving
+a real browser and inspecting rendered UI from a screenshot rather than from the
+DOM. It is the tool of choice for checking the responsive surfaces — the modal,
+the setup panel, and the options queue at phone width — because most of what can
+go wrong there (a crushed row, an off-centre grip, an unreachable control) is
+invisible to a DOM assertion. New MCP servers load on Claude Code restart.
+
+For UI work also start `npm run dev` and open `http://localhost:5173/dev/`, which
+renders the real popup and options against a mocked `chrome.*` — including a
+**390px phone frame** beside the desktop one, so the mobile-first layout is what
+you iterate on rather than an afterthought.
+
 E2E loads the built extension into real Chromium (`npx playwright install chromium`
 once). Always `npm run build` before `npm run test:e2e` — the suite loads `dist/`.
 
@@ -36,14 +50,29 @@ pure, unit-tested logic):
   (`extract.ts`) → detect fields (`fieldDetect.ts`) → fill high-confidence only,
   incl. CV via DataTransfer (`fill.ts`) → show modal (`modal/`).
   `picker.ts` = click/tap-to-pick override.
-- **`src/background/service_worker.ts`** — batch-opens job URLs, opens options,
-  handles the `SUBMITTED` message (mark URL applied + optional tab close), and
-  owns the two-step redirect watcher (below).
-- **`src/popup`, `src/options`** — popup triggers run/reset; options manages
-  profile, CV, site configs, behavior settings, and the job-URL dashboard.
+- **`src/background/service_worker.ts`** — opens options, handles the `SUBMITTED`
+  message (mark URL applied + optional tab close), and owns the two-step redirect
+  watcher (below). `session.ts` owns the queue session (below).
+- **`src/popup`, `src/options`** — popup triggers run/reset and shows session
+  progress; options is four tabs (Queue · Profile · Settings · Sites) managing
+  the job queue, profile, CV, behavior settings, and site configs.
 
 Cross-context messaging goes through the typed `MSG` contract in
 `src/shared/messages.ts` (payloads must be structured-clone friendly).
+
+### UI layer
+`src/ui/tokens.css` + `src/ui/primitives.css` are the **only** place colours,
+spacing, touch targets, buttons, rows, dots, sheets, and chips are defined. Both
+files use a `:root, :host` selector list so one copy serves the light-DOM pages
+(which `<link>` them) and the two shadow roots (which inline them via
+`src/ui/shadowCss.ts`). Before this existed each surface had a private copy and
+they contradicted each other — popup dark mode was literally the inverse of
+options dark mode. Add a rule here, not in a surface's own file, if two surfaces
+could ever want it.
+
+Mobile is the priority target (Kiwi). `--tap: 44px` under `@media (pointer:
+coarse)` is the floor for every control; status is never colour alone (dots carry
+a glyph); and the modal/setup sheets become full-width bottom sheets under 640px.
 
 ### Data model & storage
 `src/shared/types.ts` is the source of truth: `Profile`, `SiteConfig`,
@@ -74,6 +103,22 @@ no site config gets one via `ensureConfigForUrl`, so its form fills immediately;
 submitting there propagates `applied` up the `sourceUrl` chain
 (`applyStatusChain`).
 
+### Queue sessions
+`src/shared/queue.ts` (pure) — `nextBatch` picks the waiting URLs that fit the
+free slots, `queueProgress` summarizes for the headers. The queue is **derived**
+from the job-URL database (status `new`), never copied, so imports and manual
+status edits feed it automatically.
+
+`src/background/session.ts` drives it: at most `settings.sessionBatchSize` job
+tabs exist at once, and *finishing one opens the next* — `chrome.tabs.onRemoved`,
+`SUBMITTED`, and `SESSION_SKIP` all free a slot and top up. Opens are staggered
+(`STAGGER_MS`) and serialized through a promise chain, because two events landing
+together would otherwise both claim the same slot and open a posting twice.
+State splits by lifetime like the redirect watches: `{ active, batchSize }` in
+`chrome.storage.local` (survives a restart), tab↔URL map in
+`chrome.storage.session` (tab ids don't). Never restore the old behaviour of
+opening every URL in one loop — 60 links meant 60 tabs.
+
 ### Job-URL database
 `src/shared/jobUrls.ts` (pure) — `addUrls` dedupes by URL (the unique key),
 `applyStatus` records status transitions with timestamped history
@@ -94,6 +139,12 @@ dashboard.
   signal; a bare `submit` event is only the fallback for full-page-nav flows
   (AJAX fires `submit` before the server confirms and may still fail).
 - **Never auto-submit.** Only fill and report.
+- **Closing the review modal must never destroy it.** `onClose` minimizes to the
+  pill (`FillerModal.minimize`); destroying it left "Reset & Re-run" as the only
+  way back, which wipes every field just filled.
+- **On touch the picker only commits via Confirm.** A finger has no hover state,
+  so a plain `click` handler commits whatever it happened to land on; `picker.ts`
+  branches on `pointerType`. Mouse still commits on click.
 - Field matching normalizes attributes with diacritics stripped, so "Résumé"
   matches "resume" (`normalizeAttr` in `src/shared/fieldKeys.ts`).
 - **Playwright must use `channel: 'chromium'`** — the headless shell can't load

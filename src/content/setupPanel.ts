@@ -10,6 +10,7 @@
 
 import type { FieldKey, PrepAction } from '../shared/types';
 import { BUILD_ID, BUILD_LABEL } from '../shared/buildId';
+import { BASE_CSS } from '../ui/shadowCss';
 import setupCss from './setupPanel.css?inline';
 
 export type ContainerKey = 'jobTitle' | 'jobDescription' | 'jobRequirements';
@@ -85,6 +86,8 @@ export class SetupPanel {
   private host: HTMLElement;
   private shadow: ShadowRoot;
   private cb: SetupCallbacks;
+  /** Groups the user opened by hand; re-renders must not fold them back up. */
+  private openGroups = new Set<string>();
 
   constructor(cb: SetupCallbacks) {
     this.cb = cb;
@@ -93,7 +96,7 @@ export class SetupPanel {
     this.host.style.setProperty('all', 'initial');
     this.shadow = this.host.attachShadow({ mode: 'open' });
     const style = document.createElement('style');
-    style.textContent = setupCss;
+    style.textContent = `${BASE_CSS}\n${setupCss}`;
     this.shadow.appendChild(style);
     document.documentElement.appendChild(this.host);
   }
@@ -148,58 +151,98 @@ export class SetupPanel {
     nameInput.onchange = persistMeta;
     patternInput.onchange = persistMeta;
     identity.append(field('Name', nameInput), field('URL pattern', patternInput));
-    body.append(identity);
 
-    // Prerequisite steps (run in order before filling)
+    // Every section stacked open is a wall on a phone. Each one collapses, and
+    // the ones still holding unresolved rows open themselves — so the panel
+    // opens on exactly the work that is left.
+    const jobInfoTodo = countTodo(data.containers);
+    const fieldsTodo = countTodo(data.fields);
+    const redirectTodo = countTodo(data.redirect);
+    const nothingTodo = jobInfoTodo + fieldsTodo + redirectTodo === 0;
+
+    const site = this.group('Site', 0, false);
+    site.body.append(identity);
+
+    const steps = this.group('Setup steps', 0, false);
     const prepHead = el('div', 'cf-section-row');
-    prepHead.append(sectionHead('Setup steps — run in order before filling'));
+    prepHead.append(sectionHead('Run in order before filling'));
     prepHead.append(btn('Run steps ▶', () => this.cb.onRunPrep(), true));
-    body.append(prepHead);
-    this.appendPrepList(body, data.prep, 'prep');
+    steps.body.append(prepHead);
+    this.appendPrepList(steps.body, data.prep, 'prep');
 
     // Application type: does this posting apply here, or on the employer's site?
-    body.append(sectionHead('Application type — quick-apply here, or an external handoff'));
+    const kind = this.group('Application type', redirectTodo, false);
     const verdict = el('div', 'cf-verdict');
     verdict.textContent = data.verdict;
     verdict.title = data.verdict;
-    body.append(verdict);
+    kind.body.append(verdict);
     for (const row of data.redirect) {
-      body.append(this.row(row,
+      kind.body.append(this.row(row,
         () => this.cb.onPickRedirect(row.key),
         () => this.cb.onClearRedirect(row.key)));
     }
-    body.append(sectionHead('Before leaving — run on the posting first, e.g. “Save job”'));
-    this.appendPrepList(body, data.beforeFollow, 'beforeFollow');
+    kind.body.append(sectionHead('Before leaving — run on the posting first, e.g. “Save job”'));
+    this.appendPrepList(kind.body, data.beforeFollow, 'beforeFollow');
 
     // Job info containers
-    body.append(sectionHead('Job info — pick each container on the page'));
+    const info = this.group('Job info', jobInfoTodo, jobInfoTodo > 0);
     for (const row of data.containers) {
-      body.append(this.row(row,
+      info.body.append(this.row(row,
         () => this.cb.onPickContainer(row.key as ContainerKey),
         () => this.cb.onClearContainer(row.key as ContainerKey)));
     }
 
     // Form fields
-    body.append(sectionHead('Form fields — pick each input (optional; heuristics fill the rest)'));
+    const fields = this.group('Form fields', fieldsTodo, fieldsTodo > 0 || nothingTodo);
+    fields.body.append(sectionHead('Heuristics fill the rest — pick only what stays grey'));
     for (const row of data.fields) {
-      body.append(this.row(row,
+      fields.body.append(this.row(row,
         () => this.cb.onPickField(row.key as FieldKey),
         () => this.cb.onClearField(row.key as FieldKey)));
     }
 
+    body.append(site.el, steps.el, kind.el, info.el, fields.el);
+
     // Footer
     const footer = el('div', 'cf-footer');
-    const skip = btn('Skip', () => {});
-    skip.setAttribute('disabled', 'true');
-    skip.title = 'Coming soon';
     footer.append(
-      skip,
       btn('Advanced (JSON)', () => this.cb.onOpenOptions()),
       btn('Done', () => this.cb.onClose(), true),
     );
 
     card.append(header, body, footer);
     this.shadow.append(card);
+  }
+
+  /**
+   * A collapsible section. `todo` is how many rows still need attention — shown
+   * as a chip so a collapsed group still says whether it can be ignored.
+   */
+  private group(title: string, todo: number, open: boolean): { el: HTMLElement; body: HTMLElement } {
+    const details = document.createElement('details');
+    details.className = 'cf-group';
+    details.open = open || this.openGroups.has(title);
+
+    const summary = document.createElement('summary');
+    const label = el('span');
+    label.textContent = title;
+    summary.append(label);
+    if (todo > 0) {
+      const chip = el('span', 'chip warn cf-group-count');
+      chip.textContent = `${todo} to do`;
+      summary.append(chip);
+    }
+    details.append(summary);
+
+    // Remember what the user opened, so a re-scan doesn't collapse it under them.
+    details.addEventListener('toggle', () => {
+      if (details.open) this.openGroups.add(title);
+      else this.openGroups.delete(title);
+    });
+
+    const body = el('div', 'cf-group-body');
+    details.append(body);
+    return { el: details, body };
   }
 
   /** A step list plus its "+ step" bar; both prep lists render identically. */
@@ -341,4 +384,9 @@ function sectionHead(text: string): HTMLElement {
   const h = el('div', 'cf-section');
   h.textContent = text;
   return h;
+}
+
+/** Rows that still need a decision: nothing found, or only a weak match. */
+function countTodo(rows: SetupRow[]): number {
+  return rows.filter((r) => r.status !== 'high').length;
 }

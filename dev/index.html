@@ -33,8 +33,11 @@
       }
       .panel { background: #fff; border-radius: 12px; box-shadow: 0 6px 24px rgba(0,0,0,.12); overflow: hidden; }
       .panel h2 { font-size: 12px; text-transform: uppercase; letter-spacing: .05em; color: #6b7280; margin: 0; padding: 8px 12px; border-bottom: 1px solid #e5e7eb; }
-      .panel.popup iframe { width: 320px; height: 260px; border: 0; display: block; }
-      .panel.options { flex: 1 1 640px; min-width: 420px; }
+      .panel.popup iframe { width: 360px; height: 320px; border: 0; display: block; }
+      /* A real phone viewport, so the mobile-first layout is what you iterate on
+         rather than something you remember to check at the end. */
+      .panel.phone iframe { width: 390px; height: 82vh; border: 0; display: block; }
+      .panel.options { flex: 1 1 560px; min-width: 420px; }
       .panel.options iframe { width: 100%; height: 82vh; border: 0; display: block; }
     </style>
   </head>
@@ -49,8 +52,12 @@
         <h2>Popup</h2>
         <iframe src="./frame.html?page=popup" title="Popup harness"></iframe>
       </div>
+      <div class="panel phone">
+        <h2>Options · phone (390px)</h2>
+        <iframe src="./frame.html?page=options" title="Options harness, phone width"></iframe>
+      </div>
       <div class="panel options">
-        <h2>Options</h2>
+        <h2>Options · desktop</h2>
         <iframe src="./frame.html?page=options" title="Options harness"></iframe>
       </div>
     </div>

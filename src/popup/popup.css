@@ -1,58 +1,175 @@
-:root {
-  --bg: #ffffff;
-  --fg: #111827;
-  --muted: #6b7280;
-  --border: #e5e7eb;
-  --surface: #f9fafb;
-  --accent: #6366f1;
-  --ok: #22c55e;
-  --warn: #eab308;
-}
-@media (prefers-color-scheme: dark) {
-  :root {
-    --bg: #1f2937; --fg: #f3f4f6; --muted: #9ca3af;
-    --border: #374151; --surface: #111827;
-  }
-}
-* { box-sizing: border-box; }
+/**
+ * Popup styles. Tokens and primitives are linked from popup.html; only what is
+ * specific to the toolbar panel lives here.
+ */
+
 body {
   margin: 0;
   /* Toolbar popups size to content; the width MUST be a fixed pixel value.
      Viewport units (vw) resolve against the popup's transient ~0-width layout
      viewport and collapse the panel to a blank sliver — even inside a
      `max-width` media query, which matches during that 0-width pass. */
-  width: 320px;
-  font: 14px/1.5 system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
+  width: 360px;
+  font: var(--text-base) / 1.5 var(--font);
   background: var(--bg);
   color: var(--fg);
 }
-.wrap { padding: 14px; }
-header { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
-h1 { font-size: 15px; margin: 0; }
-.badge {
-  font-size: 11px; padding: 3px 8px; border-radius: 999px;
-  background: var(--surface); border: 1px solid var(--border); color: var(--muted);
+
+.wrap {
+  padding: var(--space-6) var(--space-5);
 }
-.badge.matched { color: #fff; background: var(--ok); border-color: var(--ok); }
-.badge.none { color: #fff; background: var(--warn); border-color: var(--warn); }
-.detail { color: var(--muted); font-size: 13px; margin: 10px 0 14px; }
-button.primary {
-  width: 100%; min-height: 44px; border: none; border-radius: 10px;
-  background: var(--accent); color: #fff; font-size: 15px; font-weight: 600; cursor: pointer;
-}
-button.primary:disabled { opacity: 0.5; cursor: not-allowed; }
-.links { margin-top: 12px; text-align: center; }
-.links a { color: var(--accent); text-decoration: none; font-size: 13px; }
-.links a:hover { text-decoration: underline; }
-.build {
-  margin-top: 10px;
+
+header {
   display: flex;
-  gap: 6px;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+}
+
+h1 {
+  font-size: 15px;
+  margin: 0;
+}
+
+.badge {
+  font-size: var(--text-xs);
+  padding: 3px var(--space-3);
+  border-radius: var(--radius-pill);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  color: var(--muted);
+  font-weight: 600;
+}
+.badge.matched {
+  color: var(--accent-fg);
+  background: var(--ok);
+  border-color: var(--ok);
+}
+.badge.none {
+  color: var(--accent-fg);
+  background: var(--warn);
+  border-color: var(--warn);
+}
+
+.detail {
+  color: var(--muted);
+  font-size: var(--text-md);
+  margin: var(--space-4) 0 var(--space-5);
+}
+
+button.primary {
+  width: 100%;
+  min-height: var(--tap);
+  border: none;
+  border-radius: var(--radius-lg);
+  background: var(--accent);
+  color: var(--accent-fg);
+  font: 600 15px/1 var(--font);
+  cursor: pointer;
+}
+button.primary:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+/* ---------------- Queue session ---------------- */
+
+/**
+ * Only rendered while a session is running. It is the popup's answer to "where
+ * am I in these 60 links" — the question the old popup could not answer at all.
+ */
+.session {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  margin-bottom: var(--space-5);
+  padding: var(--space-3) var(--space-4);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--surface);
+}
+
+.session[hidden] {
+  display: none;
+}
+
+.session .progress {
+  flex: 1;
+  min-width: 0;
+}
+
+.session .progress b {
+  display: block;
+  font-size: var(--text-md);
+}
+
+.session .progress small {
+  display: block;
+  color: var(--muted);
+  font-size: var(--text-xs);
+}
+
+.session .bar {
+  height: 4px;
+  margin-top: var(--space-1);
+  border-radius: var(--radius-pill);
+  background: var(--border);
+  overflow: hidden;
+}
+
+.session .bar > i {
+  display: block;
+  height: 100%;
+  background: var(--accent);
+  transition: width 200ms ease;
+}
+
+.links {
+  margin-top: var(--space-5);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  text-align: center;
+}
+.links a {
+  color: var(--accent);
+  text-decoration: none;
+  font-size: var(--text-md);
+  padding: var(--space-1);
+}
+.links a[hidden] {
+  display: none;
+}
+.links a:hover {
+  text-decoration: underline;
+}
+
+@media (pointer: coarse) {
+  .links a {
+    min-height: var(--tap);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+}
+
+.build {
+  margin-top: var(--space-4);
+  display: flex;
+  gap: var(--space-2);
   align-items: center;
   justify-content: center;
   font-size: 10px;
-  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-family: var(--mono);
   user-select: text;
 }
-.build-version, .build-hash, .build-sep { color: var(--muted); opacity: 0.7; }
-.build-label { font-weight: 700; color: var(--muted); }
+.build-version,
+.build-hash,
+.build-sep {
+  color: var(--muted);
+  opacity: 0.7;
+}
+.build-label {
+  font-weight: 700;
+  color: var(--muted);
+}

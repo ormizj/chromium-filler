@@ -17,7 +17,10 @@ import {
 import { BUILD_ID } from '../shared/buildId';
 import { getCv, cvFileToFile } from '../shared/cvStore';
 import { TEXT_FIELDS, FIELD_LABELS } from '../shared/fieldKeys';
-import { MSG, type FollowRedirectResponse, type Message, type StatusResponse } from '../shared/messages';
+import {
+  MSG, type FollowRedirectResponse, type Message, type SessionState, type StatusResponse,
+} from '../shared/messages';
+import { hostOf } from '../shared/url';
 import { waitForSelector } from './waitForForm';
 import { runPrepSteps } from './prep';
 import { extractJob, previewContainer } from './extract';
@@ -64,6 +67,8 @@ class Controller {
   private fillAnyway = false;
   /** Board posting this page was reached from, when it is a tracked destination. */
   private landedFrom?: string;
+  /** Queue-session snapshot, refreshed per run so the modal can show progress. */
+  private session?: SessionState;
 
   async init(): Promise<void> {
     console.info(`${LOG} content script ready — v${chrome.runtime.getManifest().version} · build ${BUILD_ID}`);
@@ -147,6 +152,7 @@ class Controller {
       postingKind: this.detection?.kind,
       redirectHref: this.detection?.href,
       landedFrom: this.landedFrom,
+      modalMinimized: this.modal?.isMinimized ?? false,
     };
   }
 
@@ -169,6 +175,10 @@ class Controller {
         return;
       case MSG.SETUP:
         await this.openSetup();
+        sendResponse(this.status());
+        return;
+      case MSG.SHOW_REPORT:
+        this.modal?.restore();
         sendResponse(this.status());
         return;
       case MSG.REDIRECT_LANDED:
@@ -198,6 +208,7 @@ class Controller {
 
     const cv = await getCv();
     this.cvFile = cv ? cvFileToFile(cv) : null;
+    this.session = await this.fetchSession();
 
     if (config.waitFor) await waitForSelector(config.waitFor, config.waitTimeoutMs ?? 15000);
     await runPrepSteps(config.prep);
@@ -344,6 +355,21 @@ class Controller {
     return fillTextField(el, value);
   }
 
+  /** Ask the background where this posting sits in the queue session, if any. */
+  private async fetchSession(): Promise<SessionState | undefined> {
+    try {
+      return await chrome.runtime.sendMessage({ type: MSG.SESSION_STATE });
+    } catch {
+      return undefined;
+    }
+  }
+
+  /** Mark this posting skipped; the background closes the tab and opens the next. */
+  private skipPosting(): void {
+    chrome.runtime.sendMessage({ type: MSG.SESSION_SKIP, url: location.href })
+      .catch((e) => console.warn(LOG, 'skip failed', e));
+  }
+
   private showModal(): void {
     if (!this.modal) {
       this.modal = new FillerModal({
@@ -354,7 +380,11 @@ class Controller {
         onPick: (field) => this.pick(field),
         onFollow: () => { this.followed = false; void this.followRedirect(this.detection!); },
         onFillAnyway: () => this.fillHere(),
-        onClose: () => this.modal?.destroy(),
+        onSkip: () => this.skipPosting(),
+        // Collapse to the pill rather than destroying the report: the fills stay
+        // in place and the modal is one tap away, instead of only reachable
+        // through a Reset & Re-run that would wipe them.
+        onClose: () => this.modal?.minimize(),
       });
     }
     const job = extractJob(this.config!);
@@ -371,6 +401,7 @@ class Controller {
         ? { host: det!.href ? hostOf(det!.href) : undefined, reason: det!.reason, followed: this.followed }
         : undefined,
       via: this.landedFrom ? hostOf(this.landedFrom) : undefined,
+      session: this.session,
     });
   }
 
@@ -702,15 +733,6 @@ function safeQuery(selector: string): HTMLElement | null {
     return document.querySelector(selector);
   } catch {
     return null;
-  }
-}
-
-/** Host of a URL, for display; the raw string if it doesn't parse. */
-function hostOf(url: string): string {
-  try {
-    return new URL(url).host;
-  } catch {
-    return url;
   }
 }
 

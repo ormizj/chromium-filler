@@ -7,3 +7,4 @@ playwright-report
 .DS_Store
 *.zip
 .pkgtmp
+.claude/settings.local.json

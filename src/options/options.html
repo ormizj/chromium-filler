@@ -4,107 +4,163 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>Chromium Filler — Settings</title>
+    <link rel="stylesheet" href="../ui/tokens.css" />
+    <link rel="stylesheet" href="../ui/primitives.css" />
     <link rel="stylesheet" href="./options.css" />
   </head>
   <body>
+    <div class="topbar">
+      <div class="topbar-inner">
+        <h1>Chromium Filler</h1>
+        <div class="tabs" role="tablist" aria-label="Sections">
+          <button class="tab" role="tab" id="tab-queue" aria-controls="panel-queue" aria-selected="true">Queue</button>
+          <button class="tab" role="tab" id="tab-profile" aria-controls="panel-profile" aria-selected="false">Profile</button>
+          <button class="tab" role="tab" id="tab-settings" aria-controls="panel-settings" aria-selected="false">Settings</button>
+          <button class="tab" role="tab" id="tab-sites" aria-controls="panel-sites" aria-selected="false">Sites</button>
+        </div>
+      </div>
+    </div>
+
     <main>
-      <h1>Chromium Filler</h1>
+      <!-- ---------------- Queue ---------------- -->
+      <div id="panel-queue" role="tabpanel" aria-labelledby="tab-queue">
+        <section id="urls-section">
+          <h2>Job queue</h2>
+          <p class="hint">
+            A session keeps a fixed number of job tabs open and opens the next one
+            as soon as you submit, skip, or close one — so a big import never
+            becomes a wall of tabs.
+          </p>
 
-      <section id="profile-section">
-        <h2>Your profile</h2>
-        <p class="hint">Values used to auto-fill forms. Leave blank to skip a field.</p>
-        <div id="profile-fields" class="grid"></div>
-        <div class="row">
-          <button id="save-profile" class="primary">Save profile</button>
-          <span id="profile-status" class="status"></span>
-        </div>
-      </section>
+          <div id="url-stats" class="stats"></div>
 
-      <section id="cv-section">
-        <h2>CV / Résumé</h2>
-        <p class="hint">Stored on-device (chrome.storage.local). Attached to file inputs during fill.</p>
-        <div class="row">
-          <input type="file" id="cv-input" />
-          <button id="clear-cv">Remove</button>
-        </div>
-        <p id="cv-current" class="status"></p>
-      </section>
+          <div class="session-panel">
+            <div class="lead">
+              <b id="session-lead">Not running</b>
+              <small id="session-sub"></small>
+            </div>
+            <label class="batch">
+              Tabs at once
+              <input type="number" id="batch-size" min="1" max="20" step="1" />
+            </label>
+            <button id="session-toggle" class="primary">Start session</button>
+          </div>
 
-      <section id="settings-section">
-        <h2>Behavior</h2>
-        <label class="check"><input type="checkbox" id="auto-run" /> Auto-run when a matching page loads</label>
-        <label class="check"><input type="checkbox" id="close-on-submit" /> Auto-close the tab after I submit an application</label>
-        <p class="hint" style="margin: 6px 0 0;">
-          "Sent" is detected per site via that config's <code>successSelector</code>
-          (a confirmation element) — the reliable signal. Without one, a plain form
-          submit is used as a fallback (navigation flows only).
-        </p>
-        <label class="fld" style="max-width: 240px; margin-top: 8px;">
-          Close delay (ms)
-          <input type="number" id="close-delay" min="0" step="250" />
-        </label>
+          <h3>Postings</h3>
+          <div class="filters" id="url-filters" role="group" aria-label="Filter by status"></div>
+          <input type="search" id="url-search" class="search" placeholder="Search by host or path…" />
 
-        <h3>Two-step applications</h3>
-        <p class="hint" style="margin: 0 0 8px;">
-          Postings that apply on the employer's own site are followed automatically,
-          after any “before leaving” steps for that site (e.g. clicking its Save job
-          button). Both the posting and the application it leads to are recorded.
-        </p>
-        <label class="fld" style="max-width: 360px;">
-          When following an external application
-          <select id="redirect-target">
-            <option value="newTabCloseSource">Open in a new tab, close the posting</option>
-            <option value="newTab">Open in a new tab, keep the posting</option>
-            <option value="sameTab">Open in the same tab</option>
-          </select>
-        </label>
-      </section>
+          <ul id="urls-list" class="urls"></ul>
+          <div class="more-row"><button id="show-more" hidden>Show more</button></div>
 
-      <section id="configs-section">
-        <h2>Site configurations</h2>
-        <p class="hint">
-          Per-site rules as JSON (array of configs). Detection, prep steps, extract
-          selectors, field overrides, CV upload selector, submit-CV steps.
-        </p>
-        <textarea id="configs-json" spellcheck="false" rows="18"></textarea>
-        <div class="row">
-          <button id="save-configs" class="primary">Save configs</button>
-          <button id="add-template">Add template</button>
-          <span id="configs-status" class="status"></span>
-        </div>
-      </section>
+          <div class="row">
+            <button id="open-new">Open all “new” now</button>
+            <button id="clear-urls" class="btn-danger">Clear all</button>
+            <span id="queue-status" class="status" role="status" aria-live="polite"></span>
+          </div>
+          <div id="clear-confirm" class="confirm" hidden>
+            <span class="label" id="clear-confirm-label"></span>
+            <button id="clear-cancel">Cancel</button>
+            <button id="clear-really" class="btn-danger">Delete</button>
+          </div>
+        </section>
 
-      <section id="urls-section">
-        <h2>Job URL database</h2>
-        <p class="hint">Paste a messy blob of text — every URL in it is extracted, normalized and deduped.</p>
-        <textarea id="urls-paste" rows="6" placeholder="Paste anything containing links…"></textarea>
-        <div class="row">
-          <button id="extract-urls" class="primary">Extract URLs</button>
-          <span id="extract-status" class="status"></span>
-        </div>
-        <div id="urls-preview"></div>
+        <section id="import-section">
+          <h2>Import URLs</h2>
+          <p class="hint">Paste a messy blob of text — every URL in it is extracted, normalized and deduped.</p>
+          <textarea id="urls-paste" rows="6" placeholder="Paste anything containing links…"></textarea>
+          <div class="row">
+            <button id="extract-urls" class="primary">Extract URLs</button>
+            <span id="extract-status" class="status" role="status" aria-live="polite"></span>
+          </div>
+          <div id="urls-preview"></div>
+        </section>
+      </div>
 
-        <h3>Dashboard</h3>
-        <div id="url-stats" class="stats"></div>
+      <!-- ---------------- Profile ---------------- -->
+      <div id="panel-profile" role="tabpanel" aria-labelledby="tab-profile" hidden>
+        <section id="profile-section">
+          <h2>Your profile</h2>
+          <p class="hint">Values used to auto-fill forms. Leave blank to skip a field.</p>
+          <div id="profile-fields" class="grid"></div>
+          <div id="profile-savebar" class="savebar" hidden>
+            <span class="label">Unsaved changes</span>
+            <button id="save-profile" class="primary">Save profile</button>
+          </div>
+          <p id="profile-status" class="status" role="status" aria-live="polite"></p>
+        </section>
 
-        <div class="row">
-          <button id="open-new">Open all “new” in tabs</button>
-          <button id="clear-urls">Clear all</button>
-          <label class="fld inline">
-            Filter
-            <select id="url-filter">
-              <option value="all">All</option>
-              <option value="new">New</option>
-              <option value="opened">Opened</option>
-              <option value="redirected">Redirected</option>
-              <option value="applied">Applied</option>
-              <option value="skipped">Skipped</option>
+        <section id="cv-section">
+          <h2>CV / Résumé</h2>
+          <p class="hint">Stored on-device (chrome.storage.local). Attached to file inputs during fill.</p>
+          <div class="row">
+            <input type="file" id="cv-input" />
+            <button id="clear-cv" class="btn-danger">Remove</button>
+          </div>
+          <p id="cv-current" class="status" role="status" aria-live="polite"></p>
+        </section>
+      </div>
+
+      <!-- ---------------- Settings ---------------- -->
+      <div id="panel-settings" role="tabpanel" aria-labelledby="tab-settings" hidden>
+        <section id="settings-section">
+          <h2>Behavior</h2>
+          <p class="hint">These save as soon as you change them.</p>
+          <label class="check"><input type="checkbox" id="auto-run" /> Auto-run when a matching page loads</label>
+          <label class="check"><input type="checkbox" id="close-on-submit" /> Auto-close the tab after I submit an application</label>
+          <p class="hint" style="margin: 6px 0 0;">
+            "Sent" is detected per site via that config's <code>successSelector</code>
+            (a confirmation element) — the reliable signal. Without one, a plain form
+            submit is used as a fallback (navigation flows only).
+          </p>
+          <label class="fld" style="max-width: 240px; margin-top: 8px;">
+            Close delay (ms)
+            <input type="number" id="close-delay" min="0" step="250" />
+          </label>
+          <p id="settings-status" class="status" role="status" aria-live="polite"></p>
+
+          <h3>Two-step applications</h3>
+          <p class="hint" style="margin: 0 0 8px;">
+            Postings that apply on the employer's own site are followed automatically,
+            after any “before leaving” steps for that site (e.g. clicking its Save job
+            button). Both the posting and the application it leads to are recorded.
+          </p>
+          <label class="fld" style="max-width: 360px;">
+            When following an external application
+            <select id="redirect-target">
+              <option value="newTabCloseSource">Open in a new tab, close the posting</option>
+              <option value="newTab">Open in a new tab, keep the posting</option>
+              <option value="sameTab">Open in the same tab</option>
             </select>
           </label>
-        </div>
-        <ul id="urls-list" class="urls"></ul>
-      </section>
+        </section>
+      </div>
+
+      <!-- ---------------- Sites ---------------- -->
+      <div id="panel-sites" role="tabpanel" aria-labelledby="tab-sites" hidden>
+        <section id="configs-section">
+          <h2>Site configurations</h2>
+          <p class="hint">
+            Per-site rules as JSON (array of configs). Detection, prep steps, extract
+            selectors, field overrides, CV upload selector, submit-CV steps. Most sites
+            are easier to set up visually — open a posting and use “Set up this site”.
+          </p>
+          <div id="configs-summary" class="filters"></div>
+          <textarea id="configs-json" spellcheck="false" rows="18"></textarea>
+          <div class="row">
+            <button id="save-configs" class="primary">Save configs</button>
+            <button id="add-template">Add template</button>
+            <span id="configs-status" class="status" role="status" aria-live="polite"></span>
+          </div>
+        </section>
+      </div>
     </main>
+
+    <div id="toast" class="toast" hidden>
+      <span id="toast-label"></span>
+      <button id="toast-action">Undo</button>
+    </div>
+
     <script type="module" src="./options.ts"></script>
   </body>
 </html>

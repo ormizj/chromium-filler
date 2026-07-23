@@ -7,6 +7,7 @@
  */
 import { test, expect, chromium, type BrowserContext, type Page } from '@playwright/test';
 import type { JobUrlEntry } from '../src/shared/types';
+import { MSG } from '../src/shared/messages';
 import path from 'node:path';
 import fs from 'node:fs';
 import { fileURLToPath } from 'node:url';
@@ -274,4 +275,73 @@ test('MixedBoard: the quick-apply posting on the same site still fills in place'
 
   context.off('page', countTab);
   await board.close();
+});
+
+/* ---------------- Queue session ---------------- */
+
+test('Session: holds the batch size and opens the next posting as one closes', async () => {
+  test.setTimeout(120_000);
+  // The point of the session is that a big import never becomes a wall of tabs:
+  // at most `batchSize` exist at once, and finishing one is what opens the next.
+  await patchSettings({ closeTabOnSubmit: false, redirectTarget: 'newTab' });
+
+  const BATCH = 3;
+  const urls = Array.from({ length: 9 }, (_, i) => `${BASE}/sites/redirect-board.html?job=quick&n=${i}`);
+  await onExtensionPage((page) => page.evaluate(async (list) => {
+    const now = Date.now();
+    await chrome.storage.local.set({
+      jobUrls: list.map((url, i) => ({
+        id: `seed-${i}`, url, status: 'new', addedAt: now, updatedAt: now,
+        history: [{ status: 'new', at: now }],
+      })),
+    });
+  }, urls));
+
+  const jobTabs = (): Page[] => context.pages().filter((p) => p.url().includes('job=quick&n='));
+  const seen = new Set<string>();
+  let peak = 0;
+  const watch = setInterval(() => {
+    const open = jobTabs();
+    peak = Math.max(peak, open.length);
+    open.forEach((p) => seen.add(p.url()));
+  }, 100);
+
+  const waitFor = async (predicate: () => boolean, what: string, timeoutMs = 30_000) => {
+    const deadline = Date.now() + timeoutMs;
+    while (Date.now() < deadline) {
+      if (predicate()) return;
+      await new Promise((r) => setTimeout(r, 200));
+    }
+    throw new Error(`timed out waiting for ${what}`);
+  };
+
+  try {
+    await onExtensionPage((page) => page.evaluate(
+      ([type, batchSize]) => chrome.runtime.sendMessage({ type, batchSize }),
+      [MSG.SESSION_START, BATCH] as [string, number],
+    ));
+
+    await waitFor(() => jobTabs().length === BATCH, `${BATCH} job tabs`);
+    expect(peak, 'the session must never exceed its batch size').toBeLessThanOrEqual(BATCH);
+
+    // Closing one frees a slot; the next waiting posting takes it.
+    const closing = jobTabs()[0];
+    const closedUrl = closing.url();
+    await closing.close();
+
+    await waitFor(() => seen.size > BATCH, 'a replacement posting to open');
+    expect(peak, 'refilling must not overshoot the batch size').toBeLessThanOrEqual(BATCH);
+    expect(jobTabs().length).toBe(BATCH);
+
+    // A tab closed without submitting is not lost — it stays `opened`, so it is
+    // still visible in the dashboard rather than silently dropped or re-queued.
+    const closed = (await readJobUrls()).find((e) => e.url === closedUrl);
+    expect(closed?.status).toBe('opened');
+  } finally {
+    clearInterval(watch);
+    await onExtensionPage((page) => page.evaluate(
+      (type) => chrome.runtime.sendMessage({ type }), MSG.SESSION_STOP as string,
+    ));
+    await Promise.all(jobTabs().map((p) => p.close()));
+  }
 });

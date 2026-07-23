@@ -4,6 +4,7 @@
  */
 
 import type { FieldKey, FieldMatch } from './types';
+import type { QueueProgress } from './queue';
 
 export const MSG = {
   /** popup -> content: run the full detect/prep/fill flow now. */
@@ -26,7 +27,25 @@ export const MSG = {
   FOLLOW_REDIRECT: 'CF_FOLLOW_REDIRECT',
   /** background -> content: this tab is where a tracked redirect landed. */
   REDIRECT_LANDED: 'CF_REDIRECT_LANDED',
+  /** options -> background: begin a queue session keeping `batchSize` tabs open. */
+  SESSION_START: 'CF_SESSION_START',
+  /** options/popup -> background: stop refilling (open tabs are left alone). */
+  SESSION_STOP: 'CF_SESSION_STOP',
+  /** any surface -> background: report session progress. */
+  SESSION_STATE: 'CF_SESSION_STATE',
+  /** popup/modal -> background: mark this posting skipped, close it, open the next. */
+  SESSION_SKIP: 'CF_SESSION_SKIP',
+  /** popup -> content: re-open the minimized review modal without re-running. */
+  SHOW_REPORT: 'CF_SHOW_REPORT',
 } as const;
+
+/** Session snapshot shown by the popup, the options queue, and the modal strip. */
+export interface SessionState {
+  active: boolean;
+  batchSize: number;
+  /** Every entry counted for the progress bar. */
+  progress: QueueProgress;
+}
 
 export interface StatusResponse {
   siteMatched: boolean;
@@ -41,6 +60,11 @@ export interface StatusResponse {
   redirectHref?: string;
   /** The board posting this page was reached from, for a redirect destination. */
   landedFrom?: string;
+  /**
+   * The review modal is collapsed to its pill. The popup offers "Show report"
+   * instead of the destructive "Reset & Re-run" when this is set.
+   */
+  modalMinimized?: boolean;
 }
 
 /** Background's answer to FOLLOW_REDIRECT: who performs the navigation. */
@@ -64,7 +88,12 @@ export type Message =
   | { type: typeof MSG.OPEN_OPTIONS; createForUrl?: string }
   | { type: typeof MSG.SUBMITTED; url: string }
   | { type: typeof MSG.FOLLOW_REDIRECT; sourceUrl: string; href?: string }
-  | { type: typeof MSG.REDIRECT_LANDED; sourceUrl: string };
+  | { type: typeof MSG.REDIRECT_LANDED; sourceUrl: string }
+  | { type: typeof MSG.SESSION_START; batchSize?: number }
+  | { type: typeof MSG.SESSION_STOP }
+  | { type: typeof MSG.SESSION_STATE }
+  | { type: typeof MSG.SESSION_SKIP; url: string }
+  | { type: typeof MSG.SHOW_REPORT };
 
 export interface RunResult {
   status: StatusResponse;

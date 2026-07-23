@@ -11,6 +11,7 @@ export const DEFAULT_SETTINGS: Settings = {
   closeTabOnSubmit: false,
   closeTabDelayMs: 1500,
   redirectTarget: 'newTabCloseSource',
+  sessionBatchSize: 5,
 };
 
 /**

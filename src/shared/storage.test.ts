@@ -3,7 +3,7 @@ import { fileToCvFile, cvFileToFile, setCv, getCv, clearCv } from './cvStore';
 import {
   upsertSiteConfig, saveJobUrls, getJobUrls, getSiteConfigs, saveFieldOverride,
   mutateSiteConfig, saveExtractSelector, ensureConfigForUrl,
-  clearExtractSelector, clearFieldOverride,
+  clearExtractSelector, clearFieldOverride, getSettings, saveSettings,
 } from './storage';
 import type { SiteConfig } from './types';
 
@@ -22,6 +22,23 @@ function readBytes(blob: Blob): Promise<Uint8Array> {
     fr.readAsArrayBuffer(blob);
   });
 }
+
+describe('settings', () => {
+  it('backfills a setting an older install never stored', async () => {
+    // Written before sessionBatchSize existed; reading must not yield undefined,
+    // or the session would open zero tabs.
+    await chrome.storage.local.set({ settings: { autoRunOnLoad: false } });
+    const settings = await getSettings();
+    expect(settings.sessionBatchSize).toBe(5);
+    expect(settings.autoRunOnLoad).toBe(false);
+  });
+
+  it('keeps a stored batch size over the default', async () => {
+    const current = await getSettings();
+    await saveSettings({ ...current, sessionBatchSize: 2 });
+    expect((await getSettings()).sessionBatchSize).toBe(2);
+  });
+});
 
 describe('cv codec (File <-> CvFile)', () => {
   it('round-trips name, type, and bytes', async () => {

@@ -175,6 +175,12 @@ export interface Settings {
    * it, or in place.
    */
   redirectTarget: RedirectTarget;
+  /**
+   * How many job tabs a queue session keeps open at once. The session refills
+   * back up to this number as you finish each one, so a 60-link import never
+   * becomes 60 tabs. Lower it to 1–2 on mobile.
+   */
+  sessionBatchSize: number;
 }
 
 /** Everything persisted in chrome.storage.local (the CV bytes are stored separately, also in chrome.storage.local). */

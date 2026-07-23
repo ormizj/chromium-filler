@@ -15,16 +15,21 @@ site's config for next time. It never submits for you.
 - **URL-based site detection** with per-site configs (match-patterns or regex).
 - **Auto prep phase** — expand description, open the apply/CV modal, etc.
 - **Review-report modal** (Shadow DOM, draggable; a bottom-sheet on mobile) with
-  the job title, a scrollable description, and per-field status.
+  the job title, a scrollable description, and per-field status. Closing it
+  **collapses it to a pill**, never destroying your fills, and during a session
+  it carries the queue progress and a *Skip → next* action — so a whole run is
+  drivable without ever opening the toolbar popup.
 - **Field matching** = keyword heuristics + per-site selector overrides. Only
   high-confidence matches auto-fill; the rest are reported for one-click confirm.
 - **Click/tap-to-pick overrides**, persisted to the site config.
 - **CV upload** via `DataTransfer` (stored on-device in `chrome.storage.local`).
-- **Job URL database + dashboard** — paste a messy text blob, every URL is
-  extracted / normalized / deduped (the **URL is the unique key**); batch-open
-  them and each tab auto-fills on load. Every entry tracks a timestamped status
-  **history** (new → opened → applied, or skipped), with stat cards and a status
-  filter.
+- **Job queue + sessions** — paste a messy text blob, every URL is extracted /
+  normalized / deduped (the **URL is the unique key**). A **session** then keeps a
+  fixed number of job tabs open (default 5; drop it to 1–2 on mobile) and opens
+  the next posting the moment you submit, skip, or close one — so 60 imported
+  links never become 60 tabs. Pause and resume at will; it survives a browser
+  restart. Every entry tracks a timestamped status **history**
+  (new → opened → applied, or skipped), with stat cards, search, and filters.
 - **Auto-close after submit** (optional) — since the extension never submits,
   "sent" is detected per site via a `successSelector` (see below), which also
   marks the URL **applied**.
@@ -62,10 +67,11 @@ npm run dev            # then open http://localhost:5173/dev/
 ```
 
 This renders the **real** `popup.ts` and `options.ts` side by side in a normal
-browser tab, driven by a **mocked** `chrome.*` API (`dev/mock-chrome.ts`) whose
-storage is backed by `localStorage` and whose content script is faked so the
-popup's Fill / Reset buttons visibly change state. Instant Vite HMR, no
-extension install.
+browser tab — at both a **390px phone width** and desktop — driven by a **mocked**
+`chrome.*` API (`dev/mock-chrome.ts`) whose storage is backed by `localStorage`,
+whose content script is faked so the popup's Fill / Reset buttons visibly change
+state, and which simulates a queue session so the Start/Stop controls do
+something. Instant Vite HMR, no extension install.
 
 > ⚠️ The harness is a *simulation*. It exercises the UI only — it does **not**
 > cover real content-script injection, cross-context messaging, or real sites.
@@ -95,8 +101,23 @@ it as a normal tab at `chrome-extension://<your-extension-id>/src/popup/popup.ht
 
 Stock **Chrome for Android does not support extensions.** Use a Chromium-based
 mobile browser that does — primarily **Kiwi Browser**: menu → Extensions →
-enable Developer mode → load the packed/zipped `dist/`. Every surface (modal,
-popup, options) is responsive and touch-first.
+enable Developer mode → load the packed/zipped `dist/`.
+
+Mobile is the priority target, so every surface is touch-first: a 44px minimum
+for every control, the modal and setup panel become full-width bottom sheets,
+status is shown by glyph as well as colour, tap-to-pick proposes a target and
+waits for **Confirm** (a finger has no hover, so committing on first tap picked
+whatever you happened to hit), and the picker toolbar sits at the bottom where
+your thumb is. Because reaching the toolbar popup costs two or three taps through
+the browser menu, the on-page modal carries the session controls too.
+
+### Validating the UI
+
+`.mcp.json` registers the [Playwright MCP server](https://github.com/microsoft/playwright-mcp)
+with `--caps=vision`, so a browser can be driven and the **rendered** result
+inspected from a screenshot. That is the right tool for the responsive surfaces —
+a crushed row, an off-centre sheet grip or an unreachable button are all invisible
+to a DOM assertion. It loads on Claude Code restart.
 
 ## Try it (local fixtures)
 
@@ -121,6 +142,29 @@ into the options "Site configurations" box, or they're auto-seeded by the E2E):
 - **redirect-board.html** — one board serving both kinds of posting:
   `?job=quick` fills in place, `?job=external` hands off to `ats-form.html` on
   another host (tests the two-step flow below).
+
+## Working through a batch (queue sessions)
+
+Import 60 links and opening them all at once helps nobody — it is 60 tabs, 60
+forms filling simultaneously, and no way to tell where you got to. A **session**
+is a sliding window instead:
+
+1. Options → **Queue** → set *Tabs at once* (default 5; 1–2 on a phone) → **Start
+   session**. That many postings open in the background, staggered rather than in
+   one burst.
+2. Each tab fills itself as usual. You press the site's own Send, or **Skip →
+   next** in the modal, or just close the tab.
+3. Whichever you do, the slot frees and **the next waiting posting opens**. The
+   window stays full until the queue drains.
+
+Progress (`done / total`, applied, skipped, waiting) shows in the options Queue
+tab, in the popup, and in the modal itself. **Stop session** stops refilling but
+deliberately leaves open tabs alone — you are probably mid-application in one.
+Closing a tab without submitting leaves that posting `opened`, not lost, so it
+stays visible in the dashboard.
+
+The session survives a browser restart; open tabs do not, so it simply refills
+when you start it again.
 
 ## Two-step (redirect) applications
 
@@ -190,7 +234,9 @@ options "Behavior" section.
 
 ## Architecture
 
-`src/shared` — types, storage, matcher, selector, URL import, field heuristics,
-CV codec (all pure logic is unit-tested). `src/content` — orchestrator + waitFor,
-prep, extract, fieldDetect, fill, picker, modal. `src/popup`, `src/options`,
-`src/background`.
+`src/shared` — types, storage, matcher, selector, URL import, queue, field
+heuristics, CV codec (all pure logic is unit-tested). `src/content` —
+orchestrator + waitFor, prep, extract, fieldDetect, fill, picker, modal, setup
+panel. `src/ui` — the design tokens and component primitives every surface shares
+(one copy, used by both the light-DOM pages and the shadow roots). `src/popup`,
+`src/options`, `src/background` (service worker + queue session).

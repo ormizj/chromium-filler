@@ -7,9 +7,12 @@
 
 import { MSG, type FollowRedirectResponse, type Message } from '../shared/messages';
 import { getSettings, mutateJobUrls } from '../shared/storage';
-import { applyStatus, applyStatusChain, linkRedirect } from '../shared/jobUrls';
+import { applyStatusChain, linkRedirect } from '../shared/jobUrls';
 import { isExternalUrl } from '../shared/redirect';
 import { DEFAULT_STATE } from '../shared/defaults';
+import {
+  onSubmitted, onTabClosed, openUrls, sessionState, skipUrl, startSession, stopSession,
+} from './session';
 
 const LOG = '[chromium-filler:bg]';
 
@@ -46,6 +49,22 @@ chrome.runtime.onMessage.addListener((msg: Message, _sender, sendResponse) => {
       .catch((e) => sendResponse({ error: String(e) } satisfies FollowRedirectResponse));
     return true;
   }
+  if (msg.type === MSG.SESSION_START) {
+    startSession(msg.batchSize).then(sendResponse).catch((e) => sendResponse({ error: String(e) }));
+    return true;
+  }
+  if (msg.type === MSG.SESSION_STOP) {
+    stopSession().then(sendResponse).catch((e) => sendResponse({ error: String(e) }));
+    return true;
+  }
+  if (msg.type === MSG.SESSION_STATE) {
+    sessionState().then(sendResponse).catch((e) => sendResponse({ error: String(e) }));
+    return true;
+  }
+  if (msg.type === MSG.SESSION_SKIP) {
+    skipUrl(msg.url, _sender.tab?.id).then(sendResponse).catch((e) => sendResponse({ error: String(e) }));
+    return true;
+  }
   if (msg.type === MSG.OPEN_OPTIONS) {
     const url = msg.createForUrl
       ? `${chrome.runtime.getURL('src/options/options.html')}#create=${encodeURIComponent(msg.createForUrl)}`
@@ -63,6 +82,10 @@ async function handleSubmitted(url: string, tabId: number | undefined): Promise<
   // the application belongs to that posting even though it was sent elsewhere.
   await mutateJobUrls((list) => applyStatusChain(list, url, 'applied'));
 
+  // Free this posting's session slot and pull in the next one. This is what
+  // makes a session self-refilling: finishing an application is the trigger.
+  await onSubmitted(tabId);
+
   // Optionally close the tab after a short delay so the request completes.
   const settings = await getSettings();
   if (settings.closeTabOnSubmit && tabId != null) {
@@ -71,12 +94,10 @@ async function handleSubmitted(url: string, tabId: number | undefined): Promise<
   }
 }
 
-async function openUrls(urls: string[]): Promise<void> {
-  for (const url of urls) {
-    await chrome.tabs.create({ url, active: false });
-  }
-  await mutateJobUrls((list) => urls.reduce((acc, url) => applyStatus(acc, url, 'opened'), list));
-}
+/** A closed job tab frees its slot, whether it was submitted, skipped, or given up on. */
+chrome.tabs.onRemoved.addListener((tabId) => {
+  void onTabClosed(tabId).catch((e) => console.warn(LOG, 'session top-up failed', e));
+});
 
 /* ---------------- Two-step (redirect) handoff ---------------- */
 

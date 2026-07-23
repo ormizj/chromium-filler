@@ -3,6 +3,8 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <link rel="stylesheet" href="../ui/tokens.css" />
+    <link rel="stylesheet" href="../ui/primitives.css" />
     <link rel="stylesheet" href="./popup.css" />
   </head>
   <body>
@@ -14,10 +16,20 @@
 
       <p id="detail" class="detail">Checking this page…</p>
 
+      <div id="session" class="session" hidden>
+        <div class="progress">
+          <b id="session-count"></b>
+          <small id="session-detail"></small>
+          <div class="bar"><i id="session-bar"></i></div>
+        </div>
+        <button id="session-skip" class="btn">Skip &amp; next</button>
+      </div>
+
       <button id="primary" class="primary" disabled>Fill</button>
 
       <div class="links">
         <a id="reconfigure" href="#" hidden>Edit site setup →</a>
+        <a id="open-queue" href="#" hidden>Open the job queue →</a>
         <a id="open-options" href="#">Manage profile, configs &amp; URLs →</a>
       </div>
       <div id="build" class="build"></div>

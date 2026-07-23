@@ -1,206 +1,199 @@
+/**
+ * Setup-panel styles. The shell (card, header, body, footer, rows, dots,
+ * buttons, pill) comes from src/ui/primitives.css, which setupPanel.ts inlines
+ * ahead of this file; only what is specific to setup lives here.
+ */
+
 :host {
-  --cf-bg: #ffffff;
-  --cf-fg: #111827;
-  --cf-muted: #6b7280;
-  --cf-border: #e5e7eb;
-  --cf-surface: #f9fafb;
-  --cf-accent: #6366f1;
-  --cf-ok: #22c55e;
-  --cf-warn: #eab308;
-  --cf-none: #ef4444;
   all: initial;
 }
 
-@media (prefers-color-scheme: dark) {
-  :host {
-    --cf-bg: #1f2937;
-    --cf-fg: #f3f4f6;
-    --cf-muted: #9ca3af;
-    --cf-border: #374151;
-    --cf-surface: #111827;
-  }
-}
-
-* { box-sizing: border-box; }
-
+/* The setup panel docks top-right — it must not cover the page's own footer
+   controls while you pick fields. Under 640px primitives.css makes it a
+   bottom sheet. */
 .cf-card {
-  position: fixed;
-  right: 16px;
-  top: 16px;
+  top: var(--space-6);
   width: 400px;
-  max-width: calc(100vw - 32px);
   max-height: min(88vh, 720px);
-  display: flex;
-  flex-direction: column;
-  background: var(--cf-bg);
-  color: var(--cf-fg);
-  border: 1px solid var(--cf-border);
-  border-radius: 14px;
-  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.28);
-  font: 14px/1.5 system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
-  z-index: 2147483645;
-  overflow: hidden;
 }
 
 @media (max-width: 640px) {
   .cf-card {
-    right: 0;
-    left: 0;
-    top: auto;
-    bottom: 0;
-    width: 100%;
-    max-width: 100%;
     max-height: 88vh;
-    border-radius: 16px 16px 0 0;
   }
 }
 
-.cf-header {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 10px 12px;
-  border-bottom: 1px solid var(--cf-border);
-  cursor: grab;
-  touch-action: none;
+/* "Not set" here means an optional selector nobody has filled in, not a
+   failure — so it stays neutral rather than borrowing the report's red ×. */
+.cf-dot.none {
+  background: var(--border-strong);
 }
-.cf-header:active { cursor: grabbing; }
-
-.cf-grip {
-  width: 36px;
-  height: 4px;
-  border-radius: 2px;
-  background: var(--cf-border);
-  margin: 0 auto;
+.cf-dot.none::before {
+  content: '–';
 }
-@media (min-width: 641px) { .cf-grip { display: none; } }
 
-.cf-heading { font-weight: 700; font-size: 14px; flex: 1; }
+.cf-heading {
+  font-weight: 700;
+  font-size: var(--text-base);
+  flex: 1;
+  min-width: 0;
+}
+
 .cf-build {
   display: flex;
   align-items: center;
   gap: 5px;
   font-size: 10px;
-  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-family: var(--mono);
   margin-top: 3px;
 }
-.cf-build-version, .cf-build-hash, .cf-build-sep { color: var(--cf-muted); opacity: 0.7; }
-.cf-build-label { font-weight: 700; color: var(--cf-muted); }
-
-.cf-close {
-  border: none;
-  background: transparent;
-  color: var(--cf-muted);
-  font-size: 20px;
-  line-height: 1;
-  cursor: pointer;
-  padding: 4px 8px;
-  min-height: 32px;
+.cf-build-version,
+.cf-build-hash,
+.cf-build-sep {
+  color: var(--muted);
+  opacity: 0.7;
+}
+.cf-build-label {
+  font-weight: 700;
+  color: var(--muted);
 }
 
-.cf-body { padding: 12px; overflow-y: auto; flex: 1; }
-
-.cf-identity { display: flex; flex-direction: column; gap: 8px; margin-bottom: 8px; }
-.cf-fld { display: flex; flex-direction: column; gap: 3px; }
-.cf-fld-label { font-size: 11px; color: var(--cf-muted); text-transform: uppercase; letter-spacing: 0.04em; }
-.cf-input {
-  width: 100%;
-  border: 1px solid var(--cf-border);
-  border-radius: 8px;
-  padding: 7px 9px;
-  background: var(--cf-surface);
-  color: var(--cf-fg);
-  font: 13px system-ui, sans-serif;
+.cf-identity {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  margin-bottom: var(--space-3);
 }
 
-.cf-section {
-  font-size: 11px;
-  font-weight: 600;
-  color: var(--cf-muted);
+.cf-fld {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.cf-fld-label {
+  font-size: var(--text-xs);
+  color: var(--muted);
   text-transform: uppercase;
   letter-spacing: 0.04em;
-  margin: 14px 0 6px;
+}
+
+.cf-input {
+  width: 100%;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  padding: 7px 9px;
+  background: var(--surface);
+  color: var(--fg);
+  font: var(--text-md) var(--font);
+  min-height: 36px;
+}
+
+@media (pointer: coarse) {
+  .cf-input {
+    min-height: var(--tap);
+  }
+}
+
+/* ---------------- Collapsible groups ---------------- */
+
+/**
+ * The panel carries seven stacked sections; on a phone that is an unreadable
+ * wall. Each group collapses, and the controller opens the ones that still
+ * have unresolved rows — so it opens on exactly the work left to do.
+ */
+.cf-group {
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  margin-bottom: var(--space-3);
+  overflow: hidden;
+}
+
+.cf-group > summary {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  padding: var(--space-3) var(--space-4);
+  min-height: var(--tap);
+  background: var(--surface);
+  cursor: pointer;
+  list-style: none;
+  font-size: var(--text-sm);
+  font-weight: 600;
+  color: var(--fg);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.cf-group > summary::-webkit-details-marker {
+  display: none;
+}
+
+/* Chevron, rotated when open. */
+.cf-group > summary::after {
+  content: '▾';
+  margin-left: auto;
+  color: var(--muted);
+  transition: transform 120ms ease;
+}
+.cf-group[open] > summary::after {
+  transform: rotate(180deg);
+}
+
+.cf-group-body {
+  padding: var(--space-4);
+}
+
+/* Count of rows still needing attention, shown on a collapsed group. */
+.cf-group-count {
+  margin-left: auto;
+}
+.cf-group > summary:has(.cf-group-count)::after {
+  margin-left: var(--space-3);
 }
 
 .cf-section-row {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 8px;
+  gap: var(--space-3);
 }
-.cf-section-row .cf-section { margin-bottom: 6px; }
+.cf-section-row .cf-section {
+  margin-bottom: var(--space-2);
+}
 
-.cf-addbar { display: flex; gap: 6px; flex-wrap: wrap; margin: 6px 0 2px; }
+.cf-addbar {
+  display: flex;
+  gap: var(--space-2);
+  flex-wrap: wrap;
+  margin: var(--space-2) 0 2px;
+}
 
 /* Live quick-apply vs. external-redirect verdict for the current page. */
 .cf-verdict {
-  font-size: 12px;
-  color: var(--cf-fg);
-  background: rgba(127, 127, 127, 0.12);
-  border-radius: 6px;
-  padding: 6px 8px;
-  margin-bottom: 4px;
+  font-size: var(--text-sm);
+  color: var(--fg);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: var(--space-2) var(--space-3);
+  margin-bottom: var(--space-1);
   overflow-wrap: anywhere;
 }
 
 .cf-ms {
   width: 68px;
-  border: 1px solid var(--cf-border);
-  border-radius: 6px;
-  padding: 4px 6px;
-  background: var(--cf-surface);
-  color: var(--cf-fg);
-  font: 12px system-ui, sans-serif;
-}
-
-.cf-row {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 6px 8px;
-  border: 1px solid var(--cf-border);
-  border-radius: 8px;
-  min-height: 44px;
-  margin-bottom: 6px;
-}
-
-.cf-dot { width: 10px; height: 10px; border-radius: 50%; flex: none; }
-.cf-dot.ok { background: var(--cf-ok); }
-.cf-dot.warn { background: var(--cf-warn); }
-.cf-dot.none { background: var(--cf-border); }
-
-.cf-field { flex: 1; min-width: 0; }
-.cf-field b { display: block; font-size: 13px; }
-.cf-field small {
-  display: block;
-  color: var(--cf-muted);
-  font-size: 11px;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-.cf-actions { display: flex; gap: 4px; flex: none; }
-
-button.cf-btn {
-  border: 1px solid var(--cf-border);
-  background: var(--cf-surface);
-  color: var(--cf-fg);
-  border-radius: 6px;
-  padding: 6px 10px;
-  font: 12px system-ui, sans-serif;
-  cursor: pointer;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: var(--space-1) var(--space-2);
+  background: var(--surface);
+  color: var(--fg);
+  font: var(--text-sm) var(--font);
   min-height: 32px;
 }
-button.cf-btn.primary { background: var(--cf-accent); color: #fff; border-color: var(--cf-accent); }
-button.cf-btn:hover { filter: brightness(0.97); }
-button.cf-btn:disabled { opacity: 0.45; cursor: not-allowed; filter: none; }
 
-.cf-footer {
-  display: flex;
-  gap: 8px;
-  padding: 10px 12px;
-  border-top: 1px solid var(--cf-border);
-  flex-wrap: wrap;
+@media (pointer: coarse) {
+  .cf-ms {
+    min-height: var(--tap);
+  }
 }
-.cf-footer button.cf-btn { flex: 1; min-height: 44px; min-width: 96px; font-size: 13px; }

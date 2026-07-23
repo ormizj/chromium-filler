@@ -1,0 +1,402 @@
+/**
+ * Shared component rules, layered on tokens.css. Two vocabularies are styled
+ * together on purpose: the light-DOM pages use plain elements plus `.btn`, and
+ * the two shadow surfaces use the `.cf-*` classes they already had — the modal
+ * and the setup panel each carried a near-identical private copy of everything
+ * below, which is why they drifted apart.
+ *
+ * Anything genuinely unique to one surface stays in that surface's own file.
+ */
+
+* {
+  box-sizing: border-box;
+}
+
+/* ---------------- Focus ---------------- */
+
+/* Every surface was missing a focus ring entirely; keyboard use was invisible. */
+:focus-visible {
+  outline: none;
+  box-shadow: var(--ring);
+  border-radius: var(--radius-sm);
+}
+
+/* ---------------- Buttons ---------------- */
+
+.btn,
+button.cf-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-2);
+  font: 600 var(--text-md) / 1.2 var(--font);
+  color: var(--fg);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  padding: var(--space-2) var(--space-4);
+  min-height: 32px;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: background-color 120ms ease, border-color 120ms ease;
+}
+
+.btn:hover,
+button.cf-btn:hover {
+  background: var(--surface-2);
+  border-color: var(--border-strong);
+}
+
+.btn-primary,
+button.cf-btn.primary {
+  background: var(--accent);
+  color: var(--accent-fg);
+  border-color: var(--accent);
+}
+
+.btn-primary:hover,
+button.cf-btn.primary:hover {
+  background: var(--accent);
+  filter: brightness(1.08);
+}
+
+.btn-danger {
+  color: var(--err);
+  border-color: var(--err);
+  background: transparent;
+}
+
+.btn-danger:hover {
+  background: var(--err-weak);
+  border-color: var(--err);
+}
+
+.btn-ghost {
+  background: transparent;
+  border-color: transparent;
+}
+
+.btn:disabled,
+button.cf-btn:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+  filter: none;
+}
+
+/* Touch: every control gets a full-size target. Desktop keeps the denser 32px —
+   the two are different jobs, not one compromise. */
+@media (pointer: coarse) {
+  .btn,
+  button.cf-btn,
+  button,
+  select,
+  input[type='file'] {
+    min-height: var(--tap);
+  }
+
+  .btn,
+  button.cf-btn {
+    padding-inline: var(--space-5);
+  }
+}
+
+/* ---------------- Status dots ---------------- */
+
+/**
+ * Status is never colour alone: each dot carries a glyph, so the report is
+ * readable in greyscale and with colour-blindness. Class names are load-bearing
+ * (the E2E suite asserts on `.cf-dot.none`) — only the presentation changed.
+ */
+.cf-dot {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  flex: none;
+  font: 700 10px/1 var(--font);
+  color: #fff;
+}
+
+.cf-dot.high,
+.cf-dot.ok {
+  background: var(--ok);
+}
+.cf-dot.high::before,
+.cf-dot.ok::before {
+  content: '✓';
+}
+
+.cf-dot.low,
+.cf-dot.warn {
+  background: var(--warn);
+}
+.cf-dot.low::before,
+.cf-dot.warn::before {
+  content: '!';
+}
+
+.cf-dot.none {
+  background: var(--err);
+}
+.cf-dot.none::before {
+  content: '×';
+}
+
+/* ---------------- Rows ---------------- */
+
+.cf-row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  padding: var(--space-2) var(--space-3);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--surface-2);
+  min-height: var(--tap);
+  margin-bottom: var(--space-2);
+}
+
+.cf-field {
+  flex: 1;
+  min-width: 0;
+}
+.cf-field b {
+  display: block;
+  font-size: var(--text-md);
+}
+.cf-field small {
+  display: block;
+  color: var(--muted);
+  font-size: var(--text-xs);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.cf-actions {
+  display: flex;
+  gap: var(--space-1);
+  flex: none;
+}
+
+/**
+ * Narrow: a row carrying more than one action drops them onto their own line,
+ * rather than squeezing the label to nothing between the dot and the buttons.
+ * A single-action row (the common case — just "Pick") stays on one line; making
+ * every row two lines turned a 16-field report into a very long scroll.
+ */
+@media (max-width: 640px) {
+  .cf-row:has(.cf-actions > :nth-child(2)) {
+    flex-wrap: wrap;
+  }
+  .cf-row:has(.cf-actions > :nth-child(2)) .cf-actions {
+    flex: 1 0 100%;
+    justify-content: flex-end;
+  }
+  .cf-row:has(.cf-actions > :nth-child(2)) .cf-actions .cf-btn {
+    flex: 1;
+  }
+}
+
+/* ---------------- Section headings ---------------- */
+
+.cf-section {
+  font-size: var(--text-xs);
+  font-weight: 600;
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  margin: var(--space-6) 0 var(--space-2);
+}
+
+/* ---------------- Floating sheet (modal + setup panel) ---------------- */
+
+/**
+ * The shared shell. Each surface sets its own anchor (the modal sits bottom-
+ * right, the setup panel top-right); on narrow screens both become a
+ * full-width bottom sheet.
+ */
+.cf-card {
+  position: fixed;
+  right: var(--space-6);
+  width: 380px;
+  max-width: calc(100vw - 32px);
+  display: flex;
+  flex-direction: column;
+  background: var(--bg);
+  color: var(--fg);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-2);
+  font: var(--text-base) / 1.5 var(--font);
+  z-index: 2147483645;
+  overflow: hidden;
+}
+
+@media (max-width: 640px) {
+  .cf-card {
+    right: 0;
+    left: 0;
+    top: auto;
+    bottom: 0;
+    width: 100%;
+    max-width: 100%;
+    border-radius: var(--radius-lg) var(--radius-lg) 0 0;
+    padding-bottom: env(safe-area-inset-bottom, 0);
+  }
+}
+
+.cf-header {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  padding: var(--space-4) var(--space-5);
+  border-bottom: 1px solid var(--border);
+  cursor: grab;
+  touch-action: none;
+}
+.cf-header:active {
+  cursor: grabbing;
+}
+
+.cf-grip {
+  width: 36px;
+  height: 4px;
+  border-radius: var(--radius-pill);
+  background: var(--border-strong);
+  margin: 0 auto;
+}
+@media (min-width: 641px) {
+  .cf-grip {
+    display: none;
+  }
+}
+/* The grip is the sheet's handle, so it belongs centred above the title row —
+   as a flex sibling of a `flex: 1` title it just got shoved to the left edge. */
+@media (max-width: 640px) {
+  .cf-header {
+    flex-wrap: wrap;
+    padding-top: var(--space-2);
+  }
+  .cf-grip {
+    flex: 1 0 100%;
+  }
+}
+
+.cf-close {
+  border: none;
+  background: transparent;
+  color: var(--muted);
+  font-size: 20px;
+  line-height: 1;
+  cursor: pointer;
+  padding: var(--space-1) var(--space-3);
+  min-height: 32px;
+}
+@media (pointer: coarse) {
+  .cf-close {
+    min-width: var(--tap);
+    min-height: var(--tap);
+  }
+}
+
+.cf-body {
+  padding: var(--space-5);
+  overflow-y: auto;
+  flex: 1;
+  overscroll-behavior: contain;
+}
+
+.cf-footer {
+  display: flex;
+  gap: var(--space-3);
+  padding: var(--space-4) var(--space-5);
+  border-top: 1px solid var(--border);
+  flex-wrap: wrap;
+}
+.cf-footer button.cf-btn {
+  flex: 1;
+  min-height: var(--tap);
+  min-width: 96px;
+  font-size: var(--text-md);
+}
+
+/**
+ * Collapsed state: the sheet folds down to a pill instead of being destroyed,
+ * so it can always be brought back without re-running the fill.
+ */
+.cf-pill {
+  position: fixed;
+  right: var(--space-6);
+  bottom: var(--space-6);
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-height: var(--tap);
+  padding: 0 var(--space-5);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-pill);
+  background: var(--bg);
+  color: var(--fg);
+  box-shadow: var(--shadow-2);
+  font: 600 var(--text-md) / 1 var(--font);
+  cursor: pointer;
+  z-index: 2147483645;
+}
+
+@media (max-width: 640px) {
+  .cf-pill {
+    right: auto;
+    left: 50%;
+    transform: translateX(-50%);
+    bottom: calc(var(--space-6) + env(safe-area-inset-bottom, 0px));
+  }
+}
+
+/* ---------------- Chips ---------------- */
+
+.chip {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  padding: 2px var(--space-3);
+  border-radius: var(--radius-pill);
+  border: 1px solid var(--border);
+  background: var(--surface);
+  color: var(--muted);
+  font-size: var(--text-xs);
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.chip.ok {
+  background: var(--ok-weak);
+  border-color: transparent;
+  color: var(--ok);
+}
+.chip.warn {
+  background: var(--warn-weak);
+  border-color: transparent;
+  color: var(--warn);
+}
+.chip.err {
+  background: var(--err-weak);
+  border-color: transparent;
+  color: var(--err);
+}
+.chip.accent {
+  background: var(--accent-weak);
+  border-color: transparent;
+  color: var(--accent);
+}
+
+/* ---------------- Motion ---------------- */
+
+@media (prefers-reduced-motion: reduce) {
+  * {
+    transition-duration: 0.01ms !important;
+    animation-duration: 0.01ms !important;
+  }
+}

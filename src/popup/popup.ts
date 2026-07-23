@@ -1,19 +1,29 @@
 /**
- * Popup: shows whether the current page matches a site config and offers a
- * state-aware Fill / Reset & Re-run button that drives the content script.
+ * Popup: shows whether the current page matches a site config, offers a
+ * state-aware Fill / Show report / Reset & Re-run button, and reports where you
+ * are in a running queue session.
  */
 
-import { MSG, type StatusResponse } from '../shared/messages';
+import { MSG, type SessionState, type StatusResponse } from '../shared/messages';
 import { BUILD_ID, BUILD_LABEL } from '../shared/buildId';
+import { hostOf } from '../shared/url';
 
 const badge = document.getElementById('site-status')!;
 const detail = document.getElementById('detail')!;
 const primary = document.getElementById('primary') as HTMLButtonElement;
 const reconfigure = document.getElementById('reconfigure') as HTMLAnchorElement;
 const openOptions = document.getElementById('open-options') as HTMLAnchorElement;
+const openQueue = document.getElementById('open-queue') as HTMLAnchorElement;
+const sessionBox = document.getElementById('session')!;
+const sessionCount = document.getElementById('session-count')!;
+const sessionDetail = document.getElementById('session-detail')!;
+const sessionBar = document.getElementById('session-bar')!;
+const sessionSkip = document.getElementById('session-skip') as HTMLButtonElement;
 
 let tabId: number | undefined;
+let tabUrl: string | undefined;
 let status: StatusResponse | undefined;
+let session: SessionState | undefined;
 
 async function activeTab(): Promise<chrome.tabs.Tab | undefined> {
   const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
@@ -30,6 +40,15 @@ function send<T = unknown>(type: string, extra: Record<string, unknown> = {}): P
   });
 }
 
+function sendBg<T = unknown>(type: string, extra: Record<string, unknown> = {}): Promise<T | undefined> {
+  return new Promise((resolve) => {
+    chrome.runtime.sendMessage({ type, ...extra }, (resp) => {
+      if (chrome.runtime.lastError) return resolve(undefined);
+      resolve(resp as T);
+    });
+  });
+}
+
 function renderNoContentScript(): void {
   badge.textContent = 'n/a';
   badge.className = 'badge';
@@ -37,15 +56,8 @@ function renderNoContentScript(): void {
   primary.disabled = true;
 }
 
-function hostOf(url: string): string {
-  try {
-    return new URL(url).host;
-  } catch {
-    return url;
-  }
-}
-
 function render(): void {
+  renderSession();
   if (!status) return renderNoContentScript();
   if (status.siteMatched) {
     badge.textContent = 'matched';
@@ -57,7 +69,11 @@ function render(): void {
         ? `${status.siteName}${via}: ${status.filledCount}/${status.reportedCount} fields filled.`
         : `${status.siteName}${via}: ready to fill.`;
     primary.disabled = false;
-    primary.textContent = status.hasRun ? 'Reset & Re-run' : 'Fill';
+    // With the report collapsed, the useful action is to bring it back — not to
+    // wipe every field that was just filled, which is what re-running does.
+    primary.textContent = status.hasRun
+      ? (status.modalMinimized ? 'Show report' : 'Reset & Re-run')
+      : 'Fill';
     reconfigure.hidden = false;
   } else {
     badge.textContent = 'no config';
@@ -69,14 +85,35 @@ function render(): void {
   }
 }
 
+function renderSession(): void {
+  const p = session?.progress;
+  const active = !!session?.active;
+  sessionBox.hidden = !active;
+  openQueue.hidden = active || !p || p.queued === 0;
+
+  if (!active || !p) return;
+  sessionCount.textContent = `${p.done} of ${p.total} done`;
+  sessionDetail.textContent = `${p.queued} waiting · ${p.inFlight} open · ${p.applied} applied`;
+  sessionBar.style.width = `${Math.round(p.ratio * 100)}%`;
+  // Only offer Skip for a page that is actually one of the session's postings.
+  sessionSkip.disabled = !tabUrl;
+}
+
 /** Open the on-page visual Setup panel in the active tab, then close the popup. */
 async function enterSetup(): Promise<void> {
   await send(MSG.SETUP);
   window.close();
 }
 
+/**
+ * Page status first, session second: the popup must paint as soon as the content
+ * script answers, rather than waiting on a background worker that may be asleep
+ * (or, on a page with no session, has nothing interesting to say).
+ */
 async function refresh(): Promise<void> {
   status = await send<StatusResponse>(MSG.STATUS);
+  render();
+  session = await sendBg<SessionState>(MSG.SESSION_STATE);
   render();
 }
 
@@ -87,6 +124,11 @@ primary.addEventListener('click', async () => {
     return;
   }
   primary.disabled = true;
+  if (status.hasRun && status.modalMinimized) {
+    await send(MSG.SHOW_REPORT);
+    window.close();
+    return;
+  }
   if (status.hasRun) {
     await send(MSG.RESET);
     status = await send<StatusResponse>(MSG.STATUS);
@@ -96,9 +138,22 @@ primary.addEventListener('click', async () => {
   render();
 });
 
+sessionSkip.addEventListener('click', async () => {
+  if (!tabUrl) return;
+  sessionSkip.disabled = true;
+  await sendBg(MSG.SESSION_SKIP, { url: tabUrl });
+  window.close();
+});
+
 reconfigure.addEventListener('click', async (e) => {
   e.preventDefault();
   await enterSetup();
+});
+
+openQueue.addEventListener('click', (e) => {
+  e.preventDefault();
+  chrome.runtime.sendMessage({ type: MSG.OPEN_OPTIONS });
+  window.close();
 });
 
 openOptions.addEventListener('click', (e) => {
@@ -128,5 +183,6 @@ openOptions.addEventListener('click', (e) => {
 (async () => {
   const tab = await activeTab();
   tabId = tab?.id;
+  tabUrl = tab?.url;
   await refresh();
 })();

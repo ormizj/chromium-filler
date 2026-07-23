@@ -5,7 +5,7 @@
  * popup.ts fresh, and assert what the user actually sees for each state.
  */
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
-import type { StatusResponse } from '../shared/messages';
+import type { SessionState, StatusResponse } from '../shared/messages';
 import { MSG } from '../shared/messages';
 // Inject the REAL popup markup so the render logic runs against production DOM.
 import HTML from './popup.html?raw';
@@ -43,6 +43,34 @@ const matched = (over: Partial<StatusResponse> = {}): StatusResponse => ({
   hasRun: false,
   ...over,
 });
+
+/** Make the background answer SESSION_STATE with this snapshot. */
+function mockSession(state: SessionState | undefined): unknown[] {
+  const sent: unknown[] = [];
+  chrome.runtime.sendMessage = vi.fn((msg: unknown, cb?: (r: unknown) => void) => {
+    sent.push(msg);
+    cb?.((msg as { type: string }).type === MSG.SESSION_STATE ? state : { ok: true });
+  }) as unknown as typeof chrome.runtime.sendMessage;
+  return sent;
+}
+
+const session = (over: Partial<SessionState['progress']> = {}): SessionState => ({
+  active: true,
+  batchSize: 5,
+  progress: {
+    total: 60, queued: 48, inFlight: 5, applied: 6, skipped: 1, done: 7, ratio: 7 / 60, ...over,
+  },
+});
+
+/** Swap in a recording sendMessage after mount (mountPopup installs its own). */
+function recordTabMessages(reply: StatusResponse): unknown[] {
+  const sent: unknown[] = [];
+  chrome.tabs.sendMessage = vi.fn((_tabId: number, msg: unknown, cb?: (r: unknown) => void) => {
+    sent.push(msg);
+    cb?.(reply);
+  }) as unknown as typeof chrome.tabs.sendMessage;
+  return sent;
+}
 
 beforeEach(() => {
   chrome.runtime.sendMessage = vi.fn();
@@ -91,16 +119,6 @@ describe('popup render', () => {
     expect(primary.disabled).toBe(true);
   });
 
-  /** Swap in a recording sendMessage after mount (mountPopup installs its own). */
-  function recordTabMessages(reply: StatusResponse): unknown[] {
-    const sent: unknown[] = [];
-    chrome.tabs.sendMessage = vi.fn((_tabId: number, msg: unknown, cb?: (r: unknown) => void) => {
-      sent.push(msg);
-      cb?.(reply);
-    }) as unknown as typeof chrome.tabs.sendMessage;
-    return sent;
-  }
-
   it('clicking the button with no config enters on-page setup in the tab', async () => {
     const noCfg = matched({ siteMatched: false, siteName: undefined });
     await mountPopup(noCfg);
@@ -118,5 +136,63 @@ describe('popup render', () => {
     link.click();
     await flush();
     expect(sent).toContainEqual(expect.objectContaining({ type: MSG.SETUP }));
+  });
+});
+
+describe('queue session', () => {
+  it('hides the session strip when no session is running', async () => {
+    mockSession({ active: false, batchSize: 5, progress: {
+      total: 0, queued: 0, inFlight: 0, applied: 0, skipped: 0, done: 0, ratio: 0,
+    } });
+    await mountPopup(matched());
+    expect(document.getElementById('session')!.hidden).toBe(true);
+  });
+
+  it('shows progress through the queue while a session runs', async () => {
+    mockSession(session());
+    await mountPopup(matched());
+    expect(document.getElementById('session')!.hidden).toBe(false);
+    expect(document.getElementById('session-count')!.textContent).toBe('7 of 60 done');
+    expect(document.getElementById('session-detail')!.textContent)
+      .toContain('48 waiting · 5 open · 6 applied');
+  });
+
+  it('skipping reports this posting to the background so the next one opens', async () => {
+    const sent = mockSession(session());
+    await mountPopup(matched(), 'https://boards.example/job/7');
+    (document.getElementById('session-skip') as HTMLButtonElement).click();
+    await flush();
+    expect(sent).toContainEqual(
+      expect.objectContaining({ type: MSG.SESSION_SKIP, url: 'https://boards.example/job/7' }),
+    );
+  });
+
+  it('offers the queue when postings are waiting but no session is running', async () => {
+    mockSession({ active: false, batchSize: 5, progress: {
+      total: 10, queued: 10, inFlight: 0, applied: 0, skipped: 0, done: 0, ratio: 0,
+    } });
+    await mountPopup(matched());
+    expect((document.getElementById('open-queue') as HTMLAnchorElement).hidden).toBe(false);
+  });
+});
+
+describe('minimized report', () => {
+  /**
+   * The close button used to destroy the report, leaving "Reset & Re-run" — a
+   * destructive action — as the only way back. Collapsed now means restorable.
+   */
+  it('offers Show report instead of Reset & Re-run when the modal is collapsed', async () => {
+    await mountPopup(matched({ hasRun: true, filledCount: 5, reportedCount: 6, modalMinimized: true }));
+    expect((document.getElementById('primary') as HTMLButtonElement).textContent).toBe('Show report');
+  });
+
+  it('restores the report without resetting the fields', async () => {
+    const status = matched({ hasRun: true, filledCount: 5, reportedCount: 6, modalMinimized: true });
+    await mountPopup(status);
+    const sent = recordTabMessages(status);
+    (document.getElementById('primary') as HTMLButtonElement).click();
+    await flush();
+    expect(sent).toContainEqual(expect.objectContaining({ type: MSG.SHOW_REPORT }));
+    expect(sent).not.toContainEqual(expect.objectContaining({ type: MSG.RESET }));
   });
 });
