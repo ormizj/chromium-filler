@@ -34,11 +34,17 @@ because otherwise they are only reachable by loading the built extension and
 driving a real site. `?page=modal&session=1` shows the queue strip and the
 footer overflow menu.
 
-`&state=…` picks which **flow** the surface is showing — modal: `redirect`,
+`&state=…` picks which **flow** the surface is showing — modal: `long`, `redirect`,
 `redirect-followed`, `landed`, `empty`, `failed-fill`; setup: `external`. A two-step posting
 renders a different modal body entirely (notice + "Fill this page instead", no
 report), so it needs its own state rather than being inferred from the default
-data. Add a state here whenever a flow gains a distinct rendering.
+data. Add a state here whenever a flow gains a distinct rendering. `state=long` is
+a full-length posting — the reading typography is the Job view's whole job, and a
+three-line description proves nothing about it.
+
+`&view=job|fields` picks which of the modal's two views is open. The Job view is
+the default everywhere, so the report is otherwise only reachable by clicking,
+which a screenshot cannot do.
 
 E2E loads the built extension into real Chromium (`npx playwright install chromium`
 once). Always `npm run build` before `npm run test:e2e` — the suite loads `dist/`.
@@ -50,6 +56,12 @@ the user presses the site's own Send button. Filling is automatic but **never
 silent**: a Shadow-DOM review modal reports every field as filled (green) /
 low-confidence (yellow) / unmatched (red).
 
+The modal has **two views behind a header toggle**, and Job is the default: once
+the form is filled the user's question is "do I want this job?", not "which of
+sixteen fields matched". The report lives behind the Fields tab, which carries the
+report's *worst* status as a dot — hiding the report must never hide a problem,
+and that dot is what the E2E `.cf-dot.none` assertions now see.
+
 Three runtime contexts, all sharing `src/shared` (which holds every piece of
 pure, unit-tested logic):
 
@@ -57,8 +69,9 @@ pure, unit-tested logic):
   matching page: wait for slow form (`waitForForm.ts`) → run prep steps
   (`prep.ts`) → classify the posting (`redirectDetect.ts`) → **either** hand off
   to the external application **or** extract job title/description
-  (`extract.ts`) → detect fields (`fieldDetect.ts`) → fill high-confidence only,
-  incl. CV via DataTransfer (`fill.ts`) → show modal (`modal/`).
+  (`extract.ts`, which walks containers into blocks via `shared/jobText.ts`) →
+  detect fields (`fieldDetect.ts`) → fill high-confidence only, incl. CV via
+  DataTransfer (`fill.ts`) → show modal (`modal/`).
   `picker.ts` = click/tap-to-pick override.
 - **`src/background/service_worker.ts`** — opens options, handles the `SUBMITTED`
   message (mark URL applied + optional tab close), and owns the two-step redirect
@@ -93,6 +106,16 @@ every fillable field (`resume` = the CV file).
 `SiteConfig` drives per-site behavior: `urlPatterns` (match-pattern or `/regex/`),
 `waitFor`, `prep`, `extract`, `fieldOverrides` (beat the heuristics), `cvUpload`,
 `submitCv`, `autoDetect`, `successSelector`.
+
+`settings.modalLayout` (`shared/modalLayout.ts`) is where the review modal sits and
+how big it is, set from the drag-and-resize simulator in Options → Settings and
+updated when the modal itself is dragged. It is **desktop only** — at or below
+`NARROW_WIDTH` (640px, shared with primitives.css) the modal is a full-width
+bottom sheet and `modal.ts` *clears* the inline styles, because an inline width
+would beat the media query. Every read goes through `clampLayout`, so a layout
+chosen on a big monitor cannot strand the card off the edge of a laptop; the
+Options simulator models a reference 1440×900 screen when the options page is
+itself narrow, so opening that tab on a phone cannot shrink a desktop layout.
 
 ### Two-step (redirect) postings
 A board mixes quick-apply postings with postings that hand off to an employer
@@ -149,6 +172,12 @@ dashboard.
   signal; a bare `submit` event is only the fallback for full-page-nav flows
   (AJAX fires `submit` before the server confirms and may still fail).
 - **Never auto-submit.** Only fill and report.
+- **Never read a job container with `textContent`.** It welds every heading,
+  paragraph and bullet into one string and preserves the HTML source's own
+  indentation, which is what made the description unreadable. `shared/jobText.ts`
+  walks it into blocks instead — and drops `form`/`nav`/`aside`/`footer`, because
+  the broad `jobDescription` fallbacks (`main`, `article`, `[class*="content"]`)
+  otherwise quote the application form and the decoy sidebar back at the user.
 - **Closing the review modal must never destroy it.** `onClose` minimizes to the
   pill (`FillerModal.minimize`); destroying it left "Reset & Re-run" as the only
   way back, which wipes every field just filled.

@@ -133,6 +133,39 @@
               <option value="sameTab">Open in the same tab</option>
             </select>
           </label>
+
+          <h3>Review modal — size &amp; position</h3>
+          <p class="hint" style="margin: 0 0 8px;">
+            Drag the card to move it, drag its top-left corner to resize. The frame
+            below is a screen to scale, so what you set here is what the modal gets
+            on a real posting. This applies on desktop only — under 640px wide the
+            modal is always a full-width bottom sheet, so on a phone the frame
+            stands in for a desktop screen rather than for this one.
+          </p>
+          <div id="sim" class="sim">
+            <!-- A stand-in posting, so the card is judged against a page rather
+                 than against an empty box. -->
+            <div class="sim-page" aria-hidden="true">
+              <span class="sim-bar w60 tall"></span>
+              <span class="sim-bar w90"></span>
+              <span class="sim-bar w80"></span>
+              <span class="sim-bar w40"></span>
+              <span class="sim-bar w85"></span>
+              <span class="sim-bar w70"></span>
+            </div>
+            <div id="sim-card" class="sim-card" role="application"
+                 aria-label="Review modal position and size. Drag to move; use the corner handle to resize.">
+              <span class="sim-card-head" aria-hidden="true"></span>
+              <span class="sim-card-body" aria-hidden="true"></span>
+              <span class="sim-card-foot" aria-hidden="true"></span>
+              <button id="sim-grip" class="sim-grip" aria-label="Resize the modal"></button>
+            </div>
+          </div>
+          <p id="sim-readout" class="status" role="status" aria-live="polite"></p>
+          <div class="row" style="margin-top: 8px;">
+            <button id="sim-preview" class="btn">Preview at full size</button>
+            <button id="sim-reset" class="btn">Restore default</button>
+          </div>
         </section>
       </div>
 

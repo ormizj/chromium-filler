@@ -20,7 +20,9 @@
 import './mock-chrome';
 import type { FieldMatch } from '../src/shared/types';
 import type { SessionState } from '../src/shared/messages';
-import { FillerModal, type ModalData } from '../src/content/modal/modal';
+import type { JobBlock } from '../src/shared/jobText';
+import { DEFAULT_MODAL_LAYOUT } from '../src/shared/modalLayout';
+import { FillerModal, type ModalData, type ModalView } from '../src/content/modal/modal';
 import { SetupPanel, type SetupData } from '../src/content/setupPanel';
 
 type Page = 'popup' | 'options' | 'modal' | 'setup';
@@ -105,13 +107,53 @@ const REPORT: FieldMatch[] = [
 const BASE_MODAL: ModalData = {
   siteName: 'Acme Careers',
   jobTitle: 'Staff Platform Engineer',
-  jobDescription: 'Acme is hiring a Staff Platform Engineer to own the deployment '
-    + 'pipeline end to end. You will work across infrastructure, developer tooling, '
-    + 'and release engineering.',
-  jobRequirements: '8+ years, Kubernetes, Go or Rust, on-call experience.',
+  jobDescription: [
+    { kind: 'para', text: 'Acme is hiring a Staff Platform Engineer to own the deployment pipeline end to end. You will work across infrastructure, developer tooling, and release engineering.' },
+  ],
+  jobRequirements: [
+    { kind: 'list', items: ['8+ years', 'Kubernetes', 'Go or Rust', 'On-call experience'] },
+  ],
   matches: REPORT,
   canSubmitCv: true,
+  // What a fresh install gets. Without it the card falls back to the CSS
+  // defaults, which is a size no real user would ever see.
+  layout: DEFAULT_MODAL_LAYOUT,
 };
+
+/**
+ * A posting of realistic length and shape. The typography is the whole point of
+ * the Job view, and a three-line description proves nothing about it: paragraph
+ * rhythm, heading spacing and bullet indents only misbehave at length.
+ */
+const LONG_DESCRIPTION: JobBlock[] = [
+  { kind: 'para', text: 'Acme runs the deployment pipeline for every product team in the company. Roughly four hundred engineers ship through it each week, and when it is slow or unreliable, all of them feel it at once.' },
+  { kind: 'heading', text: 'About the role' },
+  { kind: 'para', text: 'You will own that pipeline end to end: the build system, the release tooling, and the guardrails that keep a bad change from reaching production. This is a hands-on staff role — you will spend most of your time in code, and the rest making sure the people around you do not have to.' },
+  { kind: 'para', text: 'The team is eight engineers across three time zones. We work asynchronously by default, with two hours of overlap each day and no expectation of being online outside them.' },
+  { kind: 'heading', text: 'What you will do' },
+  { kind: 'list', items: [
+    'Own the build and release pipeline, from commit to production rollout',
+    'Cut the median deploy time, which is currently just over eleven minutes',
+    'Design the guardrails — progressive rollout, automated rollback, change budgets',
+    'Mentor engineers on the team and review the designs that touch delivery',
+    'Carry the on-call pager for the pipeline, roughly one week in eight',
+  ] },
+  { kind: 'heading', text: 'What we are looking for' },
+  { kind: 'list', items: [
+    'Eight or more years building and operating developer infrastructure at scale',
+    'Deep familiarity with Kubernetes, and with what goes wrong in it',
+    'Strong Go or Rust — the tooling is Go, the agent is Rust',
+    'Experience owning a system that other engineers depend on hourly',
+  ] },
+  { kind: 'heading', text: 'Nice to have' },
+  { kind: 'list', items: [
+    'Bazel, Buck, or another build system you have had to make fast',
+    'Public writing or speaking about delivery engineering',
+  ] },
+  { kind: 'heading', text: 'How we hire' },
+  { kind: 'para', text: 'Four conversations over two weeks: an intro call, a systems design discussion, a practical session on a real problem from our backlog, and a conversation with the team you would join. We pay for the practical session.' },
+  { kind: 'para', text: 'Acme is an equal opportunity employer. We are happy to make adjustments to the process — tell us what you need.' },
+];
 
 /**
  * One entry per flow the modal can be in. `redirect`/`redirect-followed` are the
@@ -121,6 +163,12 @@ const BASE_MODAL: ModalData = {
  */
 const MODAL_STATES: Record<string, Partial<ModalData>> = {
   default: {},
+  // A full-length posting: the only state that exercises the reading typography
+  // and the body scroll the Job view exists for.
+  long: {
+    jobDescription: LONG_DESCRIPTION,
+    jobRequirements: [],
+  },
   redirect: {
     siteName: 'MixedBoard',
     matches: [],
@@ -151,7 +199,9 @@ const MODAL_STATES: Record<string, Partial<ModalData>> = {
   empty: {
     siteName: 'ListingBoard',
     jobTitle: 'Platform engineering jobs',
-    jobDescription: '3 results. Each employer takes applications on its own site.',
+    jobDescription: [
+      { kind: 'para', text: '3 results. Each employer takes applications on its own site.' },
+    ],
     jobRequirements: undefined,
     matches: ['fullName', 'email', 'phone', 'coverLetter', 'city', 'resume']
       .map((f) => match(f as FieldMatch['field'], 'none', false)),
@@ -171,6 +221,7 @@ function bootModal(): void {
     onFillAnyway: () => console.log('[harness] fill anyway'),
     onSkip: () => console.log('[harness] skip'),
     onClose: () => modal.minimize(),
+    onLayoutChange: (l) => console.log('[harness] layout', l),
   });
 
   modal.render({
@@ -182,6 +233,12 @@ function bootModal(): void {
     // Kept alongside `state=landed` because the README links `?via=1`.
     via: params.get('via') === '1' ? 'boards.example' : MODAL_STATES[state]?.via,
   });
+
+  // `&view=fields` opens on the report. The Job view is the default everywhere
+  // else, so without this the report is only reachable by clicking — which a
+  // screenshot cannot do.
+  const view = params.get('view');
+  if (view === 'fields' || view === 'job') modal.setView(view as ModalView);
 }
 
 function bootSetup(): void {

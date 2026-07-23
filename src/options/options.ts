@@ -7,9 +7,16 @@
  */
 
 import type {
-  JobUrlEntry, JobUrlStatus, Profile, RedirectTarget, SiteConfig, TextFieldKey,
+  JobUrlEntry, JobUrlStatus, ModalLayout, Profile, RedirectTarget, SiteConfig, TextFieldKey,
 } from '../shared/types';
 import type { SessionState } from '../shared/messages';
+import {
+  clampLayout, DEFAULT_MODAL_LAYOUT, NARROW_WIDTH, REFERENCE_VIEWPORT,
+} from '../shared/modalLayout';
+// The real review modal, rendered over this page for the full-size preview —
+// the same trick the dev harness uses. A mock of it would only ever be a lie
+// about the thing being configured.
+import { FillerModal, type ModalCallbacks, type ModalData } from '../content/modal/modal';
 import { TEXT_FIELDS, FIELD_LABELS } from '../shared/fieldKeys';
 import { configTemplate } from '../shared/configTemplate';
 import { extractUrls } from '../shared/urlImport';
@@ -181,6 +188,179 @@ async function initSettings(): Promise<void> {
   closeOnSubmit.addEventListener('change', persist);
   closeDelay.addEventListener('change', persist);
   redirectTarget.addEventListener('change', persist);
+
+  await initModalLayout(settings.modalLayout);
+}
+
+/* ---------------- Review-modal size & position ---------------- */
+
+/**
+ * A scale model of the user's own viewport, dragged and resized directly.
+ *
+ * The modal is a floating card over someone else's page, and where it sits is a
+ * matter of taste and of screen — there is no correct default. Picking it by
+ * trial and error on a live posting means re-running the fill for every nudge, so
+ * the choice is made here instead, against a stand-in page.
+ *
+ * The frame is the real viewport to scale: its aspect ratio and the `scale`
+ * factor come from `window.inner*`, so every drag maps 1:1 onto real CSS pixels
+ * and the readout can state them plainly. "Preview at full size" then renders the
+ * *actual* `FillerModal` over this page — the model is for placing, the preview
+ * is for believing.
+ */
+async function initModalLayout(initial: ModalLayout): Promise<void> {
+  const frame = $('sim');
+  const card = $('sim-card');
+  const grip = $('sim-grip');
+  const readout = $('sim-readout');
+
+  let layout = initial;
+  let scale = 1;
+  let preview: FillerModal | undefined;
+  let saveTimer: number | undefined;
+
+  /**
+   * The screen being modelled. On a phone that is NOT this window: the layout is
+   * only ever used above 640px, and clamping it to a 390px viewport — which is
+   * what modelling the real window would do — would silently shrink the user's
+   * desktop card the moment they opened this tab on their phone.
+   */
+  const viewport = () => (window.innerWidth > NARROW_WIDTH
+    ? { width: window.innerWidth, height: window.innerHeight }
+    : REFERENCE_VIEWPORT);
+
+  /** The frame stands in for that screen, so it has to have its shape. */
+  const measure = () => {
+    const width = frame.clientWidth;
+    if (!width) return false; // hidden tab panel: nothing to scale against yet
+    const vp = viewport();
+    const height = `${Math.round(width * (vp.height / vp.width))}px`;
+    if (frame.style.height !== height) frame.style.height = height;
+    scale = width / vp.width;
+    return true;
+  };
+
+  const paint = () => {
+    if (!scale) return;
+    const vp = viewport();
+    layout = clampLayout(layout, vp.width, vp.height);
+    card.style.width = `${layout.width * scale}px`;
+    card.style.height = `${layout.height * scale}px`;
+    card.style.right = `${layout.right * scale}px`;
+    card.style.bottom = `${layout.bottom * scale}px`;
+    const modelled = vp === REFERENCE_VIEWPORT
+      ? ` · on a ${vp.width} × ${vp.height} screen`
+      : '';
+    readout.textContent =
+      `${layout.width} × ${layout.height} px · ${layout.right} from the right`
+      + ` · ${layout.bottom} from the bottom${modelled}`;
+    preview?.render(previewData(layout));
+  };
+
+  // Debounced: a drag is a stream of pointermoves, and each one would otherwise
+  // be a storage write that every open tab hears about.
+  const save = () => {
+    window.clearTimeout(saveTimer);
+    saveTimer = window.setTimeout(async () => {
+      const s = await getSettings();
+      await saveSettings({ ...s, modalLayout: layout });
+      setStatus($('settings-status'), 'Saved', 'ok');
+    }, 250);
+  };
+
+  /**
+   * One pointer gesture, in viewport pixels. `mode` decides whether the delta
+   * moves the card or resizes it — and because the card is anchored bottom-right,
+   * both are expressed as changes to `right`/`bottom`/`width`/`height` rather
+   * than to a top-left origin.
+   */
+  const drag = (el: HTMLElement, mode: 'move' | 'resize') => {
+    el.addEventListener('pointerdown', (e: PointerEvent) => {
+      e.preventDefault();
+      e.stopPropagation();
+      const start = { x: e.clientX, y: e.clientY, ...layout };
+      el.setPointerCapture(e.pointerId);
+
+      const onMove = (ev: PointerEvent) => {
+        const dx = (ev.clientX - start.x) / scale;
+        const dy = (ev.clientY - start.y) / scale;
+        layout = mode === 'move'
+          ? { ...start, right: start.right - dx, bottom: start.bottom - dy }
+          : { ...start, width: start.width - dx, height: start.height - dy };
+        paint();
+      };
+      const onUp = (ev: PointerEvent) => {
+        el.releasePointerCapture(ev.pointerId);
+        el.removeEventListener('pointermove', onMove);
+        save();
+      };
+
+      el.addEventListener('pointermove', onMove);
+      el.addEventListener('pointerup', onUp, { once: true });
+      el.addEventListener('pointercancel', onUp, { once: true });
+    });
+  };
+
+  drag(card, 'move');
+  drag(grip, 'resize');
+
+  $('sim-preview').addEventListener('click', (e) => {
+    const button = e.currentTarget as HTMLButtonElement;
+    if (preview) {
+      preview.destroy();
+      preview = undefined;
+      button.textContent = 'Preview at full size';
+      return;
+    }
+    preview = new FillerModal(PREVIEW_CALLBACKS);
+    preview.render(previewData(layout));
+    button.textContent = 'Close preview';
+  });
+
+  $('sim-reset').addEventListener('click', () => {
+    layout = DEFAULT_MODAL_LAYOUT;
+    paint();
+    save();
+  });
+
+  // The Settings panel is `hidden` until its tab is selected, and a hidden
+  // element has no width to scale against — measuring at boot yields a frame one
+  // pixel tall. A ResizeObserver covers every way it can gain a size (tab click,
+  // a `#settings` deep link, the window changing) without having to enumerate
+  // them; the window listener is still needed because `scale` also depends on
+  // the viewport, which can change while the frame's own width does not.
+  new ResizeObserver(() => { if (measure()) paint(); }).observe(frame);
+  window.addEventListener('resize', () => { if (measure()) paint(); });
+  measure();
+  paint();
+}
+
+/** The preview modal is a mannequin: its buttons must not do anything real. */
+const PREVIEW_CALLBACKS: ModalCallbacks = {
+  onRerun: () => {}, onReset: () => {}, onSubmitCv: () => {},
+  onConfirm: () => {}, onPick: () => {}, onFollow: () => {},
+  onFillAnyway: () => {}, onSkip: () => {}, onClose: () => {},
+};
+
+function previewData(layout: ModalLayout): ModalData {
+  return {
+    siteName: 'Example Careers',
+    jobTitle: 'Staff Platform Engineer',
+    jobDescription: [
+      { kind: 'para', text: 'This is a preview of the review modal at the size and position you have chosen. Drag the card in the frame above to move it.' },
+      { kind: 'heading', text: 'What you would see here' },
+      { kind: 'list', items: ['The posting’s description', 'Its requirements', 'The fill report, behind the Fields tab'] },
+    ],
+    // A sample report, so the Fields tab shows its status dot: the preview is
+    // meant to answer "does this size work", and an empty report would hide the
+    // one piece of chrome most likely to be clipped by a bad one.
+    matches: [
+      { field: 'fullName', source: 'heuristic', confidence: 'high', filled: true, required: false, valueToFill: 'Ada Lovelace' },
+      { field: 'city', source: 'none', confidence: 'none', filled: false, required: false },
+    ],
+    canSubmitCv: false,
+    layout,
+  };
 }
 
 /* ---------------- Site configs ---------------- */

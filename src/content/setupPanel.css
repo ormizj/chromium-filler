@@ -39,25 +39,6 @@
   min-width: 0;
 }
 
-.cf-build {
-  display: flex;
-  align-items: center;
-  gap: 5px;
-  font-size: 10px;
-  font-family: var(--mono);
-  margin-top: 3px;
-}
-.cf-build-version,
-.cf-build-hash,
-.cf-build-sep {
-  color: var(--muted);
-  opacity: 0.7;
-}
-.cf-build-label {
-  font-weight: 700;
-  color: var(--muted);
-}
-
 .cf-identity {
   display: flex;
   flex-direction: column;

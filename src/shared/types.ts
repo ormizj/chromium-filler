@@ -2,6 +2,8 @@
  * Core data model shared across content script, popup, options, and background.
  */
 
+import type { ModalLayout } from './modalLayout';
+
 /** Every user-profile field the filler knows how to place. `resume` is the CV file. */
 export type FieldKey =
   | 'firstName'
@@ -160,6 +162,9 @@ export interface JobUrlStats {
 /** Where a followed external application opens. */
 export type RedirectTarget = 'newTabCloseSource' | 'newTab' | 'sameTab';
 
+/** Re-exported so `types.ts` stays the one import for the data model. */
+export type { ModalLayout } from './modalLayout';
+
 export interface Settings {
   /** Auto-run the full flow when a matching page finishes loading. */
   autoRunOnLoad: boolean;
@@ -181,6 +186,13 @@ export interface Settings {
    * becomes 60 tabs. Lower it to 1–2 on mobile.
    */
   sessionBatchSize: number;
+  /**
+   * Where the review modal sits, and how big it is, on desktop. Set from the
+   * simulator in Options → Settings, and updated when the modal itself is
+   * dragged. Ignored under 640px, where the modal is a full-width bottom sheet.
+   * See `shared/modalLayout.ts` — every read is clamped to the viewport.
+   */
+  modalLayout: ModalLayout;
 }
 
 /** Everything persisted in chrome.storage.local (the CV bytes are stored separately, also in chrome.storage.local). */

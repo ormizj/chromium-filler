@@ -1,4 +1,5 @@
 import type { Profile, Settings, SiteConfig, StoredState } from './types';
+import { DEFAULT_MODAL_LAYOUT } from './modalLayout';
 
 export const DEFAULT_PROFILE: Profile = {
   values: {},
@@ -12,6 +13,7 @@ export const DEFAULT_SETTINGS: Settings = {
   closeTabDelayMs: 1500,
   redirectTarget: 'newTabCloseSource',
   sessionBatchSize: 5,
+  modalLayout: DEFAULT_MODAL_LAYOUT,
 };
 
 /**

@@ -2,6 +2,9 @@
  * Render-logic tests for the review modal. The modal is the extension's entire
  * promise — "filling is automatic but never silent" — so what a row *claims*
  * about a field has to match what actually happened to it.
+ *
+ * The report now sits behind the Fields tab, which puts that promise under
+ * pressure: hiding the report must not hide a problem. Hence the tab-dot tests.
  */
 import { describe, it, expect, afterEach, vi } from 'vitest';
 import { FillerModal, type ModalCallbacks, type ModalData } from './modal';
@@ -35,10 +38,32 @@ const data = (matches: FieldMatch[], over: Partial<ModalData> = {}): ModalData =
 
 let modal: FillerModal | undefined;
 
+const ORIG_VW = window.innerWidth;
+const ORIG_VH = window.innerHeight;
+
+/** Resize the (jsdom) viewport and fire the resize the modal listens for. */
+function setViewport(w: number, h: number): void {
+  Object.defineProperty(window, 'innerWidth', { value: w, configurable: true });
+  Object.defineProperty(window, 'innerHeight', { value: h, configurable: true });
+  window.dispatchEvent(new Event('resize'));
+}
+
+/** Render, then switch to the report — most of these tests are about the rows. */
 function render(d: ModalData, cb = callbacks()): ShadowRoot {
   modal = new FillerModal(cb);
   modal.render(d);
+  modal.setView('fields');
+  return shadow();
+}
+
+function shadow(): ShadowRoot {
   return (document.getElementById('chromium-filler-modal-host') as HTMLElement).shadowRoot!;
+}
+
+/** The Job/Fields tab buttons, by their label. */
+function tab(root: ShadowRoot, label: 'Job' | 'Fields'): HTMLButtonElement {
+  return Array.from(root.querySelectorAll<HTMLButtonElement>('.cf-view'))
+    .find((b) => b.textContent?.includes(label))!;
 }
 
 /** The rows, in render order, as `[dot class, aria-label, button labels]`. */
@@ -57,6 +82,7 @@ afterEach(() => {
   modal?.destroy();
   modal = undefined;
   document.getElementById('chromium-filler-modal-host')?.remove();
+  setViewport(ORIG_VW, ORIG_VH);
 });
 
 describe('FillerModal — the report tells the truth about each field', () => {
@@ -150,5 +176,177 @@ describe('FillerModal — the minimized pill', () => {
     expect(shadow.querySelector('.cf-card')).toBeNull();
     modal!.restore();
     expect(rows(shadow)).toHaveLength(1);
+  });
+});
+
+describe('FillerModal — the posting comes first', () => {
+  const posting = (over: Partial<ModalData> = {}) =>
+    data([match({ field: 'email', filled: true })], {
+      jobTitle: 'Staff Platform Engineer',
+      jobDescription: [
+        { kind: 'para', text: 'Acme is hiring.' },
+        { kind: 'heading', text: 'What you will do' },
+        { kind: 'list', items: ['Own the pipeline', 'Mentor'] },
+      ],
+      ...over,
+    });
+
+  it('opens on the job, not on the field report', () => {
+    modal = new FillerModal(callbacks());
+    modal.render(posting());
+    const root = shadow();
+    expect(root.querySelector('.cf-title')!.textContent).toBe('Staff Platform Engineer');
+    expect(root.querySelectorAll('.cf-row')).toHaveLength(0);
+  });
+
+  it('renders the description as prose, not as one welded string', () => {
+    modal = new FillerModal(callbacks());
+    modal.render(posting());
+    const prose = shadow().querySelector('.cf-prose')!;
+    expect(prose.querySelectorAll('p')).toHaveLength(1);
+    expect(prose.querySelector('h4')!.textContent).toBe('What you will do');
+    expect(Array.from(prose.querySelectorAll('li'), (li) => li.textContent))
+      .toEqual(['Own the pipeline', 'Mentor']);
+  });
+
+  it('keeps requirements as their own section', () => {
+    modal = new FillerModal(callbacks());
+    modal.render(posting({ jobRequirements: [{ kind: 'list', items: ['8+ years'] }] }));
+    const root = shadow();
+    expect(root.querySelector('.cf-section')!.textContent).toBe('Requirements');
+    expect(root.querySelectorAll('.cf-prose')).toHaveLength(2);
+  });
+
+  it('says so when the page had no description, rather than showing a blank body', () => {
+    modal = new FillerModal(callbacks());
+    modal.render(posting({ jobDescription: [], jobRequirements: [] }));
+    expect(shadow().querySelector('.cf-empty')).not.toBeNull();
+  });
+
+  it('shows the report once Fields is tapped, and goes back on Job', () => {
+    modal = new FillerModal(callbacks());
+    modal.render(posting());
+    const root = shadow();
+    tab(root, 'Fields').click();
+    expect(root.querySelectorAll('.cf-row')).toHaveLength(1);
+    tab(root, 'Job').click();
+    expect(root.querySelectorAll('.cf-row')).toHaveLength(0);
+    expect(root.querySelector('.cf-title')).not.toBeNull();
+  });
+
+  it('stays on Fields across a re-render, so confirming a field does not eject you', () => {
+    modal = new FillerModal(callbacks());
+    const d = posting();
+    modal.render(d);
+    tab(shadow(), 'Fields').click();
+    modal.render(d); // what Controller.confirmField does
+    expect(shadow().querySelectorAll('.cf-row')).toHaveLength(1);
+  });
+});
+
+describe('FillerModal — the Fields tab advertises what it is hiding', () => {
+  const withMatches = (matches: FieldMatch[]) => {
+    modal = new FillerModal(callbacks());
+    modal.render(data(matches, { jobTitle: 'A job' }));
+    return tab(shadow(), 'Fields').querySelector('.cf-dot')!.className;
+  };
+
+  it('is red while any field was never found', () => {
+    expect(withMatches([
+      match({ field: 'email', filled: true }),
+      match({ field: 'city', confidence: 'none', filled: false }),
+    ])).toContain('none');
+  });
+
+  it('is amber while a field needs review', () => {
+    expect(withMatches([
+      match({ field: 'email', filled: true }),
+      match({ field: 'phone', confidence: 'low', filled: false }),
+    ])).toContain('low');
+  });
+
+  it('is amber for a high-confidence field that did not actually fill', () => {
+    // Same rule as the row dot: "high confidence" is not "it worked".
+    expect(withMatches([match({ field: 'country', confidence: 'high', filled: false })]))
+      .toContain('low');
+  });
+
+  it('is green only when every field took its value', () => {
+    expect(withMatches([
+      match({ field: 'email', filled: true }),
+      match({ field: 'phone', confidence: 'low', filled: true }),
+    ])).toContain('high');
+  });
+
+  it('is not offered at all for a two-step posting, which has no form here', () => {
+    modal = new FillerModal(callbacks());
+    modal.render(data([], {
+      jobTitle: 'A job',
+      redirect: { host: 'ats.acme.test', reason: 'configured external apply link', followed: false },
+    }));
+    const root = shadow();
+    expect(root.querySelector('.cf-views')).toBeNull();
+    expect(root.querySelector('.cf-notice')!.textContent).toContain('ats.acme.test');
+  });
+});
+
+describe('FillerModal — stored geometry', () => {
+  it('applies the saved size and position on a desktop viewport', () => {
+    modal = new FillerModal(callbacks());
+    modal.render(data([match()], {
+      jobTitle: 'A job',
+      layout: { right: 40, bottom: 24, width: 500, height: 600 },
+    }));
+    const card = shadow().querySelector('.cf-card') as HTMLElement;
+    expect(card.style.width).toBe('500px');
+    expect(card.style.right).toBe('40px');
+  });
+
+  it('clamps a layout stored on a bigger screen back onto this one', () => {
+    modal = new FillerModal(callbacks());
+    modal.render(data([match()], {
+      jobTitle: 'A job',
+      layout: { right: 16, bottom: 16, width: 4000, height: 4000 },
+    }));
+    const card = shadow().querySelector('.cf-card') as HTMLElement;
+    expect(parseInt(card.style.width, 10)).toBeLessThanOrEqual(window.innerWidth);
+    expect(parseInt(card.style.height, 10)).toBeLessThanOrEqual(window.innerHeight);
+  });
+
+  it('turns off the CSS size caps so the card can reach the size that was set', () => {
+    // The stylesheet caps the card at min(88vh, 820px) tall as a fallback for the
+    // no-layout case; left in place it silently overrode a stored size, so a card
+    // meant to fill the screen came out 820px and the simulator was lying.
+    modal = new FillerModal(callbacks());
+    modal.render(data([match()], {
+      jobTitle: 'A job',
+      layout: { right: 0, bottom: 0, width: window.innerWidth, height: window.innerHeight },
+    }));
+    const card = shadow().querySelector('.cf-card') as HTMLElement;
+    expect(card.style.maxHeight).toBe('none');
+    expect(card.style.maxWidth).toBe('none');
+    expect(parseInt(card.style.height, 10)).toBe(window.innerHeight);
+  });
+
+  it('keeps the chosen size fixed: a temporary shrink fits, then springs back', () => {
+    // The bug this guards: applyLayout used to write the clamped size back over
+    // the stored one, so narrowing the tab shrank the modal permanently — widen
+    // it again and it stayed small. A fixed card fits a too-small viewport and
+    // returns to its size when there is room.
+    setViewport(1440, 900);
+    modal = new FillerModal(callbacks());
+    modal.render(data([match()], {
+      jobTitle: 'A job',
+      layout: { right: 16, bottom: 16, width: 460, height: 720 },
+    }));
+    const card = shadow().querySelector('.cf-card') as HTMLElement;
+    expect(card.style.height).toBe('720px');
+
+    setViewport(1000, 500); // shorter than the card
+    expect(parseInt(card.style.height, 10)).toBeLessThanOrEqual(500);
+
+    setViewport(1440, 900); // room again
+    expect(card.style.height).toBe('720px');
+    expect(card.style.width).toBe('460px');
   });
 });

@@ -9,7 +9,6 @@
  */
 
 import type { FieldKey, PrepAction } from '../shared/types';
-import { BUILD_ID, BUILD_LABEL } from '../shared/buildId';
 import { BASE_CSS } from '../ui/shadowCss';
 import setupCss from './setupPanel.css?inline';
 
@@ -117,23 +116,6 @@ export class SetupPanel {
     header.append(el('div', 'cf-grip'));
     const title = el('span', 'cf-heading');
     title.textContent = 'Set up this site';
-    const build = el('span', 'cf-build');
-    const mk = (cls: string, text: string): HTMLElement => {
-      const s = el('span', cls);
-      s.textContent = text;
-      return s;
-    };
-    const hash = BUILD_ID.slice(BUILD_LABEL.length).replace(/^ · /, '');
-    const parts = [
-      mk('cf-build-version', `v${chrome.runtime.getManifest().version}`),
-      ...(hash ? [mk('cf-build-hash', hash)] : []),
-      mk('cf-build-label', BUILD_LABEL),
-    ];
-    parts.forEach((p, i) => {
-      if (i) build.append(mk('cf-build-sep', '·'));
-      build.append(p);
-    });
-    title.append(build);
     const close = el('button', 'cf-close');
     close.textContent = '×';
     close.setAttribute('aria-label', 'Close');

@@ -3,9 +3,14 @@
  * site config selectors with generic fallbacks. `previewContainer` exposes the
  * same resolution (with its source) so the Setup panel can show what each
  * container selector currently matches — including auto-detected fallbacks.
+ *
+ * The container's *text* is never taken raw: shared/jobText.ts walks it into
+ * blocks, so the modal can render prose as prose and so the broad fallbacks below
+ * do not drag the application form and the sidebar in with the posting.
  */
 
 import type { SiteConfig } from '../shared/types';
+import { blocksToText, extractBlocks, type JobBlock } from '../shared/jobText';
 
 export type ContainerKey = 'jobTitle' | 'jobDescription' | 'jobRequirements';
 
@@ -48,33 +53,44 @@ export type ContainerSource = 'override' | 'override-miss' | 'auto' | 'none';
 
 export interface ContainerPreview {
   el: HTMLElement | null;
+  /** The container's readable structure — what the modal renders. */
+  blocks: JobBlock[];
+  /** The same content as plain text, one line per block (Setup panel snippets). */
   text?: string;
   source: ContainerSource;
 }
+
+function resolved(el: HTMLElement, source: ContainerSource): ContainerPreview {
+  const blocks = extractBlocks(el);
+  return { el, blocks, text: blocksToText(blocks), source };
+}
+
+const MISSING = (source: ContainerSource): ContainerPreview => ({ el: null, blocks: [], source });
 
 /** Resolve one job-info container: explicit selector first, then generic fallbacks. */
 export function previewContainer(config: SiteConfig, key: ContainerKey): ContainerPreview {
   const selector = config.extract[key];
   if (selector) {
     const el = elFor(selector);
-    return el
-      ? { el, text: el.textContent!.trim(), source: 'override' }
-      : { el: null, source: 'override-miss' };
+    return el ? resolved(el, 'override') : MISSING('override-miss');
   }
   const el = firstMatch(FALLBACKS[key]);
-  return el ? { el, text: el.textContent!.trim(), source: 'auto' } : { el: null, source: 'none' };
+  return el ? resolved(el, 'auto') : MISSING('none');
 }
 
 export interface ExtractedJob {
   title?: string;
-  description?: string;
-  requirements?: string;
+  description: JobBlock[];
+  requirements: JobBlock[];
 }
 
 export function extractJob(config: SiteConfig): ExtractedJob {
+  const title = previewContainer(config, 'jobTitle');
   return {
-    title: previewContainer(config, 'jobTitle').text ?? document.title,
-    description: previewContainer(config, 'jobDescription').text,
-    requirements: previewContainer(config, 'jobRequirements').text,
+    // A title is one line, so it stays a string — but a normalized one: an <h1>
+    // wrapped across three source lines used to arrive with its indentation.
+    title: (title.text || document.title).replace(/\s+/g, ' ').trim(),
+    description: previewContainer(config, 'jobDescription').blocks,
+    requirements: previewContainer(config, 'jobRequirements').blocks,
   };
 }

@@ -5,12 +5,15 @@
  * modal's actions, and click-to-pick overrides.
  */
 
-import type { FieldKey, FieldMatch, PrepAction, PrepStep, Profile, SiteConfig } from '../shared/types';
+import type {
+  FieldKey, FieldMatch, ModalLayout, PrepAction, PrepStep, Profile, Settings, SiteConfig,
+} from '../shared/types';
 import { findMatchingConfig } from '../shared/matcher';
 import { generateSelector } from '../shared/selector';
 import { isExternalUrl } from '../shared/redirect';
+import { DEFAULT_SETTINGS } from '../shared/defaults';
 import {
-  getState, saveFieldOverride, clearFieldOverride,
+  getState, getSettings, saveSettings, saveFieldOverride, clearFieldOverride,
   saveExtractSelector, clearExtractSelector, ensureConfigForUrl, mutateSiteConfig,
   saveRedirectSelector, clearRedirectSelector, type RedirectSelectorKey,
 } from '../shared/storage';
@@ -70,11 +73,14 @@ class Controller {
   private landedFrom?: string;
   /** Queue-session snapshot, refreshed per run so the modal can show progress. */
   private session?: SessionState;
+  /** User settings; the modal's size and position live here. */
+  private settings: Settings = DEFAULT_SETTINGS;
 
   async init(): Promise<void> {
     console.info(`${LOG} content script ready — v${chrome.runtime.getManifest().version} · build ${BUILD_ID}`);
     const state = await getState();
     this.profile = state.profile;
+    this.settings = state.settings;
     this.config = findMatchingConfig(location.href, state.siteConfigs);
 
     chrome.runtime.onMessage.addListener((msg: Message, _sender, sendResponse) => {
@@ -386,6 +392,7 @@ class Controller {
         // in place and the modal is one tap away, instead of only reachable
         // through a Reset & Re-run that would wipe them.
         onClose: () => this.modal?.minimize(),
+        onLayoutChange: (layout) => this.saveModalLayout(layout),
       });
     }
     const job = extractJob(this.config!);
@@ -403,7 +410,23 @@ class Controller {
         : undefined,
       via: this.landedFrom ? hostOf(this.landedFrom) : undefined,
       session: this.session,
+      layout: this.settings.modalLayout,
     });
+  }
+
+  /**
+   * Persist where the user dragged the card. Re-read before writing: several tabs
+   * run this script at once during a queue session, and a stale in-memory copy of
+   * the settings would otherwise stamp over whatever else was changed meanwhile.
+   */
+  private async saveModalLayout(layout: ModalLayout): Promise<void> {
+    this.settings = { ...this.settings, modalLayout: layout };
+    try {
+      const stored = await getSettings();
+      await saveSettings({ ...stored, modalLayout: layout });
+    } catch (e) {
+      console.warn(LOG, 'could not save the modal layout', e);
+    }
   }
 
   private confirmField(field: FieldKey): void {
@@ -738,8 +761,10 @@ function safeQuery(selector: string): HTMLElement | null {
 }
 
 /** Truncate to `n` chars with an ellipsis. */
+/** One-line snippet for a setup row's note — container text is multi-line now. */
 function clip(text: string, n: number): string {
-  return text.length > n ? `${text.slice(0, n)}…` : text;
+  const flat = text.replace(/\s+/g, ' ').trim();
+  return flat.length > n ? `${flat.slice(0, n)}…` : flat;
 }
 
 const TEXTLIKE_SELECTOR =

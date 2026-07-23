@@ -540,3 +540,114 @@ label.fld.inline input {
     min-height: var(--tap);
   }
 }
+
+/* ---------------- Review-modal layout simulator ---------------- */
+
+/**
+ * A scale model of the user's own viewport, so the modal's size and position can
+ * be set without a job posting open. The frame's aspect ratio and the scale
+ * factor are both computed from `window.inner*` in options.ts — every number in
+ * here is real CSS pixels divided by that scale, which is what makes dragging in
+ * a 600px-wide box mean something on a 1440px screen.
+ */
+.sim {
+  position: relative;
+  width: 100%;
+  max-width: 640px;
+  overflow: hidden;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-md);
+  background: var(--surface);
+  touch-action: none;
+  user-select: none;
+}
+
+/* The stand-in posting behind the card: enough page for "does it cover the form?"
+   to be a question the frame can answer. */
+.sim-page {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 10px;
+}
+.sim-bar {
+  height: 6px;
+  border-radius: var(--radius-pill);
+  background: var(--border);
+}
+.sim-bar.tall {
+  height: 10px;
+  background: var(--border-strong);
+}
+.sim-bar.w40 { width: 40%; }
+.sim-bar.w60 { width: 60%; }
+.sim-bar.w70 { width: 70%; }
+.sim-bar.w80 { width: 80%; }
+.sim-bar.w85 { width: 85%; }
+.sim-bar.w90 { width: 90%; }
+
+/* The card. Anchored bottom-right exactly as the real one is, so `right`/`bottom`
+   mean the same thing here as they do in the modal's inline styles. */
+.sim-card {
+  position: absolute;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 6px;
+  border: 1px solid var(--accent);
+  border-radius: var(--radius-sm);
+  background: var(--bg);
+  box-shadow: var(--shadow-1);
+  cursor: grab;
+  touch-action: none;
+}
+.sim-card:active {
+  cursor: grabbing;
+}
+.sim-card-head,
+.sim-card-foot {
+  flex: none;
+  height: 8px;
+  border-radius: 2px;
+  background: var(--accent-weak);
+}
+.sim-card-body {
+  flex: 1;
+  border-radius: 2px;
+  background: var(--surface);
+}
+
+/**
+ * The resize handle sits top-LEFT: the card is anchored to the bottom-right
+ * corner, so that is the corner that has to move for it to grow. Its hit area is
+ * padded out to a finger under coarse pointers while the dot stays small.
+ */
+.sim-grip {
+  position: absolute;
+  top: -7px;
+  left: -7px;
+  width: 14px;
+  height: 14px;
+  min-height: 0;
+  padding: 0;
+  border: 1px solid var(--bg);
+  border-radius: 50%;
+  background: var(--accent);
+  cursor: nwse-resize;
+  touch-action: none;
+}
+@media (pointer: coarse) {
+  .sim-grip {
+    top: -22px;
+    left: -22px;
+    width: var(--tap);
+    height: var(--tap);
+    border-radius: 50%;
+    background: var(--accent);
+    background-clip: content-box;
+    padding: 14px;
+    border: none;
+  }
+}
