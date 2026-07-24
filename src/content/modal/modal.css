@@ -29,12 +29,11 @@
   }
 }
 
+/* Sentence case, like every other label inside a surface — see `.cf-section`. */
 .cf-site {
   font-weight: 600;
   font-size: var(--text-sm);
   color: var(--muted);
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
   flex: 1;
   min-width: 0;
   overflow: hidden;
@@ -116,8 +115,11 @@ button.cf-view .cf-dot {
  */
 .cf-prose {
   font-size: var(--text-base);
-  line-height: 1.65;
-  color: var(--fg);
+  line-height: 1.7;
+  /* Body copy is the second ink level, with only the headings at full strength —
+     the reference's reading typography, and what keeps a full-length posting from
+     reading as a wall. */
+  color: var(--muted);
   overflow-wrap: break-word;
 }
 
@@ -127,7 +129,8 @@ button.cf-view .cf-dot {
 
 .cf-prose h4 {
   font-size: var(--text-md);
-  font-weight: 700;
+  font-weight: 600;
+  color: var(--fg);
   margin: var(--space-6) 0 var(--space-2);
 }
 
@@ -205,9 +208,39 @@ button.cf-btn.cf-applied-btn[aria-disabled='true'] {
 
 /* ---------------- Fields view ---------------- */
 
+/**
+ * The report is a divided list, not a stack of boxes. `.cf-row` is the shared
+ * inset-card row (the setup panel's shape, and the reference's `.setrow`); a
+ * report of sixteen of them was sixteen bordered rectangles inside one more
+ * bordered rectangle. The reference's `.field` is the other treatment — flat, on
+ * the paper, separated by a single hairline that runs the full width of the card.
+ *
+ * The negative margin is what gets the dividers to the card's edges: the body has
+ * padding, and a rule stopping short of it reads as a boxed list again.
+ */
 .cf-report {
   display: flex;
   flex-direction: column;
+  margin: 0 calc(var(--space-6) * -1);
+}
+
+.cf-report .cf-row {
+  background: none;
+  border: 0;
+  border-radius: 0;
+  border-bottom: 1px solid var(--border);
+  margin: 0;
+  padding: var(--space-3) var(--space-6);
+}
+
+.cf-report .cf-row:last-child {
+  border-bottom: 0;
+}
+
+/* The status as a word as well as a colour and an icon — the reference's per-row
+   tag. It sits between the value and the row's actions. */
+.cf-tag {
+  flex: none;
 }
 
 .cf-summary {
@@ -263,17 +296,20 @@ button.cf-btn.cf-applied-btn[aria-disabled='true'] {
  * Shown only while a queue session is running. It is the modal's reason for
  * being the primary control on mobile: progress and "next" without a trip
  * through the browser menu to the popup.
+ *
+ * A quiet line above the footer, as in the reference — it reports where you are,
+ * it is not something to act on, and as an accent-filled band it was the loudest
+ * thing in a card whose actual accent is the Apply button.
  */
 .cf-session {
   display: flex;
   align-items: center;
   gap: var(--space-3);
-  padding: var(--space-2) var(--space-5);
-  background: var(--accent-weak);
-  color: var(--accent);
+  padding: var(--space-4) var(--space-6);
+  color: var(--muted);
   font-size: var(--text-sm);
-  font-weight: 600;
-  border-bottom: 1px solid var(--border);
+  font-weight: 500;
+  border-top: 1px solid var(--border);
 }
 
 .cf-session .cf-progress {
@@ -290,7 +326,16 @@ button.cf-btn.cf-applied-btn[aria-disabled='true'] {
 .cf-more {
   position: relative;
   flex: 0 0 auto;
-  min-width: var(--tap);
+}
+
+/* A square icon button, the width of one tap — the footer's floor of 96px is for
+   the two decisions, and applying it here spent a quarter of a 390px footer on
+   three dots. */
+.cf-more > .cf-btn {
+  flex: 0 0 var(--tap);
+  width: var(--tap);
+  min-width: 0;
+  padding-inline: 0;
 }
 
 .cf-more-menu {

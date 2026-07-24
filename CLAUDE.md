@@ -128,9 +128,20 @@ Colour lives **only** in tokens.css. The primary button has one fill
 `.btn-primary` and nowhere else. Status dots are `--on-status` masked to a
 per-status SVG (`--icon-check/alert/x/dash`), so the coloured circle keeps a
 distinct *shape* — status is never colour alone, and `.cf-dot.ok/.warn/.none`
-stay the class names (E2E asserts `.cf-dot.none`). Surfaces layer three warm
-tones: the page is `--canvas`, panels are the paper `--bg`, and insets within a
-panel (inputs, secondary buttons, rows, tiles) are `--surface`.
+stay the class names (E2E asserts `.cf-dot.none`). Both the dots and the stat
+tiles are keyed on `.high/.low/.none` *and* `.ok/.warn/.none`, because the modal
+renders from the `MatchConfidence` value and the options queue from the tone —
+spell any new status in both lists or one surface silently loses its colour.
+
+Surfaces layer three warm tones: the page is `--canvas`, panels are the paper
+`--bg`, and insets within a panel (inputs, rows, tiles) are `--surface`, with
+`--surface-2` a shallower cut of the same kind for hovers. Both sit on the same
+side of `--bg` in either scheme. A **secondary button is not an inset** — it is
+paper with a border that fills in on hover, the reference's outlined button; and
+the popup is itself a panel (`--bg`), not a page, so its progress card has
+something to recess into. Labels *inside* a surface are sentence case: uppercase
+plus letter-spacing is reserved for page furniture, and the reference has none of
+it in a control.
 
 `src/shared/labels.ts` is the wording counterpart to help.ts: `STATUS_TEXT`
 (tile / word / aria for each `MatchConfidence`) and `ACTION_LABELS` (Apply, Skip,

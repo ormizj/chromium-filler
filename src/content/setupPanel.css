@@ -55,8 +55,6 @@
 .cf-fld-label {
   font-size: var(--text-xs);
   color: var(--muted);
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
 }
 
 .cf-input {
@@ -176,11 +174,9 @@
   background: var(--surface);
   cursor: pointer;
   list-style: none;
-  font-size: var(--text-sm);
+  font-size: var(--text-md);
   font-weight: 600;
   color: var(--fg);
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
 }
 
 .cf-group > summary::-webkit-details-marker {
@@ -215,8 +211,6 @@
    and the gap never collapses onto the heading. */
 .cf-group > summary .cf-help-btn {
   margin-left: var(--space-2);
-  text-transform: none;
-  letter-spacing: 0;
 }
 .cf-group > summary:not(:has(.cf-group-count)) .cf-help-btn {
   margin-left: auto;

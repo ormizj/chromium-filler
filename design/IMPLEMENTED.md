@@ -58,6 +58,44 @@ current source of truth. No new architecture, all through the same token layer:
 Deferred (need data, not styling): the Job-view company/location/type meta chips and
 the Settings throughput/match-rate stat cards.
 
+## Third pass: how the surfaces *use* the tokens
+
+The palette matched the reference after the second pass; the surfaces still did
+not. Every remaining difference was in application rather than colour — which tone
+a surface sits on, how much air a card has, and three treatments that had never
+been ported. All fixed in the token/primitive layer plus two render changes:
+
+- **Surface layering.** The popup was a `--canvas` page, so its progress card sat
+  three values off its background in light and read *raised* in dark; it is a paper
+  panel now. Dark `--surface-2` was lighter than `--bg` (the light value is darker),
+  so hovers and shallow insets flipped side between schemes. The options settings
+  rows were `--bg` on a `--bg` panel — visible only by their border — and are now
+  inset like every other row on that page.
+- **Secondary buttons** are paper with a border, filling in on hover, as in the
+  reference. They were `--surface`-filled, which read as a well rather than a
+  button, and the options page had a second hover model (`brightness(0.97)`) that
+  did almost nothing in dark mode.
+- **Sentence-case labels.** Six in-UI labels were micro-caps; the reference uses
+  uppercase only for page furniture.
+- **Modal density** — header/body/footer at the reference's 12/16 rather than
+  10/12, which is most of what made the same palette read as a tighter design.
+- **The fields view is a divided list** (the reference's `.field`), not a stack of
+  bordered inset cards, and each row carries its status as a **word** in a tinted
+  tag as well as a dot. **The job description** is second-level ink with
+  full-strength headings, as the reference's `.desc` is.
+- **The queue strip** is a quiet muted line directly above the footer, not an
+  accent-filled band under the header — it reports, it is not an action. Its
+  progress dots are deliberately not ported: the text carries richer per-status
+  counts already.
+- **Two bugs the comparison exposed.** The footer's `min-width: 96px` was a
+  descendant selector, so the `⋯` overflow was as wide as Skip — a quarter of a
+  390px footer, taken off the two decisions. And `.cf-stat` only ever spelled
+  `.ok/.warn/.none`, while the modal renders tiles as `.high/.low/.none`, so the
+  filled and to-check numbers were falling back to plain ink; only the red one had
+  ever been coloured.
+- **The options folder tabs** sat 16px left of their panel with a rule cutting
+  across the active tab and 32px of air below it. Tab and panel are one sheet now.
+
 ## Verification
 
 `npm run typecheck`, `npx vitest run` (incl. the labels + guardrail tests), and

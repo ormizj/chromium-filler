@@ -11,7 +11,11 @@ body {
      `max-width` media query, which matches during that 0-width pass. */
   width: 360px;
   font: var(--text-base) / 1.5 var(--font);
-  background: var(--canvas);
+  /* The popup IS the panel — there is no page behind it to be the canvas. On the
+     canvas tone the progress card (`--surface`) was three values away from its
+     background in light and, worse, read as *raised* off it in dark, which is the
+     opposite of every other inset in the design. */
+  background: var(--bg);
   color: var(--fg);
 }
 
@@ -177,7 +181,7 @@ h1 {
   padding: 0 var(--space-4);
   border: 1px solid var(--border);
   border-radius: var(--radius-btn);
-  background: var(--surface);
+  background: var(--bg);
   color: var(--fg);
   text-decoration: none;
   font-size: var(--text-base);
@@ -188,7 +192,7 @@ h1 {
   display: none;
 }
 .links a:hover {
-  background: var(--surface-2);
+  background: var(--surface);
   border-color: var(--border-strong);
 }
 

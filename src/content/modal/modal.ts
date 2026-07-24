@@ -100,6 +100,13 @@ export interface ModalData {
 /** Below this width the card is a bottom sheet, and free-dragging makes no sense. */
 const NARROW = NARROW_WIDTH;
 
+/**
+ * The `.chip` tint each outcome wears in the report. The dot classes are the
+ * `MatchConfidence` values themselves; the chip's are the shared ok/warn/err
+ * tints from primitives.css, so this is the one place the two vocabularies meet.
+ */
+const TAG_TONE: Record<MatchConfidence, string> = { high: 'ok', low: 'warn', none: 'err' };
+
 export class FillerModal {
   private host: HTMLElement;
   private shadow: ShadowRoot;
@@ -159,13 +166,15 @@ export class FillerModal {
     card.setAttribute('aria-label', `${data.siteName} — ${data.jobTitle ?? 'fill report'}`);
 
     card.append(this.header(data, card));
-    // The session strip sits under the header, never above it — the header is
-    // the sheet's title and drag handle and has to stay at the top edge.
-    if (data.session?.active) card.append(this.sessionStrip(data.session));
     // A two-step posting has no report and gets no toggle, so the Fields view
     // there would be an empty dead end with no way back to the job.
     const fields = this.view === 'fields' && !data.redirect;
     card.append(fields ? this.fieldsBody(data) : this.jobBody(data));
+    // Where the strip goes: directly above the footer, never above the header —
+    // the header is the sheet's title and drag handle and has to stay at the top
+    // edge. Sitting with the footer puts "posting 8 of 13" beside the Skip that
+    // moves it on, which is the decision the number is read for.
+    if (data.session?.active) card.append(this.sessionStrip(data.session));
     card.append(this.footer(data));
 
     this.shadow.append(card);
@@ -541,6 +550,14 @@ export class FillerModal {
     detail.title = detail.textContent ?? '';
     field.append(name, detail);
     row.append(field);
+
+    // The outcome in a word, beside the dot that colours it. Status was carried by
+    // the dot alone, so reading a row meant knowing the key; the reference tags
+    // every row, and the word comes from the same catalog the legend and the tiles
+    // render from.
+    const tag = el('span', `chip cf-tag ${TAG_TONE[status]}`);
+    tag.textContent = STATUS_TEXT[status].word;
+    row.append(tag);
 
     const actions = el('div', 'cf-actions');
     // Anything matched but not filled can be retried in place; only a field with

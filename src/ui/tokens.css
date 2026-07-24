@@ -13,12 +13,12 @@
 
 :root,
 :host {
-  /* Neutrals. `--bg` is the card/paper, `--surface` is anything raised off it,
-     and `--surface-2` is raised again (a row inside a card). `--canvas` is the
-     page *behind* the cards on the popup and options pages — a shade deeper than
-     the paper floating on it. In dark mode raised means LIGHTER — the popup and
-     the two shadow surfaces used to have this inverted relative to the options
-     page, so they disagreed at a glance.
+  /* Neutrals. `--bg` is the card/paper, `--surface` is anything cut into it (an
+     input, a row, a tile), and `--surface-2` is a shallower cut of the same kind
+     — half the distance, for hovers and rows that must not read as deep as a
+     tile. Both sit on the same side of `--bg` in either scheme. `--canvas` is the
+     page *behind* the cards on the options page — a shade deeper than the paper
+     floating on it.
 
      Soft / Warm: warm paper neutrals rather than cool greys. Values follow
      design/reference-updated/design.html (the current source of truth); see
@@ -123,7 +123,10 @@
     --canvas: #1a1815;
     --bg: #26231f;
     --surface: #211e1a;
-    --surface-2: #2b2721;
+    /* Between the paper and the inset, on the SAME side of `--bg` as in light —
+       it was lighter than the paper here, so a hover or a shallow inset recessed
+       in light and rose in dark. */
+    --surface-2: #24211d;
     --fg: #f3efe8;
     --muted: #b3aca0;
     --muted-2: #807a6f;

@@ -54,7 +54,10 @@ button.cf-btn {
   gap: var(--space-2);
   font: 500 var(--text-base) / 1.2 var(--font);
   color: var(--fg);
-  background: var(--surface);
+  /* Paper with a border, not a filled inset — the reference's secondary button is
+     an outline on the panel it sits on, and a `--surface` fill made every button
+     read as a well. Hovering fills it in. */
+  background: var(--bg);
   border: 1px solid var(--border);
   border-radius: var(--radius-btn);
   padding: var(--space-2) var(--space-4);
@@ -66,7 +69,7 @@ button.cf-btn {
 
 .btn:hover,
 button.cf-btn:hover {
-  background: var(--surface-2);
+  background: var(--surface);
   border-color: var(--border-strong);
 }
 
@@ -127,7 +130,7 @@ button.cf-btn[aria-disabled='true'] {
 }
 .btn[aria-disabled='true']:hover,
 button.cf-btn[aria-disabled='true']:hover {
-  background: var(--surface);
+  background: var(--bg);
   border-color: var(--border);
 }
 
@@ -163,8 +166,8 @@ button.cf-btn[aria-disabled='true']:hover {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 16px;
-  height: 16px;
+  width: 14px;
+  height: 14px;
   border-radius: 50%;
   flex: none;
 }
@@ -252,12 +255,16 @@ button.cf-btn[aria-disabled='true']:hover {
 
 /* ---------------- Section headings ---------------- */
 
+/**
+ * Sentence case, not micro-caps. The reference reserves uppercase + tracking for
+ * page furniture (the column labels around its mockups) and writes every label
+ * *inside* a surface in sentence case — a heading here is the same object as its
+ * `.desc h4`, so it is worded and sized the same.
+ */
 .cf-section {
-  font-size: var(--text-xs);
+  font-size: var(--text-md);
   font-weight: 600;
-  color: var(--muted);
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
+  color: var(--fg);
   margin: var(--space-6) 0 var(--space-2);
 }
 
@@ -325,11 +332,15 @@ button.cf-btn[aria-disabled='true']:hover {
   }
 }
 
+/* The sheet's three bands share the reference's padding — its card breathes at
+   16/20 where these were at 10/12, which is most of what made the same colours
+   read as a denser design. Scaled one step down from the 560px mockup to the
+   380px card, and the same at 390px, where the sheet is the whole width. */
 .cf-header {
   display: flex;
   align-items: center;
   gap: var(--space-3);
-  padding: var(--space-4) var(--space-5);
+  padding: var(--space-5) var(--space-6);
   border-bottom: 1px solid var(--border);
   cursor: grab;
   touch-action: none;
@@ -380,7 +391,7 @@ button.cf-btn[aria-disabled='true']:hover {
 }
 
 .cf-body {
-  padding: var(--space-5);
+  padding: var(--space-6);
   overflow-y: auto;
   flex: 1;
   overscroll-behavior: contain;
@@ -389,11 +400,18 @@ button.cf-btn[aria-disabled='true']:hover {
 .cf-footer {
   display: flex;
   gap: var(--space-3);
-  padding: var(--space-4) var(--space-5);
+  padding: var(--space-5) var(--space-6);
   border-top: 1px solid var(--border);
   flex-wrap: wrap;
 }
-.cf-footer button.cf-btn {
+/**
+ * Direct children only. As a descendant selector this reached inside `.cf-more`
+ * and gave the overflow toggle a 96px floor — a `⋯` as wide as Skip, taking that
+ * width off the two decisions at 390px, which is the exact failure the overflow
+ * exists to prevent. The icon button sizes itself in modal.css.
+ */
+.cf-footer-actions > button.cf-btn,
+.cf-footer > button.cf-btn {
   flex: 1;
   min-height: var(--tap);
   min-width: 96px;
@@ -511,9 +529,16 @@ button.cf-btn[aria-disabled='true']:hover {
   font-weight: 600;
   line-height: 1.1;
 }
+/* Both vocabularies, exactly as `.cf-dot` aliases them: the modal renders its
+   tiles from the `MatchConfidence` value (`high`/`low`/`none`) and the options
+   queue from ok/warn/none. Only `none` was spelled in both, so the filled and
+   to-check tiles were silently falling back to plain ink while the unmatched one
+   went red — the reference colours all three. */
+.cf-stat.high .cf-stat-n,
 .cf-stat.ok .cf-stat-n {
   color: var(--ok);
 }
+.cf-stat.low .cf-stat-n,
 .cf-stat.warn .cf-stat-n {
   color: var(--warn);
 }
@@ -528,8 +553,6 @@ button.cf-btn[aria-disabled='true']:hover {
   margin-top: 2px;
   font-size: var(--text-xs);
   color: var(--muted);
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
 }
 
 /* ---------------- Inline help ---------------- */
