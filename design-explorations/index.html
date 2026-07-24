@@ -1,0 +1,107 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Filler — UI direction exploration</title>
+<style>
+  :root{--sans:"Inter",ui-sans-serif,-apple-system,"Segoe UI",system-ui,sans-serif}
+  *{box-sizing:border-box}
+  body{margin:0;font-family:var(--sans);background:#0b0b0c;color:#f5f5f4;-webkit-font-smoothing:antialiased;padding:72px 40px 100px}
+  .wrap{max-width:1000px;margin:0 auto}
+  .kicker{font-size:12px;letter-spacing:.22em;text-transform:uppercase;color:#6b6b70}
+  h1{font-weight:600;font-size:42px;letter-spacing:-.02em;margin:12px 0 10px}
+  .lede{color:#a1a1a6;font-size:16px;line-height:1.65;max-width:620px}
+  .cards{display:grid;grid-template-columns:repeat(3,1fr);gap:18px;margin-top:44px}
+  a.card{display:block;text-decoration:none;color:inherit;border:1px solid #2a2a2e;border-radius:18px;
+    padding:24px;background:#141416;transition:border-color .15s,transform .15s}
+  a.card:hover{border-color:#4a4a52;transform:translateY(-3px)}
+  .swatch{height:74px;border-radius:12px;margin-bottom:18px;border:1px solid rgba(255,255,255,.08)}
+  .s1{background:linear-gradient(135deg,#1b1b1e,#0b0b0c)}
+  .s2{background:linear-gradient(135deg,#c46a3f,#f6e7dd)}
+  .s3{background:radial-gradient(120px 80px at 20% 10%,#8b9bff,transparent),radial-gradient(120px 90px at 90% 90%,#67e8f9,transparent),#0a0c14}
+  .num{font-size:12px;color:#6b6b70;letter-spacing:.14em}
+  h3{margin:8px 0 6px;font-size:19px;font-weight:600}
+  p{margin:0;font-size:13px;color:#a1a1a6;line-height:1.55}
+  .go{margin-top:16px;font-size:13px;color:#f5f5f4;display:inline-flex;gap:6px;align-items:center}
+  .note{margin-top:40px;font-size:13px;color:#6b6b70;border-top:1px solid #2a2a2e;padding-top:20px;line-height:1.6}
+  .section{margin-top:56px}
+  .section h2{font-size:14px;font-weight:600;margin:0 0 4px;color:#f5f5f4}
+  .section .desc{font-size:13px;color:#a1a1a6;margin:0 0 20px}
+  .pick{display:inline-block;font-size:11px;color:#e0a87e;border:1px solid #5a3f2e;background:#2a1e15;border-radius:99px;padding:3px 10px;margin-left:10px;vertical-align:2px}
+  .rc{background:linear-gradient(135deg,#c46a3f,#f6e7dd)}
+  .ra{background:linear-gradient(135deg,#b1552f,#f4e5db)}
+  .rb{background:linear-gradient(135deg,#d0623a,#e08a3c)}
+  .rcc{background:#faf7f1;border:1px solid #e6dfd3}
+  @media(max-width:820px){.cards{grid-template-columns:1fr}}
+</style>
+</head>
+<body>
+  <div class="wrap">
+    <div class="kicker">Filler · UI exploration</div>
+    <h1>Three directions to feel out</h1>
+    <p class="lede">Each mockup applies one design language across the three surfaces you see most — the popup, the review modal (Job + Fields views), and the options settings tab. Same content, same structure, different feel. Open each and we'll converge from there.</p>
+
+    <div class="cards">
+      <a class="card" href="01-mono-editorial.html">
+        <div class="swatch s1"></div>
+        <div class="num">01</div>
+        <h3>Mono / Editorial</h3>
+        <p>Near-monochrome, serif headings, hairline borders. Restraint as the premium signal — Linear / Vercel.</p>
+        <span class="go">Open →</span>
+      </a>
+      <a class="card" href="02-soft-warm.html">
+        <div class="swatch s2"></div>
+        <div class="num">02</div>
+        <h3>Soft / Warm</h3>
+        <p>Warm paper neutrals, one clay accent, rounded and gentle. Approachable but tidy — Notion / Stripe.</p>
+        <span class="go">Open →</span>
+      </a>
+      <a class="card" href="03-glass-depth.html">
+        <div class="swatch s3"></div>
+        <div class="num">03</div>
+        <h3>Glass / Depth</h3>
+        <p>Frosted panels, indigo-to-cyan glow, layered depth. Modern and high-end — Arc / visionOS.</p>
+        <span class="go">Open →</span>
+      </a>
+    </div>
+
+    <div class="section">
+      <h2>Soft / Warm — refinements <span class="pick">chosen direction</span></h2>
+      <p class="desc">Three ways to push the direction you picked. The original (02) stays as the baseline; each of these keeps the warm palette and glance-able status, and pulls one lever. All have the light/dark toggle.</p>
+      <div class="cards">
+        <a class="card" href="02-soft-warm.html">
+          <div class="swatch rc"></div>
+          <div class="num">02 · baseline</div>
+          <h3>Original</h3>
+          <p>The version you liked. Rounded cards, tinted chips, three-stat block, gentle shadows.</p>
+          <span class="go">Open →</span>
+        </a>
+        <a class="card" href="02a-warm-editorial.html">
+          <div class="swatch ra"></div>
+          <div class="num">02a</div>
+          <h3>Editorial</h3>
+          <p>Serif headings and headline numbers, elevation dialled down, deeper terracotta. Premium via type.</p>
+          <span class="go">Open →</span>
+        </a>
+        <a class="card" href="02b-warm-vivid.html">
+          <div class="swatch rb"></div>
+          <div class="num">02b</div>
+          <h3>Vivid</h3>
+          <p>Accent leads — gradient popup header, filled status blocks, coloured field edges. Info hits harder.</p>
+          <span class="go">Open →</span>
+        </a>
+        <a class="card" href="02c-warm-calm.html">
+          <div class="swatch rcc"></div>
+          <div class="num">02c</div>
+          <h3>Calm / flat</h3>
+          <p>No shadows or nested cards — flat paper, hairline dividers, lots of air. The most minimal reading.</p>
+          <span class="go">Open →</span>
+        </a>
+      </div>
+    </div>
+
+    <p class="note">These are static mockups for choosing a direction — not wired to the extension yet. Once you pick (or mix), the next step is folding the chosen language into <code>src/ui/tokens.css</code> + <code>primitives.css</code>, the single source of truth for every surface.</p>
+  </div>
+</body>
+</html>

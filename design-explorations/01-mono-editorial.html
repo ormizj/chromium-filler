@@ -1,0 +1,192 @@
+<!doctype html>
+<html lang="en" data-mode="dark">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Direction 1 — Mono / Editorial</title>
+<style>
+  :root{
+    --r:10px; --tap:44px;
+    --sans:ui-sans-serif,-apple-system,"Segoe UI",Inter,system-ui,sans-serif;
+    --serif:"Iowan Old Style","Palatino Linotype",Georgia,serif;
+  }
+  [data-mode="dark"]{
+    --bg:#0b0b0c; --panel:#141416; --panel-2:#1b1b1e; --line:#2a2a2e;
+    --ink:#f5f5f4; --ink-2:#a1a1a6; --ink-3:#6b6b70;
+    --ok:#d7d7d5; --warn:#e8c37e; --bad:#e08b7e;
+    --page:radial-gradient(1200px 600px at 80% -10%,#161618 0,transparent 60%),#0b0b0c;
+    --shadow:0 30px 60px -30px rgba(0,0,0,.8);
+  }
+  [data-mode="light"]{
+    --bg:#f5f4f1; --panel:#ffffff; --panel-2:#f0efeb; --line:#e4e2db;
+    --ink:#1b1a18; --ink-2:#6c6a64; --ink-3:#9c998f;
+    --ok:#2c2c2a; --warn:#a9822b; --bad:#bd5548;
+    --page:radial-gradient(1200px 600px at 80% -10%,#ffffff 0,transparent 60%),#f5f4f1;
+    --shadow:0 30px 60px -34px rgba(60,50,40,.28);
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--page);color:var(--ink);font-family:var(--sans);
+    -webkit-font-smoothing:antialiased;padding:56px 40px 90px}
+  .mode-toggle{position:fixed;top:20px;right:24px;z-index:50;display:flex;align-items:center;gap:8px;
+    background:var(--panel);border:1px solid var(--line);color:var(--ink);border-radius:99px;
+    padding:9px 16px;font-family:var(--sans);font-size:13px;cursor:pointer;box-shadow:var(--shadow)}
+  .head{max-width:1120px;margin:0 auto 44px}
+  .kicker{font-size:12px;letter-spacing:.22em;text-transform:uppercase;color:var(--ink-3)}
+  h1{font-family:var(--serif);font-weight:500;font-size:40px;letter-spacing:-.01em;margin:10px 0 8px}
+  .sub{color:var(--ink-2);font-size:15px;max-width:640px;line-height:1.6}
+  .grid{max-width:1120px;margin:0 auto;display:grid;grid-template-columns:340px 1fr;gap:34px;align-items:start}
+  .col-label{font-size:11px;letter-spacing:.2em;text-transform:uppercase;color:var(--ink-3);margin:0 0 14px 4px}
+  .surface{background:var(--panel);border:1px solid var(--line);border-radius:16px;box-shadow:var(--shadow)}
+
+  .popup{width:340px;padding:20px}
+  .brand{display:flex;align-items:center;gap:10px;margin-bottom:22px}
+  .mark{width:26px;height:26px;border-radius:7px;border:1px solid var(--line);display:grid;place-items:center;font-family:var(--serif);font-size:15px}
+  .brand b{font-weight:500;font-size:14px;letter-spacing:.02em}
+  .brand span{margin-left:auto;font-size:11px;color:var(--ink-3)}
+  .prog{border:1px solid var(--line);border-radius:12px;padding:16px;margin-bottom:16px}
+  .prog .n{font-family:var(--serif);font-size:34px;line-height:1}
+  .prog .n small{font-size:15px;color:var(--ink-3)}
+  .prog .cap{font-size:12px;color:var(--ink-2);margin-top:4px}
+  .bar{height:3px;background:var(--panel-2);border-radius:99px;margin-top:14px;overflow:hidden}
+  .bar i{display:block;height:100%;width:62%;background:var(--ink)}
+  .btn{display:flex;align-items:center;justify-content:center;gap:8px;height:var(--tap);border-radius:11px;
+    border:1px solid var(--line);background:transparent;color:var(--ink);font-family:var(--sans);font-size:14px;cursor:pointer;width:100%}
+  .btn.primary{background:var(--ink);color:var(--bg);border-color:var(--ink)}
+  .row2{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:6px}
+  .meta{display:flex;justify-content:space-between;font-size:12px;color:var(--ink-3);margin-top:16px}
+
+  .modal{width:100%;max-width:560px;overflow:hidden}
+  .mhead{display:flex;align-items:center;gap:14px;padding:16px 20px;border-bottom:1px solid var(--line)}
+  .toggle{display:flex;background:var(--panel-2);border-radius:10px;padding:3px}
+  .toggle button{border:0;background:transparent;color:var(--ink-2);font-size:13px;padding:7px 16px;border-radius:8px;cursor:pointer;font-family:var(--sans)}
+  .toggle button.on{background:var(--panel);color:var(--ink)}
+  .dot{width:8px;height:8px;border-radius:50%;display:inline-block}
+  .grip{margin-left:auto;color:var(--ink-3);font-size:12px;display:flex;gap:8px;align-items:center}
+  .mbody{padding:22px 24px 6px}
+  .jobtitle{font-family:var(--serif);font-size:26px;line-height:1.15;margin:0 0 6px}
+  .jobmeta{color:var(--ink-2);font-size:13px;margin-bottom:18px}
+  .desc{color:var(--ink-2);font-size:14px;line-height:1.7}
+  .desc p{margin:0 0 12px}
+  .desc h4{color:var(--ink);font-size:13px;font-weight:500;letter-spacing:.02em;margin:18px 0 8px}
+  .desc li{margin-bottom:5px}
+  .statusline{display:flex;gap:16px;font-size:12px;color:var(--ink-2);padding:14px 24px;border-top:1px solid var(--line);border-bottom:1px solid var(--line);margin-top:14px}
+  .statusline b{color:var(--ink);font-weight:500}
+  .pill{display:inline-flex;align-items:center;gap:6px}
+  .foot{display:flex;gap:10px;padding:16px 20px}
+  .foot .btn{width:auto;flex:1}
+  .foot .icon{flex:0 0 var(--tap);width:var(--tap)}
+  .field{display:flex;align-items:center;gap:12px;padding:12px 24px;border-bottom:1px solid var(--line)}
+  .field:last-child{border-bottom:0}
+  .field .k{font-size:13px;color:var(--ink);width:130px}
+  .field .v{font-size:13px;color:var(--ink-2);flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .tag{font-size:11px;color:var(--ink-3);border:1px solid var(--line);border-radius:99px;padding:3px 9px}
+  .queue{display:flex;align-items:center;gap:10px;padding:10px 20px;border-top:1px solid var(--line);font-size:12px;color:var(--ink-2)}
+  .qdots{display:flex;gap:5px;margin-left:auto}
+  .qd{width:7px;height:7px;border-radius:50%;background:var(--panel-2);border:1px solid var(--line)}
+  .qd.done{background:var(--ink);border-color:var(--ink)}
+  .qd.now{background:transparent;border-color:var(--ink)}
+
+  .options{width:100%;margin-top:34px;overflow:hidden}
+  .tabs{display:flex;border-bottom:1px solid var(--line)}
+  .tabs button{flex:1;border:0;background:transparent;color:var(--ink-3);padding:15px;font-size:13px;cursor:pointer;font-family:var(--sans);position:relative}
+  .tabs button.on{color:var(--ink)}
+  .tabs button.on::after{content:"";position:absolute;left:24px;right:24px;bottom:-1px;height:1px;background:var(--ink)}
+  .opt-body{padding:26px 26px 30px;display:grid;grid-template-columns:1fr 1fr;gap:14px}
+  .card{border:1px solid var(--line);border-radius:12px;padding:18px}
+  .card h5{margin:0 0 4px;font-size:13px;font-weight:500}
+  .card p{margin:0;font-size:12px;color:var(--ink-3);line-height:1.5}
+  .card .val{font-family:var(--serif);font-size:24px;margin-top:12px}
+  .switch{width:38px;height:22px;border-radius:99px;background:var(--ink);position:relative;flex:0 0 auto}
+  .switch i{position:absolute;top:2px;right:2px;width:18px;height:18px;border-radius:50%;background:var(--bg)}
+  .switch.off{background:var(--panel-2)}
+  .switch.off i{right:auto;left:2px;background:var(--ink-3)}
+  .setrow{display:flex;align-items:center;gap:12px;border:1px solid var(--line);border-radius:12px;padding:14px 16px}
+  .setrow div{flex:1}
+  .setrow h5{margin:0;font-size:13px;font-weight:500}
+  .setrow p{margin:2px 0 0;font-size:12px;color:var(--ink-3)}
+  @media(max-width:900px){.grid{grid-template-columns:1fr}.opt-body{grid-template-columns:1fr}}
+</style>
+</head>
+<body>
+  <button class="mode-toggle" onclick="var h=document.documentElement;h.dataset.mode=h.dataset.mode==='dark'?'light':'dark';this.querySelector('span').textContent=h.dataset.mode==='dark'?'Light mode':'Dark mode'"><span>Light mode</span></button>
+
+  <div class="head">
+    <div class="kicker">Direction 01</div>
+    <h1>Mono / Editorial</h1>
+    <p class="sub">Near-monochrome. A serif display face carries the headings, everything else is quiet ink on paper. Status is weight and glyph, not colour. Reads like a well-set page — restraint as the premium signal.</p>
+  </div>
+
+  <div class="grid">
+    <div>
+      <p class="col-label">Popup</p>
+      <div class="surface popup">
+        <div class="brand"><span class="mark">F</span><b>Filler</b><span>v2.0</span></div>
+        <div class="prog">
+          <div class="n">8<small> / 13</small></div>
+          <div class="cap">applications this session</div>
+          <div class="bar"><i></i></div>
+        </div>
+        <button class="btn primary">Run this page</button>
+        <div class="row2"><button class="btn">Reset</button><button class="btn">Queue</button></div>
+        <div class="meta"><span>3 filled · 1 skipped</span><span>2 waiting</span></div>
+      </div>
+    </div>
+
+    <div>
+      <p class="col-label">Review modal — job view</p>
+      <div class="surface modal">
+        <div class="mhead">
+          <div class="toggle"><button class="on">Job</button><button>Fields <span class="dot" style="background:var(--warn)"></span></button></div>
+          <div class="grip">⋮⋮ drag</div>
+        </div>
+        <div class="mbody">
+          <h2 class="jobtitle">Senior Product Designer</h2>
+          <div class="jobmeta">Northwind Labs · Remote (EU) · Full-time</div>
+          <div class="desc">
+            <p>We're looking for a designer who can hold the whole product in their head and still sweat a 2px border. You'll own flows end to end, from the first sketch to the shipped pixel.</p>
+            <h4>What you'll do</h4>
+            <ul><li>Lead design on two core surfaces</li><li>Partner with eng from day one, not at handoff</li><li>Keep the system honest as it grows</li></ul>
+          </div>
+          <div class="statusline">
+            <span class="pill"><span class="dot" style="background:var(--ok)"></span> <b>11</b> filled</span>
+            <span class="pill"><span class="dot" style="background:var(--warn)"></span> <b>2</b> to check</span>
+            <span class="pill"><span class="dot" style="background:var(--bad)"></span> <b>1</b> unmatched</span>
+          </div>
+        </div>
+        <div class="queue">Session · posting 8 of 13
+          <span class="qdots"><span class="qd done"></span><span class="qd done"></span><span class="qd now"></span><span class="qd"></span><span class="qd"></span></span>
+        </div>
+        <div class="foot"><button class="btn primary">Apply</button><button class="btn">Skip</button><button class="btn icon">⋯</button></div>
+      </div>
+
+      <p class="col-label" style="margin-top:30px">Review modal — fields view</p>
+      <div class="surface modal">
+        <div class="mhead"><div class="toggle"><button>Job</button><button class="on">Fields</button></div><div class="grip">13 fields</div></div>
+        <div class="field"><span class="dot" style="background:var(--ok)"></span><span class="k">Full name</span><span class="v">Or Mizrahi</span><span class="tag">exact</span></div>
+        <div class="field"><span class="dot" style="background:var(--ok)"></span><span class="k">Email</span><span class="v">ormizj@gmail.com</span><span class="tag">exact</span></div>
+        <div class="field"><span class="dot" style="background:var(--warn)"></span><span class="k">Phone</span><span class="v">+972 · guessed format</span><span class="tag">low</span></div>
+        <div class="field"><span class="dot" style="background:var(--ok)"></span><span class="k">Résumé</span><span class="v">or-mizrahi-cv.pdf</span><span class="tag">file</span></div>
+        <div class="field"><span class="dot" style="background:var(--bad)"></span><span class="k">Portfolio URL</span><span class="v">no field matched</span><span class="tag">skip</span></div>
+      </div>
+    </div>
+  </div>
+
+  <div class="grid" style="margin-top:34px">
+    <div></div>
+    <div>
+      <p class="col-label">Options — settings tab</p>
+      <div class="surface options">
+        <div class="tabs"><button>Queue</button><button>Profile</button><button class="on">Settings</button><button>Sites</button></div>
+        <div class="opt-body">
+          <div class="setrow"><div><h5>Close tab on skip</h5><p>Free the slot when a posting is skipped</p></div><span class="switch"><i></i></span></div>
+          <div class="setrow"><div><h5>Auto-detect fields</h5><p>Beat the heuristics with saved overrides</p></div><span class="switch"><i></i></span></div>
+          <div class="setrow"><div><h5>Confirm before apply</h5><p>Never press Send without review</p></div><span class="switch off"><i></i></span></div>
+          <div class="setrow"><div><h5>Batch size</h5><p>Tabs open at once in a session</p></div><span style="font-family:var(--serif);font-size:20px">3</span></div>
+          <div class="card"><h5>Session throughput</h5><p>Applications completed, last 7 days</p><div class="val">41</div></div>
+          <div class="card"><h5>Match rate</h5><p>Fields filled on first pass</p><div class="val">88%</div></div>
+        </div>
+      </div>
+    </div>
+  </div>
+</body>
+</html>
