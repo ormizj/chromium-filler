@@ -54,7 +54,7 @@ function sendBg<T = unknown>(type: string, extra: Record<string, unknown> = {}):
 
 function renderNoContentScript(): void {
   badge.textContent = 'n/a';
-  badge.className = 'badge';
+  badge.className = 'chip';
   detail.textContent = 'This page can’t be filled (e.g. a browser page). Open a job posting.';
   primary.disabled = true;
 }
@@ -64,7 +64,7 @@ function render(): void {
   if (!status) return renderNoContentScript();
   if (status.siteMatched) {
     badge.textContent = 'matched';
-    badge.className = 'badge matched';
+    badge.className = 'chip ok';
     const via = status.landedFrom ? ` (via ${hostOf(status.landedFrom)})` : '';
     detail.textContent = status.postingKind === 'redirect'
       ? `${status.siteName}: applies on ${status.redirectHref ? hostOf(status.redirectHref) : 'the employer’s site'} — external application.`
@@ -80,7 +80,7 @@ function render(): void {
     reconfigure.hidden = false;
   } else {
     badge.textContent = 'no config';
-    badge.className = 'badge none';
+    badge.className = 'chip warn';
     detail.textContent = 'No site config matches this URL. Set it up visually to enable filling here.';
     primary.disabled = false;
     primary.textContent = 'Set up this site';

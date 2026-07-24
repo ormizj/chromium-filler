@@ -5,7 +5,10 @@
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <title>Direction 2 — Soft / Warm</title>
 <style>
-  :root{--r:14px; --tap:44px; --sans:"Inter",ui-sans-serif,-apple-system,"Segoe UI",system-ui,sans-serif;}
+  :root{--r:14px; --tap:44px; --sans:"Inter",ui-sans-serif,-apple-system,"Segoe UI",system-ui,sans-serif;
+    --icon-check:url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='3.2' stroke-linecap='round' stroke-linejoin='round'><path d='M5 12.5l4.2 4.2L19 7'/></svg>");
+    --icon-bang:url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='3.2' stroke-linecap='round' stroke-linejoin='round'><path d='M12 6v7'/><path d='M12 18h.01'/></svg>");
+    --icon-x:url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='3.2' stroke-linecap='round' stroke-linejoin='round'><path d='M6.5 6.5l11 11M17.5 6.5l-11 11'/></svg>");}
   [data-mode="light"]{
     --bg:#f4f1ec; --panel:#fffdfa; --panel-2:#f7f3ec; --line:#eae4da;
     --ink:#2c2a26; --ink-2:#6f6a61; --ink-3:#a29b8f;
@@ -62,7 +65,11 @@
   .toggle{display:flex;background:var(--panel-2);border-radius:12px;padding:4px}
   .toggle button{border:0;background:transparent;color:var(--ink-2);font-size:13px;font-weight:500;padding:8px 16px;border-radius:9px;cursor:pointer;font-family:var(--sans);display:flex;align-items:center;gap:7px}
   .toggle button.on{background:var(--panel);color:var(--ink);box-shadow:0 2px 5px -2px rgba(80,60,40,.25)}
-  .dot{width:9px;height:9px;border-radius:50%}
+  .dot{position:relative;display:inline-block;width:14px;height:14px;border-radius:50%;flex:none}
+  .dot::before{content:'';position:absolute;inset:22%;background:#fff;-webkit-mask:var(--i) center/contain no-repeat;mask:var(--i) center/contain no-repeat}
+  .dot.ok{background:var(--ok);--i:var(--icon-check)}
+  .dot.warn{background:var(--warn);--i:var(--icon-bang)}
+  .dot.none{background:var(--bad);--i:var(--icon-x)}
   .grip{margin-left:auto;color:var(--ink-3);font-size:12px}
   .mbody{padding:22px 24px 4px}
   .jobtitle{font-size:24px;font-weight:600;line-height:1.2;margin:0 0 6px;letter-spacing:-.01em}
@@ -135,7 +142,7 @@
     <div>
       <p class="col-label">Review modal — job view</p>
       <div class="surface modal">
-        <div class="mhead"><div class="toggle"><button class="on">Job</button><button>Fields <span class="dot" style="background:var(--warn)"></span></button></div><div class="grip">⋮⋮ drag</div></div>
+        <div class="mhead"><div class="toggle"><button class="on">Job</button><button>Fields <span class="dot warn"></span></button></div><div class="grip">⋮⋮ drag</div></div>
         <div class="mbody">
           <h2 class="jobtitle">Senior Product Designer</h2>
           <div class="jobmeta"><b>Northwind Labs</b><b>Remote (EU)</b><b>Full-time</b></div>
@@ -159,11 +166,11 @@
       <p class="col-label" style="margin-top:30px">Review modal — fields view</p>
       <div class="surface modal">
         <div class="mhead"><div class="toggle"><button>Job</button><button class="on">Fields</button></div><div class="grip">13 fields</div></div>
-        <div class="field"><span class="dot" style="background:var(--ok)"></span><span class="k">Full name</span><span class="v">Or Mizrahi</span><span class="tag ok">exact</span></div>
-        <div class="field"><span class="dot" style="background:var(--ok)"></span><span class="k">Email</span><span class="v">ormizj@gmail.com</span><span class="tag ok">exact</span></div>
-        <div class="field"><span class="dot" style="background:var(--warn)"></span><span class="k">Phone</span><span class="v">+972 · guessed format</span><span class="tag warn">low</span></div>
-        <div class="field"><span class="dot" style="background:var(--ok)"></span><span class="k">Résumé</span><span class="v">or-mizrahi-cv.pdf</span><span class="tag ok">file</span></div>
-        <div class="field"><span class="dot" style="background:var(--bad)"></span><span class="k">Portfolio URL</span><span class="v">no field matched</span><span class="tag bad">skip</span></div>
+        <div class="field"><span class="dot ok"></span><span class="k">Full name</span><span class="v">Or Mizrahi</span><span class="tag ok">exact</span></div>
+        <div class="field"><span class="dot ok"></span><span class="k">Email</span><span class="v">ormizj@gmail.com</span><span class="tag ok">exact</span></div>
+        <div class="field"><span class="dot warn"></span><span class="k">Phone</span><span class="v">+972 · guessed format</span><span class="tag warn">low</span></div>
+        <div class="field"><span class="dot ok"></span><span class="k">Résumé</span><span class="v">or-mizrahi-cv.pdf</span><span class="tag ok">file</span></div>
+        <div class="field"><span class="dot none"></span><span class="k">Portfolio URL</span><span class="v">no field matched</span><span class="tag bad">skip</span></div>
       </div>
     </div>
   </div>

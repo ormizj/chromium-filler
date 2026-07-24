@@ -12,6 +12,7 @@ import type { FieldKey, PrepAction } from '../shared/types';
 import {
   CONCEPT_HELP, DOT_LEGEND, SETUP_GROUP_HELP, SETUP_GROUP_TITLES, type SetupGroupKey,
 } from '../shared/help';
+import { ACTION_LABELS } from '../shared/labels';
 import { BASE_CSS } from '../ui/shadowCss';
 import { helpButton, helpPanel, richText } from '../ui/help';
 import setupCss from './setupPanel.css?inline';
@@ -274,7 +275,7 @@ export class SetupPanel {
     const footer = el('div', 'cf-footer');
     footer.append(
       btn('Advanced (JSON)', () => this.cb.onOpenOptions()),
-      btn('Done', () => this.cb.onClose(), true),
+      btn(ACTION_LABELS.done, () => this.cb.onClose(), true),
     );
 
     card.append(header, body, footer);
@@ -451,7 +452,7 @@ export class SetupPanel {
     row.append(info);
 
     const actions = el('div', 'cf-actions');
-    actions.append(btn(m.hasSave ? 'Re-pick' : 'Pick', onPick, true));
+    actions.append(btn(m.hasSave ? 'Re-pick' : ACTION_LABELS.pick, onPick, true));
     if (m.hasSave) actions.append(btn('Clear', onClear));
     row.append(actions);
     return row;

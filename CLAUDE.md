@@ -110,18 +110,52 @@ Cross-context messaging goes through the typed `MSG` contract in
 `src/shared/messages.ts` (payloads must be structured-clone friendly).
 
 ### UI layer
+The look is **Soft / Warm** (warm paper neutrals, one clay accent, icon status
+dots, gentle shadows) — see `design/` for the source of truth. It is a design
+*system*, enforced in three files plus a guardrail test, not just a stylesheet:
+
 `src/ui/tokens.css` + `src/ui/primitives.css` are the **only** place colours,
-spacing, touch targets, buttons, rows, dots, sheets, and chips are defined. Both
-files use a `:root, :host` selector list so one copy serves the light-DOM pages
-(which `<link>` them) and the two shadow roots (which inline them via
-`src/ui/shadowCss.ts`). Before this existed each surface had a private copy and
-they contradicted each other — popup dark mode was literally the inverse of
+spacing, touch targets, buttons, rows, dots, sheets, chips, and the stat tile are
+defined. Both files use a `:root, :host` selector list so one copy serves the
+light-DOM pages (which `<link>` them) and the two shadow roots (which inline them
+via `src/ui/shadowCss.ts`). Before this existed each surface had a private copy
+and they contradicted each other — popup dark mode was literally the inverse of
 options dark mode. Add a rule here, not in a surface's own file, if two surfaces
 could ever want it.
 
+Colour lives **only** in tokens.css. The primary button has one fill
+(`--btn-primary`, a coral gradient in light / solid accent in dark), read by
+`.btn-primary` and nowhere else. Status dots are `--on-status` masked to a
+per-status SVG (`--icon-check/alert/x/dash`), so the coloured circle keeps a
+distinct *shape* — status is never colour alone, and `.cf-dot.ok/.warn/.none`
+stay the class names (E2E asserts `.cf-dot.none`). Surfaces layer three warm
+tones: the page is `--canvas`, panels are the paper `--bg`, and insets within a
+panel (inputs, secondary buttons, rows, tiles) are `--surface`.
+
+`src/shared/labels.ts` is the wording counterpart to help.ts: `STATUS_TEXT`
+(tile / word / aria for each `MatchConfidence`) and `ACTION_LABELS` (Apply, Skip,
+Confirm, Pick, …), typed `Record<>` so a new status or action fails
+`npm run typecheck` until it is named. Every surface renders its status words and
+button verbs from here — the modal legend, summary, stat tiles, the setup rows
+and the popup badge no longer disagree. `fieldStatus.STATUS_LABELS` re-exports
+the aria forms from it.
+
+`src/ui/palette.ts` is the **one** legitimate copy of the token colours, for the
+two marks drawn on the *host* page (the field highlight in `fill.ts`, the
+click-to-pick toolbar in `picker.ts`) — content-script light-DOM never sees
+tokens.css, so it cannot read a `var(--…)`.
+
+`src/ui/designSystem.test.ts` is the guardrail that makes "zero inconsistencies,
+now and in the future" mechanical: it fails the build if any CSS/TS outside the
+token layer hardcodes a colour, if a `var(--…)` names a token nothing declares,
+if a second primary fill appears, if a status is missing its colour/icon/word, or
+if `palette.ts` drifts from the tokens it mirrors. It reads the sources off disk
+because Vite hands vitest an *empty* string for a `.css?inline` import.
+
 Mobile is the priority target (Kiwi). `--tap: 44px` under `@media (pointer:
 coarse)` is the floor for every control; status is never colour alone (dots carry
-a glyph); and the modal/setup sheets become full-width bottom sheets under 640px.
+an icon shape); and the modal/setup sheets become full-width bottom sheets under
+640px.
 
 ### In-app help
 `src/shared/help.ts` is the **only** place the extension explains itself. Every

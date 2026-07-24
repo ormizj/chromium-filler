@@ -11,6 +11,7 @@
  */
 
 import type { MatchConfidence } from './types';
+import { STATUS_TEXT } from './labels';
 
 export interface FieldOutcome {
   confidence: MatchConfidence;
@@ -23,8 +24,13 @@ export function matchStatus(m: FieldOutcome): MatchConfidence {
   return m.confidence === 'high' ? 'low' : m.confidence;
 }
 
+/**
+ * The spoken descriptor for each outcome — a dot's `aria-label`. Kept as a thin
+ * re-export of the wording catalog so the report and the status vocabulary can
+ * never drift apart; `labels.ts` is the source of truth.
+ */
 export const STATUS_LABELS: Record<MatchConfidence, string> = {
-  high: 'filled',
-  low: 'needs review',
-  none: 'not found',
+  high: STATUS_TEXT.high.aria,
+  low: STATUS_TEXT.low.aria,
+  none: STATUS_TEXT.none.aria,
 };

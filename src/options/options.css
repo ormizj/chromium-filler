@@ -3,9 +3,17 @@
  * page-level layout, the tab bar, and the queue/URL list live here.
  */
 
+/**
+ * Surface layering in Soft/Warm: the page is `--canvas`, the panels are the
+ * paper `--bg` that floats on it, and anything inset within a panel (inputs,
+ * secondary buttons, list rows, stat tiles) is `--surface` — which is the same
+ * warm tone as the canvas, so it reads as a well cut into the paper. This is the
+ * inverse of the old cool palette, where the page was white and panels were the
+ * off-white; every `--surface`/`--bg` choice below follows from it.
+ */
 body {
   margin: 0;
-  background: var(--bg);
+  background: var(--canvas);
   color: var(--fg);
   font: var(--text-base) / 1.55 var(--font);
 }
@@ -46,7 +54,7 @@ h3 {
   position: sticky;
   top: 0;
   z-index: 10;
-  background: var(--bg);
+  background: var(--canvas);
   border-bottom: 1px solid var(--border);
   padding: var(--space-5) var(--space-6) 0;
   margin-bottom: var(--space-6);
@@ -91,7 +99,7 @@ h3 {
 }
 
 section {
-  background: var(--surface);
+  background: var(--bg);
   border: 1px solid var(--border);
   border-radius: var(--radius-lg);
   padding: var(--space-6);
@@ -118,7 +126,7 @@ select {
   width: 100%;
   font: inherit;
   color: var(--fg);
-  background: var(--bg);
+  background: var(--surface);
   border: 1px solid var(--border);
   border-radius: var(--radius-md);
   padding: var(--space-3) var(--space-4);
@@ -147,17 +155,23 @@ textarea {
 button {
   font: inherit;
   border: 1px solid var(--border);
-  background: var(--bg);
+  background: var(--surface);
   color: var(--fg);
   border-radius: var(--radius-md);
   padding: var(--space-3) var(--space-6);
   min-height: 40px;
   cursor: pointer;
 }
+/* The one primary fill, read from the shared token so the options CTA matches
+   the popup's and the modal's; only the sizing is the options page's own. */
 button.primary {
-  background: var(--accent);
+  background: var(--btn-primary);
   color: var(--accent-fg);
-  border-color: var(--accent);
+  border-color: transparent;
+  box-shadow: var(--btn-primary-shadow);
+}
+button.primary:hover {
+  filter: brightness(1.08);
 }
 button:hover {
   filter: brightness(0.97);
@@ -233,38 +247,20 @@ label.fld.inline input {
 
 /* ---------------- Queue ---------------- */
 
-.stats {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(88px, 1fr));
-  gap: var(--space-4);
+/* The queue stats use the shared `.cf-stats`/`.cf-stat` tile (primitives.css) for
+   shape; only the row's floor before it wraps, and the extra category colours the
+   queue has beyond ok/warn/none, are the options page's own. */
+#url-stats {
+  --min: 88px;
   margin: var(--space-3) 0 var(--space-1);
 }
-
-.stat {
-  border: 1px solid var(--border);
-  border-radius: var(--radius-md);
-  padding: var(--space-4) var(--space-5);
-  background: var(--bg);
-  text-align: center;
-}
-.stat .n {
-  font-size: var(--text-xl);
-  font-weight: 700;
-  line-height: 1.1;
-}
-.stat .k {
-  font-size: var(--text-xs);
-  color: var(--muted);
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
-}
-.stat.applied .n {
+.cf-stat.applied .cf-stat-n {
   color: var(--ok);
 }
-.stat.redirected .n {
+.cf-stat.redirected .cf-stat-n {
   color: var(--accent);
 }
-.stat.skipped .n {
+.cf-stat.skipped .cf-stat-n {
   color: var(--muted);
 }
 
@@ -279,7 +275,7 @@ label.fld.inline input {
   padding: var(--space-5);
   border: 1px solid var(--border);
   border-radius: var(--radius-md);
-  background: var(--bg);
+  background: var(--surface);
 }
 
 .session-panel .lead {
@@ -321,7 +317,7 @@ label.fld.inline input {
   padding: 0 var(--space-4);
   border: 1px solid var(--border);
   border-radius: var(--radius-pill);
-  background: var(--bg);
+  background: var(--surface);
   color: var(--muted);
   font: 600 var(--text-sm) / 1 var(--font);
   cursor: pointer;
@@ -357,7 +353,7 @@ label.fld.inline input {
   border: 1px solid var(--border);
   border-radius: var(--radius-md);
   margin-bottom: var(--space-2);
-  background: var(--bg);
+  background: var(--surface);
   min-height: var(--tap);
 }
 
@@ -999,27 +995,10 @@ label.fld.inline input {
   margin: 0;
 }
 
-/* The chosen config's behaviour, in a sentence. */
-.explain {
-  border: 1px solid var(--border);
-  border-left: 3px solid var(--accent);
-  border-radius: var(--radius-md);
-  background: var(--surface);
-  padding: var(--space-4);
+/* The chosen config's behaviour, in a sentence — the shared `.cf-help` panel
+   (primitives.css) with its accent left border; only the bottom gap is added. */
+#configs-explain {
   margin-bottom: var(--space-5);
-  font-size: var(--text-md);
-  line-height: 1.55;
-}
-
-.explain[hidden] {
-  display: none;
-}
-
-.explain code {
-  font: 0.95em var(--mono);
-  background: var(--surface-2);
-  border-radius: var(--radius-sm);
-  padding: 1px 4px;
 }
 
 /* A chip that is also a control — the config picker. */

@@ -11,7 +11,7 @@ body {
      `max-width` media query, which matches during that 0-width pass. */
   width: 360px;
   font: var(--text-base) / 1.5 var(--font);
-  background: var(--bg);
+  background: var(--canvas);
   color: var(--fg);
 }
 
@@ -29,26 +29,6 @@ header {
 h1 {
   font-size: 15px;
   margin: 0;
-}
-
-.badge {
-  font-size: var(--text-xs);
-  padding: 3px var(--space-3);
-  border-radius: var(--radius-pill);
-  background: var(--surface);
-  border: 1px solid var(--border);
-  color: var(--muted);
-  font-weight: 600;
-}
-.badge.matched {
-  color: var(--accent-fg);
-  background: var(--ok);
-  border-color: var(--ok);
-}
-.badge.none {
-  color: var(--accent-fg);
-  background: var(--warn);
-  border-color: var(--warn);
 }
 
 .detail {
@@ -80,19 +60,14 @@ h1 {
   display: none;
 }
 
-button.primary {
+/* The popup's primary is the shared `.btn.btn-primary` (colour, hover and
+   disabled all come from primitives.css); only its full-width, taller shape is
+   the popup's own. */
+#primary {
   width: 100%;
   min-height: var(--tap);
-  border: none;
   border-radius: var(--radius-lg);
-  background: var(--accent);
-  color: var(--accent-fg);
-  font: 600 15px/1 var(--font);
-  cursor: pointer;
-}
-button.primary:disabled {
-  opacity: 0.5;
-  cursor: not-allowed;
+  font-size: 15px;
 }
 
 /* ---------------- Queue session ---------------- */

@@ -24,6 +24,7 @@ import type { SessionState } from '../../shared/messages';
 import type { JobBlock } from '../../shared/jobText';
 import { FIELD_LABELS } from '../../shared/fieldKeys';
 import { STATUS_LABELS, matchStatus } from '../../shared/fieldStatus';
+import { ACTION_LABELS, STATUS_TEXT } from '../../shared/labels';
 import { clampLayout, layoutLimits, NARROW_WIDTH } from '../../shared/modalLayout';
 import { CONCEPT_HELP } from '../../shared/help';
 import { helpPanel } from '../../ui/help';
@@ -282,7 +283,7 @@ export class FillerModal {
     // A posting you do not want is worth skipping whether or not you can apply
     // to it here, so Skip is on both branches. The label names the consequence:
     // during a session skipping also pulls in the next posting.
-    const skip = btn(data.session?.active ? 'Skip → next' : 'Skip', () => this.cb.onSkip());
+    const skip = btn(data.session?.active ? ACTION_LABELS.skipNext : ACTION_LABELS.skip, () => this.cb.onSkip());
 
     if (data.redirect) {
       // Same shape as below — the primary action, Skip, then the overflow. "Fill
@@ -290,9 +291,9 @@ export class FillerModal {
       // given reason to doubt, and as a third button it pushed the primary one
       // off the right edge at 390px.
       actions.append(
-        btn(data.redirect.followed ? 'Open again' : 'Open application', () => this.cb.onFollow(), true),
+        btn(data.redirect.followed ? ACTION_LABELS.openApplicationAgain : ACTION_LABELS.openApplication, () => this.cb.onFollow(), true),
         skip,
-        this.overflow([btn('Fill this page instead', () => this.cb.onFillAnyway())]),
+        this.overflow([btn(ACTION_LABELS.fillAnyway, () => this.cb.onFillAnyway())]),
       );
       footer.append(actions);
       return footer;
@@ -301,22 +302,22 @@ export class FillerModal {
     // Sent and confirmed: there is nothing left to press here, and an Apply that
     // still looked live would invite a second application to the same posting.
     if (data.applied) {
-      const done = btn('Applied ✓', () => {}, true);
+      const done = btn(ACTION_LABELS.applied, () => {}, true);
       done.setAttribute('aria-disabled', 'true');
       done.classList.add('cf-applied-btn');
       actions.append(
         done,
         skip,
         this.overflow([
-          btn('Re-run', () => this.cb.onRerun()),
-          btn('Reset', () => this.cb.onReset()),
+          btn(ACTION_LABELS.rerun, () => this.cb.onRerun()),
+          btn(ACTION_LABELS.reset, () => this.cb.onReset()),
         ]),
       );
       footer.append(actions);
       return footer;
     }
 
-    const apply = btn('Apply', () => this.cb.onApply(), true);
+    const apply = btn(ACTION_LABELS.apply, () => this.cb.onApply(), true);
     if (data.applyState !== 'ready') {
       // `aria-disabled`, not `disabled`: a disabled button swallows pointer
       // events, so the one thing the user does — press it — could not answer
@@ -335,8 +336,8 @@ export class FillerModal {
       apply,
       skip,
       this.overflow([
-        btn('Re-run', () => this.cb.onRerun()),
-        btn('Reset', () => this.cb.onReset()),
+        btn(ACTION_LABELS.rerun, () => this.cb.onRerun()),
+        btn(ACTION_LABELS.reset, () => this.cb.onReset()),
       ]),
     );
 
@@ -397,7 +398,28 @@ export class FillerModal {
       body.append(empty);
     }
 
+    // The report at a glance, without leaving the Job view: filled / to-check /
+    // unmatched as three tiles. A two-step posting has no report to summarize, so
+    // it gets none. The Fields tab's summary line stays the greyscale fallback.
+    if (!data.redirect && data.matches.length) body.append(this.statSummary(data.matches));
+
     return body;
+  }
+
+  /** The three-stat summary — the same counts the Fields summary line carries. */
+  private statSummary(matches: FieldMatch[]): HTMLElement {
+    const counts = statCounts(matches);
+    const wrap = el('div', 'cf-stats');
+    for (const status of ['high', 'low', 'none'] as const) {
+      const tile = el('div', `cf-stat ${status}`);
+      const n = el('div', 'cf-stat-n');
+      n.textContent = String(counts[status]);
+      const k = el('div', 'cf-stat-k');
+      k.textContent = STATUS_TEXT[status].tile;
+      tile.append(n, k);
+      wrap.append(tile);
+    }
+    return wrap;
   }
 
   /**
@@ -422,10 +444,11 @@ export class FillerModal {
     const body = el('div', 'cf-body');
     if (data.applied) body.append(this.appliedBanner());
 
-    const filled = data.matches.filter((m) => m.filled).length;
-    const missing = data.matches.filter((m) => m.confidence === 'none').length;
+    const counts = statCounts(data.matches);
     const summary = el('p', 'cf-summary');
-    summary.textContent = `${filled} filled · ${data.matches.length - filled} need review · ${missing} not found`;
+    // One vocabulary with the tiles and the legend — the words come from labels.ts.
+    summary.textContent = `${counts.high} ${STATUS_TEXT.high.word} · `
+      + `${counts.low} ${STATUS_TEXT.low.word} · ${counts.none} ${STATUS_TEXT.none.word}`;
     body.append(summary);
 
     const report = el('div', 'cf-report');
@@ -435,10 +458,10 @@ export class FillerModal {
     // The report is three colours and a set of buttons, and nothing on screen
     // says what any of them mean — or that nothing has been sent yet.
     const legend = el('p', 'cf-legend-line');
-    for (const [cls, text] of [['ok', 'filled'], ['low', 'check it'], ['none', 'not found']] as const) {
-      const dot = el('span', `cf-dot ${cls}`);
+    for (const status of ['high', 'low', 'none'] as const) {
+      const dot = el('span', `cf-dot ${status}`);
       const label = el('span');
-      label.textContent = text;
+      label.textContent = STATUS_TEXT[status].word;
       legend.append(dot, label);
     }
     const sent = el('small', 'cf-legend-send');
@@ -523,9 +546,9 @@ export class FillerModal {
     // Anything matched but not filled can be retried in place; only a field with
     // no element at all has nothing for Confirm to act on.
     if (!m.filled && m.confidence !== 'none') {
-      actions.append(btn('Confirm', () => this.cb.onConfirm(m.field), true));
+      actions.append(btn(ACTION_LABELS.confirm, () => this.cb.onConfirm(m.field), true));
     }
-    actions.append(btn('Pick', () => this.cb.onPick(m.field)));
+    actions.append(btn(ACTION_LABELS.pick, () => this.cb.onPick(m.field)));
     row.append(actions);
     return row;
   }
@@ -685,6 +708,19 @@ function pillStatus(data: ModalData, filled: number): MatchConfidence {
   if (data.redirect || data.matches.length === 0) return 'high';
   if (filled === data.matches.length) return 'high';
   return filled > 0 ? 'low' : 'none';
+}
+
+/**
+ * The report split into its three buckets, keyed by the same `matchStatus` the
+ * dots use — so the summary line, the stat tiles and the row dots can never
+ * count a field into different columns. `high` = actually filled, `none` = no
+ * field matched, `low` = everything left (a guess, or a confident match the
+ * field would not take).
+ */
+function statCounts(matches: FieldMatch[]): Record<MatchConfidence, number> {
+  const counts: Record<MatchConfidence, number> = { high: 0, low: 0, none: 0 };
+  for (const m of matches) counts[matchStatus(m)] += 1;
+  return counts;
 }
 
 /**

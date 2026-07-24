@@ -24,12 +24,12 @@
 }
 
 /* "Not set" here means an optional selector nobody has filled in, not a
-   failure — so it stays neutral rather than borrowing the report's red ×. */
+   failure — so it stays neutral (grey circle, a dash) rather than borrowing the
+   report's red cross. Only the colour and icon change; the masked-SVG mechanism
+   is primitives.css's. */
 .cf-dot.none {
   background: var(--border-strong);
-}
-.cf-dot.none::before {
-  content: '–';
+  --i: var(--icon-dash);
 }
 
 .cf-heading {

@@ -183,7 +183,8 @@ button.cf-btn.cf-applied-btn,
 button.cf-btn.cf-applied-btn[aria-disabled='true'] {
   background: var(--ok);
   border-color: var(--ok);
-  color: #fff;
+  color: var(--on-status);
+  box-shadow: none;
   opacity: 1;
   cursor: default;
 }
@@ -192,6 +193,13 @@ button.cf-btn.cf-applied-btn[aria-disabled='true'] {
   font-size: var(--text-md);
   color: var(--muted);
   margin: 0;
+}
+
+/* The three-stat summary sits below the posting in the Job view. The tile itself
+   is the shared `.cf-stats`/`.cf-stat` primitive; only the gap above it is the
+   modal's, so it stays here rather than baked into the shared component. */
+.cf-body > .cf-stats {
+  margin-top: var(--space-6);
 }
 
 /* ---------------- Fields view ---------------- */

@@ -260,8 +260,8 @@ describe('FillerModal — the report says what it means', () => {
   it('keys the three dot colours under the rows', () => {
     const legend = render(data([match()])).querySelector('.cf-legend-line')!;
     expect(legend.textContent).toContain('filled');
-    expect(legend.textContent).toContain('check it');
-    expect(legend.textContent).toContain('not found');
+    expect(legend.textContent).toContain('to check');
+    expect(legend.textContent).toContain('unmatched');
     // A colour alone is not a key; each word gets the dot it describes.
     expect(legend.querySelectorAll('.cf-dot').length).toBe(3);
   });

@@ -4,6 +4,7 @@
  */
 
 import type { MatchConfidence } from '../shared/types';
+import { currentPalette } from '../ui/palette';
 
 /** Set `value` via the native setter so React's value tracker sees the change. */
 function setNativeValue(el: HTMLInputElement | HTMLTextAreaElement, value: string): void {
@@ -90,17 +91,21 @@ export function fillFileInput(input: HTMLInputElement, file: File): boolean {
   }
 }
 
-const HIGHLIGHT_COLORS: Record<MatchConfidence, string> = {
-  high: '#22c55e',
-  low: '#eab308',
-  none: '#ef4444',
-};
-
 const HL_ATTR = 'data-cf-highlight';
+
+/**
+ * The on-page outline colour per outcome — high/low/none map to ok/warn/err.
+ * Read from `palette.ts` (not a `var(--…)`): the highlight lands on the host
+ * page's own element, outside every shadow root, so it cannot see the tokens.
+ */
+function highlightColor(confidence: MatchConfidence): string {
+  const p = currentPalette();
+  return confidence === 'high' ? p.ok : confidence === 'low' ? p.warn : p.err;
+}
 
 export function highlight(el: HTMLElement, confidence: MatchConfidence): void {
   el.setAttribute(HL_ATTR, confidence);
-  el.style.setProperty('outline', `2px solid ${HIGHLIGHT_COLORS[confidence]}`, 'important');
+  el.style.setProperty('outline', `2px solid ${highlightColor(confidence)}`, 'important');
   el.style.setProperty('outline-offset', '1px', 'important');
 }
 

@@ -826,12 +826,12 @@ function renderStats(list: JobUrlEntry[]): void {
   ];
   $('url-stats').replaceChildren(...cards.map(([k, n, cls]) => {
     const card = document.createElement('div');
-    card.className = `stat ${cls}`.trim();
+    card.className = `cf-stat ${cls}`.trim();
     const num = document.createElement('div');
-    num.className = 'n';
+    num.className = 'cf-stat-n';
     num.textContent = String(n);
     const key = document.createElement('div');
-    key.className = 'k';
+    key.className = 'cf-stat-k';
     key.textContent = k;
     card.append(num, key);
     return card;

@@ -11,18 +11,23 @@
  * to commit first, so on touch you got whatever you happened to hit.)
  */
 
+import { currentPalette, withAlpha } from '../ui/palette';
+
 export type PickHandler = (el: Element) => void;
 
 const OWN_ATTR = 'data-cf-picker';
 
 export function startPicker(onPick: PickHandler, fieldLabel: string, onCancel?: () => void): () => void {
   const coarse = window.matchMedia?.('(pointer: coarse)').matches ?? false;
+  // The toolbar lives on the host page's light DOM, which never sees tokens.css,
+  // so its colours come from the palette copy rather than a `var(--…)`.
+  const p = currentPalette();
 
   const box = document.createElement('div');
   box.setAttribute(OWN_ATTR, 'box');
   Object.assign(box.style, {
     position: 'fixed', zIndex: '2147483646', pointerEvents: 'none',
-    border: '2px solid #6366f1', background: 'rgba(99,102,241,0.15)',
+    border: `2px solid ${p.accent}`, background: withAlpha(p.accent, 0.15),
     borderRadius: '4px', transition: 'all 40ms linear', display: 'none',
   } as CSSStyleDeclaration);
 
@@ -35,7 +40,7 @@ export function startPicker(onPick: PickHandler, fieldLabel: string, onCancel?: 
     ...(coarse
       ? { bottom: 'calc(12px + env(safe-area-inset-bottom, 0px))', top: 'auto' }
       : { top: '12px', bottom: 'auto' }),
-    transform: 'translateX(-50%)', background: '#111827', color: '#fff',
+    transform: 'translateX(-50%)', background: p.ink, color: p.onInk,
     font: '13px/1.4 system-ui, sans-serif', padding: '8px 12px', borderRadius: '10px',
     display: 'flex', gap: '8px', alignItems: 'center', boxShadow: '0 4px 16px rgba(0,0,0,.35)',
     maxWidth: '92vw', flexWrap: 'wrap', justifyContent: 'center',
@@ -45,8 +50,9 @@ export function startPicker(onPick: PickHandler, fieldLabel: string, onCancel?: 
   label.textContent = coarse
     ? `Tap the "${fieldLabel}" field, then Confirm`
     : `Click the "${fieldLabel}" field`;
-  const confirmBtn = mkButton('Confirm', '#6366f1', coarse);
-  const cancelBtn = mkButton('Cancel', '#374151', coarse);
+  // Confirm is the primary — accent fill; Cancel is a neutral chip on the bar.
+  const confirmBtn = mkButton('Confirm', p.accent, p.onStatus, coarse);
+  const cancelBtn = mkButton('Cancel', p.neutral, p.ink, coarse);
   confirmBtn.style.display = 'none';
   bar.append(label, confirmBtn, cancelBtn);
 
@@ -122,12 +128,12 @@ export function startPicker(onPick: PickHandler, fieldLabel: string, onCancel?: 
   return cancel;
 }
 
-function mkButton(text: string, bg: string, coarse: boolean): HTMLButtonElement {
+function mkButton(text: string, bg: string, fg: string, coarse: boolean): HTMLButtonElement {
   const b = document.createElement('button');
   b.setAttribute(OWN_ATTR, 'btn');
   b.textContent = text;
   Object.assign(b.style, {
-    background: bg, color: '#fff', border: 'none', borderRadius: '8px',
+    background: bg, color: fg, border: 'none', borderRadius: '8px',
     padding: coarse ? '10px 18px' : '6px 12px', font: '13px system-ui, sans-serif',
     cursor: 'pointer', minHeight: coarse ? '44px' : '32px',
   } as CSSStyleDeclaration);

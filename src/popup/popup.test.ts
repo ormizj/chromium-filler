@@ -90,7 +90,7 @@ describe('popup render', () => {
     const badge = document.getElementById('site-status')!;
     const primary = document.getElementById('primary') as HTMLButtonElement;
     expect(badge.textContent).toBe('matched');
-    expect(badge.className).toContain('matched');
+    expect(badge.className).toContain('ok');
     expect(document.getElementById('detail')!.textContent).toContain('ready to fill');
     expect(primary.textContent).toBe('Fill');
     expect(primary.disabled).toBe(false);
@@ -107,7 +107,7 @@ describe('popup render', () => {
     const badge = document.getElementById('site-status')!;
     const primary = document.getElementById('primary') as HTMLButtonElement;
     expect(badge.textContent).toBe('no config');
-    expect(badge.className).toContain('none');
+    expect(badge.className).toContain('warn');
     expect(primary.textContent).toBe('Set up this site');
     expect(primary.disabled).toBe(false);
   });

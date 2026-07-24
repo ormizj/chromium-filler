@@ -13,28 +13,58 @@
 
 :root,
 :host {
-  /* Neutrals. `--bg` is the page, `--surface` is anything raised off it, and
-     `--surface-2` is raised again (a row inside a card). In dark mode raised
-     means LIGHTER — the popup and the two shadow surfaces used to have this
-     inverted relative to the options page, so they disagreed at a glance. */
-  --bg: #ffffff;
-  --surface: #f9fafb;
-  --surface-2: #ffffff;
-  --fg: #111827;
-  --muted: #6b7280;
-  --border: #e5e7eb;
-  --border-strong: #d1d5db;
+  /* Neutrals. `--bg` is the card/paper, `--surface` is anything raised off it,
+     and `--surface-2` is raised again (a row inside a card). `--canvas` is the
+     page *behind* the cards on the popup and options pages — a shade deeper than
+     the paper floating on it. In dark mode raised means LIGHTER — the popup and
+     the two shadow surfaces used to have this inverted relative to the options
+     page, so they disagreed at a glance.
 
-  /* Brand + status. `--accent-fg` is what stays legible on top of `--accent`. */
-  --accent: #6366f1;
+     Soft / Warm: warm paper neutrals rather than cool greys. See
+     design/design-system.md for the mapping. */
+  --canvas: #f4efe7;
+  --bg: #fffdfa;
+  --surface: #f4efe7;
+  --surface-2: #faf6ee;
+  --fg: #2c2a26;
+  --muted: #6f6a61;
+  --border: #eae4da;
+  --border-strong: #ded6c9;
+
+  /* Brand + status. A single clay accent; muted status colours paired with the
+     soft `*-weak` tints the chips are built from. `--accent-fg` is what stays
+     legible on top of `--accent`. `--on-status` is what sits on a *filled*
+     status colour (the icon inside a dot, text on the Applied button) — the one
+     place white-on-colour is spelled, so no surface hardcodes `#fff`. */
+  --accent: #c46a3f;
   --accent-fg: #ffffff;
-  --accent-weak: #eef2ff;
-  --ok: #16a34a;
-  --warn: #ca8a04;
-  --err: #dc2626;
-  --ok-weak: #dcfce7;
-  --warn-weak: #fef9c3;
-  --err-weak: #fee2e2;
+  --accent-weak: #f6e7dd;
+  --on-status: #ffffff;
+  --ok: #3f9d6b;
+  --warn: #c99a2e;
+  --err: #c85a4e;
+  --ok-weak: #e4f2e8;
+  --warn-weak: #f7edd6;
+  --err-weak: #f7e2df;
+
+  /* The one primary-button fill, read by `.btn-primary` in primitives.css and
+     nowhere else — a warm coral gradient with a soft coloured lift, the single
+     deliberate exception to the otherwise-flat direction. Dark mode falls back
+     to the solid accent (a gradient glows badly against the dark card), so the
+     shadow is dropped there too. Defined here, applied once, never per surface. */
+  --btn-primary: linear-gradient(135deg, #e0632f, #f0913f);
+  --btn-primary-shadow: 0 8px 16px -7px rgba(224, 99, 47, 0.6);
+
+  /* Status-dot glyphs — masked SVGs, so the coloured circle carries a distinct
+     *shape* per status (colour is only half the signal: colour-blindness and
+     greyscale need the icon). Stroked and rounded to match the warmth. The mask
+     reads the stroke's alpha, so the drawn colour is irrelevant; `--on-status`
+     is what actually shows through. `--icon-dash` is the setup panel's neutral
+     "not set", which is not the report's red error. */
+  --icon-check: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='3.2' stroke-linecap='round' stroke-linejoin='round'><path d='M5 12.5l4.2 4.2L19 7'/></svg>");
+  --icon-alert: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='3.2' stroke-linecap='round' stroke-linejoin='round'><path d='M12 6v7'/><path d='M12 18h.01'/></svg>");
+  --icon-x: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='3.2' stroke-linecap='round' stroke-linejoin='round'><path d='M6.5 6.5l11 11M17.5 6.5l-11 11'/></svg>");
+  --icon-dash: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='3.2' stroke-linecap='round'><path d='M6 12h12'/></svg>");
 
   /* Geometry. `--tap` is the minimum comfortable touch target; primitives.css
      applies it to every control under `@media (pointer: coarse)`. */
@@ -61,33 +91,42 @@
   --text-lg: 17px;
   --text-xl: 22px;
 
-  --shadow-1: 0 1px 2px rgba(0, 0, 0, 0.06);
-  --shadow-2: 0 12px 40px rgba(0, 0, 0, 0.28);
+  /* Warm, soft shadows — the direction reads warm through colour and shadow, not
+     through new geometry. */
+  --shadow-1: 0 1px 2px rgba(80, 60, 40, 0.1);
+  --shadow-2: 0 18px 40px -22px rgba(80, 60, 40, 0.35);
   --ring: 0 0 0 2px var(--bg), 0 0 0 4px var(--accent);
 }
 
 @media (prefers-color-scheme: dark) {
   :root,
   :host {
-    --bg: #111827;
-    --surface: #1f2937;
-    --surface-2: #273244;
-    --fg: #f3f4f6;
-    --muted: #9ca3af;
-    --border: #374151;
-    --border-strong: #4b5563;
+    --canvas: #1a1815;
+    --bg: #221e1a;
+    --surface: #2c2823;
+    --surface-2: #322d27;
+    --fg: #f3efe8;
+    --muted: #b3aca0;
+    --border: #37322b;
+    --border-strong: #453f37;
 
-    --accent: #818cf8;
-    --accent-fg: #10142a;
-    --accent-weak: #312e81;
-    --ok: #4ade80;
-    --warn: #facc15;
-    --err: #f87171;
-    --ok-weak: #14532d;
-    --warn-weak: #422006;
-    --err-weak: #7f1d1d;
+    --accent: #e08a54;
+    --accent-fg: #2a1a10;
+    --accent-weak: #3a2a1f;
+    --ok: #5fc48c;
+    --warn: #e0b356;
+    --err: #e07a6c;
+    --ok-weak: #22332a;
+    --warn-weak: #352d1c;
+    --err-weak: #3a2622;
 
-    --shadow-1: 0 1px 2px rgba(0, 0, 0, 0.4);
+    /* A gradient glows against the dark card, so the primary falls back to the
+       solid accent and drops its coloured lift. */
+    --btn-primary: var(--accent);
+    --btn-primary-shadow: none;
+
+    --shadow-1: 0 1px 2px rgba(0, 0, 0, 0.5);
+    --shadow-2: 0 24px 50px -26px rgba(0, 0, 0, 0.7);
   }
 }
 

@@ -26,6 +26,15 @@
   border: 0;
 }
 
+/* Native form controls follow the accent, so a checkbox or a range track is not
+   the one browser-blue element left in an otherwise warm surface. */
+input[type='checkbox'],
+input[type='radio'],
+input[type='range'],
+progress {
+  accent-color: var(--accent);
+}
+
 /* ---------------- Focus ---------------- */
 
 /* Every surface was missing a focus ring entirely; keyboard use was invisible. */
@@ -61,16 +70,26 @@ button.cf-btn:hover {
   border-color: var(--border-strong);
 }
 
+/**
+ * The one primary button, defined once for every surface — the modal's Apply,
+ * the popup's "Run this page", the options CTAs. Its warm coral gradient (and the
+ * solid-accent dark-mode fallback) lives entirely in `--btn-primary`, so no
+ * surface opts in or restyles it. Two states are primary buttons but must NOT
+ * read as this live CTA, and each overrides it downstream: a blocked Apply
+ * (`aria-disabled`, faded by the `opacity` rule below) and the green "Applied ✓"
+ * button (`.cf-applied-btn` in modal.css, its own `--ok` fill — it reports
+ * success, not a pending action).
+ */
 .btn-primary,
 button.cf-btn.primary {
-  background: var(--accent);
+  background: var(--btn-primary);
   color: var(--accent-fg);
-  border-color: var(--accent);
+  border-color: transparent;
+  box-shadow: var(--btn-primary-shadow);
 }
 
 .btn-primary:hover,
 button.cf-btn.primary:hover {
-  background: var(--accent);
   filter: brightness(1.08);
 }
 
@@ -132,11 +151,15 @@ button.cf-btn[aria-disabled='true']:hover {
 /* ---------------- Status dots ---------------- */
 
 /**
- * Status is never colour alone: each dot carries a glyph, so the report is
- * readable in greyscale and with colour-blindness. Class names are load-bearing
- * (the E2E suite asserts on `.cf-dot.none`) — only the presentation changed.
+ * Status is never colour alone: each dot carries an ICON as well as a colour, so
+ * the report is readable in greyscale and with colour-blindness. Class names are
+ * load-bearing (the E2E suite asserts on `.cf-dot.none`) — only the presentation
+ * moved, from a text glyph to a masked SVG. The icon is `--on-status` masked to
+ * the shape in `--i`, so the coloured circle stays and any icon set drops in; the
+ * 12px view-tab dots and the legend dots use the same classes and inherit it.
  */
 .cf-dot {
+  position: relative;
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -144,33 +167,31 @@ button.cf-btn[aria-disabled='true']:hover {
   height: 16px;
   border-radius: 50%;
   flex: none;
-  font: 700 10px/1 var(--font);
-  color: #fff;
+}
+.cf-dot::before {
+  content: '';
+  position: absolute;
+  inset: 22%;
+  background: var(--on-status);
+  -webkit-mask: var(--i) center / contain no-repeat;
+  mask: var(--i) center / contain no-repeat;
 }
 
 .cf-dot.high,
 .cf-dot.ok {
   background: var(--ok);
-}
-.cf-dot.high::before,
-.cf-dot.ok::before {
-  content: '✓';
+  --i: var(--icon-check);
 }
 
 .cf-dot.low,
 .cf-dot.warn {
   background: var(--warn);
-}
-.cf-dot.low::before,
-.cf-dot.warn::before {
-  content: '!';
+  --i: var(--icon-alert);
 }
 
 .cf-dot.none {
   background: var(--err);
-}
-.cf-dot.none::before {
-  content: '×';
+  --i: var(--icon-x);
 }
 
 /* ---------------- Rows ---------------- */
@@ -460,6 +481,55 @@ button.cf-btn[aria-disabled='true']:hover {
   background: var(--accent-weak);
   border-color: transparent;
   color: var(--accent);
+}
+
+/* ---------------- Stat tiles ---------------- */
+
+/**
+ * A row of at-a-glance count tiles — the modal's three-stat summary (filled /
+ * to-check / unmatched) and the options Queue stats both render from this, which
+ * is why it lives here rather than in either surface. The number is coloured by
+ * status (`.ok/.warn/.none`); the caption stays muted. `--min` lets the caller
+ * pick a floor before the row wraps: the modal's three always fit one row, the
+ * options grid wraps as many as the width allows.
+ */
+.cf-stats {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(var(--min, 0), 1fr));
+  gap: var(--space-3);
+}
+
+.cf-stat {
+  background: var(--surface);
+  border-radius: var(--radius-lg);
+  padding: var(--space-4);
+  text-align: center;
+}
+
+.cf-stat-n {
+  font-size: var(--text-xl);
+  font-weight: 600;
+  line-height: 1.1;
+}
+.cf-stat.ok .cf-stat-n {
+  color: var(--ok);
+}
+.cf-stat.warn .cf-stat-n {
+  color: var(--warn);
+}
+.cf-stat.none .cf-stat-n {
+  color: var(--err);
+}
+.cf-stat.accent .cf-stat-n {
+  color: var(--accent);
+}
+
+.cf-stat-k {
+  margin-top: 2px;
+  font-size: var(--text-xs);
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
 }
 
 /* ---------------- Inline help ---------------- */
