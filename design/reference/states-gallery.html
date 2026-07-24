@@ -1,0 +1,303 @@
+<!doctype html>
+<html lang="en" data-mode="light">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Soft / Warm — states &amp; components the mockups missed</title>
+<style>
+  :root{--tap:44px; --sans:"Inter",ui-sans-serif,-apple-system,"Segoe UI",system-ui,sans-serif; --mono:ui-monospace,SFMono-Regular,Menlo,monospace;
+    --icon-check:url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='3.2' stroke-linecap='round' stroke-linejoin='round'><path d='M5 12.5l4.2 4.2L19 7'/></svg>");
+    --icon-bang:url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='3.2' stroke-linecap='round' stroke-linejoin='round'><path d='M12 6v7'/><path d='M12 18h.01'/></svg>");
+    --icon-x:url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='3.2' stroke-linecap='round' stroke-linejoin='round'><path d='M6.5 6.5l11 11M17.5 6.5l-11 11'/></svg>");}
+  /* ===== 02 Soft/Warm tokens, mapped onto the extension's token names ===== */
+  [data-mode="light"]{
+    --canvas:#f4efe7; --bg:#fffdfa; --surface:#f4efe7; --surface-2:#faf6ee;
+    --fg:#2c2a26; --muted:#6f6a61; --border:#eae4da; --border-strong:#ded6c9;
+    --accent:#c46a3f; --accent-fg:#ffffff; --accent-weak:#f6e7dd;
+    --ok:#3f9d6b; --ok-weak:#e4f2e8; --warn:#c99a2e; --warn-weak:#f7edd6; --err:#c85a4e; --err-weak:#f7e2df;
+    --shadow-1:0 1px 2px rgba(80,60,40,.10); --shadow-2:0 18px 40px -22px rgba(80,60,40,.35);
+  }
+  [data-mode="dark"]{
+    --canvas:#1a1815; --bg:#221e1a; --surface:#2c2823; --surface-2:#322d27;
+    --fg:#f3efe8; --muted:#b3aca0; --border:#37322b; --border-strong:#453f37;
+    --accent:#e08a54; --accent-fg:#2a1a10; --accent-weak:#3a2a1f;
+    --ok:#5fc48c; --ok-weak:#22332a; --warn:#e0b356; --warn-weak:#352d1c; --err:#e07a6c; --err-weak:#3a2622;
+    --shadow-1:0 1px 2px rgba(0,0,0,.5); --shadow-2:0 24px 50px -26px rgba(0,0,0,.7);
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--canvas);color:var(--fg);font-family:var(--sans);-webkit-font-smoothing:antialiased;padding:56px 40px 120px}
+  .mode-toggle{position:fixed;top:20px;right:24px;z-index:50;display:flex;gap:8px;align-items:center;background:var(--bg);border:1px solid var(--border);color:var(--fg);border-radius:999px;padding:9px 16px;font:500 13px var(--sans);cursor:pointer;box-shadow:var(--shadow-2)}
+  .wrap{max-width:1160px;margin:0 auto}
+  h1{font-weight:600;font-size:34px;letter-spacing:-.02em;margin:0 0 8px}
+  .lede{color:var(--muted);font-size:15px;line-height:1.6;max-width:720px;margin:0 0 8px}
+  .warnbox{max-width:720px;margin:18px 0 0;border:1px solid var(--border);border-left:3px solid var(--accent);background:var(--bg);border-radius:8px;padding:14px 16px;font-size:13.5px;line-height:1.6;color:var(--fg)}
+  .warnbox b{color:var(--accent)}
+  h2{font-weight:600;font-size:15px;margin:56px 0 4px;padding-top:20px;border-top:1px solid var(--border)}
+  .h2sub{color:var(--muted);font-size:13px;margin:0 0 22px;max-width:720px;line-height:1.55}
+  .gal{display:flex;flex-wrap:wrap;gap:22px;align-items:flex-start}
+  .demo{display:flex;flex-direction:column;gap:8px}
+  .demo .cap{font-size:11px;letter-spacing:.06em;text-transform:uppercase;color:var(--muted);font-weight:500;margin-left:2px}
+  .demo .st{font-size:11px;color:var(--muted);font-family:var(--mono);margin-left:2px}
+
+  /* ===== primitives (mirrors src/ui/primitives.css, recoloured) ===== */
+  .btn{display:inline-flex;align-items:center;justify-content:center;gap:6px;font:500 13px/1.2 var(--sans);color:var(--fg);background:var(--bg);border:1px solid var(--border);border-radius:8px;padding:10px 14px;min-height:var(--tap);cursor:pointer}
+  .btn.primary{background:linear-gradient(135deg,#e0632f,#f0913f);color:#fff;border-color:transparent;box-shadow:0 8px 16px -7px rgba(224,99,47,.6)}
+  [data-mode="dark"] .btn.primary{background:var(--accent);color:var(--accent-fg);border-color:var(--accent);box-shadow:none}
+  .btn.danger{color:var(--err);border-color:var(--err);background:transparent}
+  .btn.ghost{background:transparent;border-color:transparent}
+  .btn[aria-disabled=true]{opacity:.5;cursor:help}
+  /* status dot — coloured fill + an ICON (not a text glyph); colour is only half the signal */
+  .dot{position:relative;display:inline-flex;width:16px;height:16px;border-radius:50%;flex:none}
+  .dot::before{content:'';position:absolute;inset:22%;background:#fff;-webkit-mask:var(--i) center/contain no-repeat;mask:var(--i) center/contain no-repeat}
+  .dot.ok{background:var(--ok);--i:var(--icon-check)}
+  .dot.warn{background:var(--warn);--i:var(--icon-bang)}
+  .dot.none{background:var(--err);--i:var(--icon-x)}
+  .chip{display:inline-flex;align-items:center;gap:4px;padding:3px 10px;border-radius:999px;border:1px solid var(--border);background:var(--surface);color:var(--muted);font-size:11px;font-weight:600;white-space:nowrap}
+  .chip.ok{background:var(--ok-weak);border-color:transparent;color:var(--ok)}
+  .chip.warn{background:var(--warn-weak);border-color:transparent;color:var(--warn)}
+  .chip.err{background:var(--err-weak);border-color:transparent;color:var(--err)}
+  .chip.accent{background:var(--accent-weak);border-color:transparent;color:var(--accent)}
+
+  /* ===== floating sheet shell (.cf-card equivalents) ===== */
+  .card{width:380px;max-width:100%;display:flex;flex-direction:column;background:var(--bg);border:1px solid var(--border);border-radius:14px;box-shadow:var(--shadow-2);overflow:hidden}
+  .chead{display:flex;align-items:center;gap:10px;padding:12px 14px;border-bottom:1px solid var(--border)}
+  .site{font-weight:600;font-size:12px;color:var(--muted);text-transform:uppercase;letter-spacing:.04em;flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .views{display:flex;gap:2px;padding:2px;border:1px solid var(--border);border-radius:999px;background:var(--surface)}
+  .view{display:inline-flex;align-items:center;gap:5px;font:600 12px/1 var(--sans);color:var(--muted);background:transparent;border:0;border-radius:999px;padding:8px 14px;cursor:pointer}
+  .view.active{background:var(--bg);color:var(--fg);box-shadow:var(--shadow-1)}
+  .view .d{width:9px;height:9px;border-radius:50%}
+  .cbody{padding:16px;overflow-y:auto}
+  .cfooter{display:flex;gap:8px;padding:12px 14px;border-top:1px solid var(--border)}
+  .cfooter .btn{flex:1;min-width:90px}
+  .cfooter .icon{flex:0 0 var(--tap)}
+  .title{font-size:17px;font-weight:700;line-height:1.3;margin:0 0 10px}
+  .prose{font-size:14px;line-height:1.65}
+  .prose p{margin:0 0 12px} .prose h4{font-size:13px;font-weight:700;margin:16px 0 6px} .prose li{margin-bottom:5px}
+  .meta{color:var(--muted);font-size:13px;margin:0 0 14px}
+
+  /* notice / applied / empty banners */
+  .notice{font-size:13px;font-weight:600;color:var(--accent);background:var(--accent-weak);border-radius:8px;padding:8px 12px;margin:0 0 10px}
+  .applied{display:flex;align-items:center;gap:6px;font-size:13px;font-weight:700;color:var(--ok);background:var(--ok-weak);border-radius:8px;padding:8px 12px;margin:0 0 12px}
+  .empty{font-size:13px;color:var(--muted);margin:0}
+
+  /* three-stat summary (NEW component — see design-system.md) */
+  .stats{display:flex;gap:8px;margin:14px 0 0}
+  .stat{flex:1;background:var(--surface);border-radius:10px;padding:10px;text-align:center}
+  .stat .num{font-size:19px;font-weight:600} .stat.ok .num{color:var(--ok)} .stat.warn .num{color:var(--warn)} .stat.bad .num{color:var(--err)}
+  .stat .lbl{font-size:11px;color:var(--muted);margin-top:2px}
+
+  /* report rows */
+  .summary{font-size:12px;color:var(--muted);margin:0 0 10px}
+  .row{display:flex;align-items:center;gap:10px;padding:9px 10px;border:1px solid var(--border);border-radius:8px;background:var(--surface-2);min-height:var(--tap);margin-bottom:6px}
+  .row .f{flex:1;min-width:0} .row .f b{display:block;font-size:13px} .row .f small{display:block;color:var(--muted);font-size:11px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .row .acts{display:flex;gap:4px;flex:none}
+  .row .acts .btn{min-height:32px;padding:6px 10px;font-size:12px}
+  .legend{display:flex;flex-wrap:wrap;align-items:center;gap:4px 16px;margin:14px 0 0;padding-top:10px;border-top:1px solid var(--border);font-size:11px;color:var(--muted)}
+  .legend .pair{display:inline-flex;align-items:center;gap:6px}
+  .legend .send{display:block;margin-top:6px;font-size:11px;color:var(--muted);opacity:.85}
+
+  /* session strip + overflow menu */
+  .session{display:flex;align-items:center;gap:10px;padding:7px 14px;background:var(--accent-weak);color:var(--accent);font-size:12px;font-weight:600;border-bottom:1px solid var(--border)}
+  .qdots{display:flex;gap:4px;margin-left:auto}
+  .qd{width:7px;height:7px;border-radius:50%;background:var(--border-strong)} .qd.done{background:var(--accent)} .qd.now{background:transparent;border:2px solid var(--accent)}
+  .menu{width:190px;display:flex;flex-direction:column;gap:4px;padding:8px;background:var(--bg);border:1px solid var(--border);border-radius:8px;box-shadow:var(--shadow-2)}
+  .menu .btn{justify-content:flex-start;width:100%}
+
+  /* minimized pill */
+  .pill{display:inline-flex;align-items:center;gap:6px;min-height:var(--tap);padding:0 16px;border:1px solid var(--border);border-radius:999px;background:var(--bg);color:var(--fg);box-shadow:var(--shadow-2);font:600 13px var(--sans);cursor:pointer}
+
+  /* help disclosure */
+  .help{border:1px solid var(--border);border-left:3px solid var(--accent);border-radius:8px;background:var(--surface);padding:12px;font-size:13px;line-height:1.5;color:var(--fg);width:360px}
+  .help-title{display:block;font-weight:700;margin-bottom:6px}
+  .help-body{margin:0;color:var(--muted)}
+  .help-rows{margin:10px 0 0;padding:0;list-style:none;display:flex;flex-direction:column;gap:6px}
+  .help-rows li{color:var(--muted);display:flex;gap:8px;align-items:baseline} .help-rows b{color:var(--fg);font-weight:600}
+  .helpbtn{width:24px;height:24px;padding:0;border:1px solid var(--border);border-radius:999px;background:var(--surface);color:var(--muted);font:600 13px/1 var(--sans);cursor:pointer}
+  .helpbtn[aria-expanded=true]{background:var(--accent-weak);border-color:transparent;color:var(--accent)}
+
+  /* setup panel rows */
+  .setup{width:400px}
+  .verdict{font-size:12px;font-weight:600;color:var(--accent);background:var(--accent-weak);border-radius:8px;padding:8px 12px;margin:0 0 12px}
+  .sec{font-size:11px;font-weight:600;color:var(--muted);text-transform:uppercase;letter-spacing:.04em;margin:16px 0 8px}
+  .srow{display:flex;align-items:center;gap:10px;padding:9px 10px;border:1px solid var(--border);border-radius:8px;background:var(--surface-2);min-height:var(--tap);margin-bottom:6px}
+  .srow .f{flex:1;min-width:0} .srow .f b{display:block;font-size:13px} .srow .f small{display:block;color:var(--muted);font-size:11px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .prep{display:flex;align-items:center;gap:8px;padding:8px 10px;border:1px solid var(--border);border-radius:8px;background:var(--surface-2);margin-bottom:6px;font-size:12px}
+  .prep .mono{font-family:var(--mono);color:var(--muted);flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .prep .k{font-weight:600}
+</style>
+</head>
+<body>
+  <button class="mode-toggle" onclick="var h=document.documentElement;h.dataset.mode=h.dataset.mode==='dark'?'light':'dark';this.querySelector('span').textContent=h.dataset.mode==='dark'?'Light mode':'Dark mode'"><span>Dark mode</span></button>
+  <div class="wrap">
+    <h1>Soft / Warm — the parts the mockups didn't cover</h1>
+    <p class="lede">The three exploration mockups showed the popup, the two modal views, and one options tab. This page fills the gaps: the modal's other flows, the minimized pill and session strip, the overflow menu, the in-app help disclosure, and the whole setup panel — all in the chosen Soft/Warm language, so a fresh agent has a visual target for every state, not just the happy path.</p>
+    <div class="warnbox"><b>Correctness note.</b> Status dots carry an icon as well as a colour — <span class="dot ok" style="vertical-align:-3px"></span> filled, <span class="dot warn" style="vertical-align:-3px"></span> low-confidence, <span class="dot none" style="vertical-align:-3px"></span> unmatched. These are real icons (check / alert / cross), not the text glyphs the exploration mockups used. Two rules survive the change: status is never colour alone (colour-blindness, greyscale need a distinct shape), and the E2E suite asserts on the <code>.cf-dot.none</code> class — so the class stays, only the <code>::before</code> content becomes a masked SVG.</div>
+
+    <h2>Modal · two-step (redirect) posting</h2>
+    <p class="h2sub">A posting that hands off to an external ATS renders a completely different body — a notice and a "Fill this page instead" escape hatch, no field report at all. This flow was invisible in the mockups.</p>
+    <div class="gal">
+      <div class="demo"><span class="cap">Redirect — not yet followed</span><span class="st">state=redirect</span>
+        <div class="card">
+          <div class="chead"><span class="site">MixedBoard</span><div class="views"><button class="view active">Job</button><button class="view">Fields</button></div></div>
+          <div class="cbody">
+            <div class="notice">This posting applies on the company's own site</div>
+            <p class="meta">matched "Apply on company website" → ats.acme.test</p>
+            <p class="prose" style="color:var(--muted)">Following the link fills the destination form automatically. Or fill this page directly if the board has its own form.</p>
+          </div>
+          <div class="cfooter"><button class="btn primary">Follow &amp; fill</button><button class="btn">Fill this page instead</button></div>
+        </div>
+      </div>
+      <div class="demo"><span class="cap">Handoff destination — landed</span><span class="st">state=landed</span>
+        <div class="card">
+          <div class="chead"><span class="site">ats.acme.test</span><div class="views"><button class="view active">Job</button><button class="view">Fields <span class="dot ok" style="width:12px;height:12px;font-size:8px"></span></button></div></div>
+          <div class="cbody">
+            <div class="notice" style="color:var(--ok);background:var(--ok-weak)">Arrived from boards.example — form filled</div>
+            <h3 class="title">Staff Platform Engineer</h3>
+            <p class="prose" style="color:var(--muted)">The destination form was filled on arrival. Review the fields, then Apply.</p>
+          </div>
+          <div class="cfooter"><button class="btn primary">Apply</button><button class="btn">Skip</button><button class="btn icon">⋯</button></div>
+        </div>
+      </div>
+    </div>
+
+    <h2>Modal · Apply blocked, and Apply done</h2>
+    <p class="h2sub">Apply greys out for two different reasons, each needing a different note; and once a submission is confirmed the modal has to say so loudly, because the site's own message is usually below the fold.</p>
+    <div class="gal">
+      <div class="demo"><span class="cap">No Send button found</span><span class="st">state=apply-unset · note=apply</span>
+        <div class="card">
+          <div class="chead"><span class="site">Acme Careers</span><div class="views"><button class="view active">Job</button><button class="view">Fields <span class="dot warn" style="width:12px;height:12px;font-size:8px"></span></button></div></div>
+          <div class="cbody">
+            <div class="help" style="width:auto;border-left-color:var(--warn)"><span class="help-title">Apply is unavailable</span><p class="help-body">No Send button could be found on this page, so there's nothing to press. Open Setup and pick the Send button, then Apply becomes available.</p></div>
+          </div>
+          <div class="cfooter"><button class="btn primary" aria-disabled="true">Apply</button><button class="btn">Skip</button><button class="btn icon">⋯</button></div>
+        </div>
+      </div>
+      <div class="demo"><span class="cap">No confirmation element</span><span class="st">state=apply-unverified</span>
+        <div class="card">
+          <div class="chead"><span class="site">Acme Careers</span><div class="views"><button class="view active">Job</button><button class="view">Fields</button></div></div>
+          <div class="cbody">
+            <div class="help" style="width:auto"><span class="help-title">Apply is unavailable</span><p class="help-body">This site has no confirmation element set, so a submission's outcome can't be read back. Nothing is sent to a page whose result we can't verify. Set the confirmation element in Setup to enable Apply.</p></div>
+          </div>
+          <div class="cfooter"><button class="btn primary" aria-disabled="true">Apply</button><button class="btn">Skip</button><button class="btn icon">⋯</button></div>
+        </div>
+      </div>
+      <div class="demo"><span class="cap">Sent &amp; confirmed</span><span class="st">state=applied</span>
+        <div class="card">
+          <div class="chead"><span class="site">Acme Careers</span><div class="views"><button class="view active">Job</button><button class="view">Fields <span class="dot ok" style="width:12px;height:12px;font-size:8px"></span></button></div></div>
+          <div class="cbody">
+            <div class="applied"><span class="dot ok"></span> Application sent and confirmed</div>
+            <h3 class="title">Staff Platform Engineer</h3>
+            <p class="prose" style="color:var(--muted)">Recorded as applied. You can close this tab.</p>
+          </div>
+          <div class="cfooter"><button class="btn" style="background:var(--ok);border-color:var(--ok);color:#fff;flex:1" aria-disabled="true">Applied ✓</button><button class="btn">Skip</button><button class="btn icon">⋯</button></div>
+        </div>
+      </div>
+    </div>
+
+    <h2>Modal · empty listing, and a failed fill</h2>
+    <p class="h2sub">An ambiguous listing page had nothing to fill; a failed-fill row is a confident match the page wouldn't accept (a select with no matching option), which must read as "needs you", never as done.</p>
+    <div class="gal">
+      <div class="demo"><span class="cap">Nothing to fill</span><span class="st">state=empty</span>
+        <div class="card">
+          <div class="chead"><span class="site">ListingBoard</span><div class="views"><button class="view active">Job</button><button class="view">Fields <span class="dot none" style="width:12px;height:12px;font-size:8px"></span></button></div></div>
+          <div class="cbody">
+            <h3 class="title">Platform engineering jobs</h3>
+            <p class="empty">3 results. Each employer takes applications on its own site — open one to apply.</p>
+          </div>
+          <div class="cfooter"><button class="btn primary" aria-disabled="true">Apply</button><button class="btn">Skip</button><button class="btn icon">⋯</button></div>
+        </div>
+      </div>
+      <div class="demo"><span class="cap">Fields — a failed fill</span><span class="st">state=failed-fill · view=fields</span>
+        <div class="card">
+          <div class="chead"><span class="site">Acme Careers</span><div class="views"><button class="view">Job</button><button class="view active">Fields <span class="dot warn" style="width:12px;height:12px;font-size:8px"></span></button></div></div>
+          <div class="cbody">
+            <p class="summary">4 fields · 1 filled · 3 need review</p>
+            <div class="row"><span class="dot ok"></span><div class="f"><b>Full name</b><small>Ada Lovelace</small></div></div>
+            <div class="row"><span class="dot warn"></span><div class="f"><b>Country</b><small>US — select has no matching option</small></div><div class="acts"><button class="btn">Confirm</button><button class="btn">Pick</button></div></div>
+            <div class="row"><span class="dot warn"></span><div class="f"><b>City</b><small>London — override hit a wrapper</small></div><div class="acts"><button class="btn">Pick</button></div></div>
+            <div class="row"><span class="dot warn"></span><div class="f"><b>Résumé / CV</b><small>dropzone — needs a manual drop</small></div><div class="acts"><button class="btn">Pick</button></div></div>
+            <div class="legend">
+              <span class="pair"><span class="dot ok"></span> filled</span>
+              <span class="pair"><span class="dot warn"></span> low / needs review</span>
+              <span class="pair"><span class="dot none"></span> unmatched</span>
+              <span class="send">Nothing has been sent yet — Apply is the only thing that presses Send.</span>
+            </div>
+          </div>
+          <div class="cfooter"><button class="btn primary">Apply</button><button class="btn">Skip</button><button class="btn icon">⋯</button></div>
+        </div>
+      </div>
+    </div>
+
+    <h2>Modal · session strip, overflow menu, minimized pill</h2>
+    <p class="h2sub">During a queue session the modal grows a progress strip and Skip becomes "Skip → next". The footer never shows more than two buttons plus ⋯; everything else lives in the overflow. Closing the modal minimizes it to a pill — it is never destroyed.</p>
+    <div class="gal">
+      <div class="demo"><span class="cap">With session strip</span><span class="st">session=1</span>
+        <div class="card">
+          <div class="session">Posting 9 of 60 · 8 applied · 1 skipped <span class="qdots"><span class="qd done"></span><span class="qd done"></span><span class="qd now"></span><span class="qd"></span><span class="qd"></span></span></div>
+          <div class="chead"><span class="site">Acme Careers</span><div class="views"><button class="view active">Job</button><button class="view">Fields <span class="dot warn" style="width:12px;height:12px;font-size:8px"></span></button></div></div>
+          <div class="cbody"><h3 class="title">Staff Platform Engineer</h3><p class="prose" style="color:var(--muted)">Acme is hiring a Staff Platform Engineer to own the deployment pipeline end to end.</p>
+            <div class="stats"><div class="stat ok"><div class="num">4</div><div class="lbl">Filled</div></div><div class="stat warn"><div class="num">1</div><div class="lbl">To check</div></div><div class="stat bad"><div class="num">1</div><div class="lbl">Unmatched</div></div></div>
+          </div>
+          <div class="cfooter"><button class="btn primary">Apply</button><button class="btn">Skip → next</button><button class="btn icon">⋯</button></div>
+        </div>
+      </div>
+      <div class="demo"><span class="cap">Overflow menu</span><span class="st">footer ⋯ open</span>
+        <div class="menu"><button class="btn ghost">Re-run fill</button><button class="btn ghost">Reset &amp; re-run</button><button class="btn ghost">Open setup</button><button class="btn ghost">Open options</button></div>
+        <div style="height:14px"></div>
+        <span class="cap">Minimized pill</span><span class="st">onClose → minimize</span>
+        <div class="pill"><span class="dot warn"></span> Filler · 4 filled</div>
+      </div>
+    </div>
+
+    <h2>In-app help disclosure</h2>
+    <p class="h2sub">The one component that explains the extension. A <span style="font-family:var(--mono)">?</span> button toggles a bordered panel (disclosure, never a hover tooltip — mobile is the priority target). Rendered from <code>src/shared/help.ts</code>; keep the accent left-border.</p>
+    <div class="gal">
+      <div class="demo"><span class="cap">Dot key (modal / setup legend)</span>
+        <div class="help">
+          <span class="help-title">What the dots mean</span>
+          <ul class="help-rows">
+            <li><span class="dot ok"></span><span><b>Filled</b> — matched with high confidence and accepted by the field.</span></li>
+            <li><span class="dot warn"></span><span><b>Low / review</b> — a guess, or a value the field wouldn't take. Confirm or Pick.</span></li>
+            <li><span class="dot none"></span><span><b>Unmatched</b> — no field on the page matched this one.</span></li>
+          </ul>
+          <p class="help-body" style="margin-top:10px">Nothing is sent until you press Apply.</p>
+        </div>
+      </div>
+      <div class="demo"><span class="cap">? button — shut / open</span>
+        <div style="display:flex;gap:10px;align-items:flex-start">
+          <button class="helpbtn">?</button>
+          <button class="helpbtn" aria-expanded="true">?</button>
+        </div>
+      </div>
+    </div>
+
+    <h2>Setup panel — the whole surface the mockups skipped</h2>
+    <p class="h2sub">The second shadow-DOM surface. It maps a site: prep steps, job containers, form fields, the redirect classification, and the Send / confirmation selectors — each row showing auto vs saved status and a Pick action. Shown here at default; other states are external, cv-steps, submit-unset, success-unset, and first-run help.</p>
+    <div class="gal">
+      <div class="demo"><span class="cap">Setup panel — default</span><span class="st">page=setup</span>
+        <div class="card setup">
+          <div class="chead"><span class="site">Acme Careers · setup</span><button class="helpbtn">?</button></div>
+          <div class="cbody">
+            <div class="verdict">Quick apply (assumed) — no external apply link found on this page</div>
+            <div class="sec">Prep steps</div>
+            <div class="prep"><span class="k">Click</span><span class="mono">#expand-description</span><span class="chip ok">ok</span></div>
+            <div class="prep"><span class="k">Wait for</span><span class="mono">#application_form · 10s</span><span class="chip warn">waiting</span></div>
+            <div class="prep"><span class="k">Delay</span><span class="mono">500ms</span></div>
+            <div class="sec">Job containers</div>
+            <div class="srow"><span class="dot ok"></span><div class="f"><b>Description</b><small>saved · Acme is hiring a Staff…</small></div><div class="acts" style="display:flex;gap:4px"><button class="btn" style="min-height:32px;padding:6px 10px;font-size:12px">Pick</button></div></div>
+            <div class="srow"><span class="dot none"></span><div class="f"><b>Requirements</b><small>not set</small></div><div class="acts"><button class="btn" style="min-height:32px;padding:6px 10px;font-size:12px">Pick</button></div></div>
+            <div class="sec">Form fields</div>
+            <div class="srow"><span class="dot ok"></span><div class="f"><b>Full name</b><small>auto · #name</small></div><button class="btn" style="min-height:32px;padding:6px 10px;font-size:12px">Pick</button></div>
+            <div class="srow"><span class="dot warn"></span><div class="f"><b>Phone</b><small>auto (low) · .field input:nth-of-type(3)</small></div><button class="btn" style="min-height:32px;padding:6px 10px;font-size:12px">Pick</button></div>
+            <div class="srow"><span class="dot ok"></span><div class="f"><b>Résumé / CV</b><small>saved · input[type=file]</small></div><button class="btn" style="min-height:32px;padding:6px 10px;font-size:12px">Pick</button></div>
+            <div class="sec">Send &amp; confirmation</div>
+            <div class="srow"><span class="dot warn"></span><div class="f"><b>Send button</b><small>auto · Submit application</small></div><button class="btn" style="min-height:32px;padding:6px 10px;font-size:12px">Pick</button></div>
+            <div class="srow"><span class="dot ok"></span><div class="f"><b>Confirmation element</b><small>saved · #app-success</small></div><button class="btn" style="min-height:32px;padding:6px 10px;font-size:12px">Pick</button></div>
+          </div>
+          <div class="cfooter"><button class="btn primary">Done</button><button class="btn">Open options</button></div>
+        </div>
+      </div>
+    </div>
+  </div>
+</body>
+</html>
