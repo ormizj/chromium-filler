@@ -204,9 +204,11 @@ export interface Settings {
    */
   sessionBatchSize: number;
   /**
-   * Where the review modal sits, and how big it is, on desktop. Set from the
-   * simulator in Options → Settings, and updated when the modal itself is
-   * dragged. Ignored under 640px, where the modal is a full-width bottom sheet.
+   * Where the review modal sits, and how big it is, on desktop. The simulator in
+   * Options → Settings is the only thing that writes it: dragging the modal on a
+   * job page moves it for that page alone, because a nudge to see the field
+   * underneath is not a preference.
+   * Ignored under 640px, where the modal is a full-width bottom sheet.
    * See `shared/modalLayout.ts` — every read is clamped to the viewport.
    */
   modalLayout: ModalLayout;

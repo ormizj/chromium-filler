@@ -79,8 +79,16 @@ class Controller {
   private landedFrom?: string;
   /** Queue-session snapshot, refreshed per run so the modal can show progress. */
   private session?: SessionState;
-  /** User settings; the modal's size and position live here. */
+  /** User settings; the modal's default size and position live here. */
   private settings: Settings = DEFAULT_SETTINGS;
+  /**
+   * Where the user dragged the card *on this page*. Deliberately never persisted:
+   * `settings.modalLayout` is the default, and only the Options simulator may
+   * change it. Nudging the card aside to read the field underneath it is a
+   * one-off gesture, not a preference, and it used to redefine where the modal
+   * opened on every posting after it. Lives exactly as long as the page does.
+   */
+  private draggedLayout?: ModalLayout;
 
   async init(): Promise<void> {
     console.info(`${LOG} content script ready — v${chrome.runtime.getManifest().version} · build ${BUILD_ID}`);
@@ -418,7 +426,7 @@ class Controller {
         // in place and the modal is one tap away, instead of only reachable
         // through a Reset & Re-run that would wipe them.
         onClose: () => this.modal?.minimize(),
-        onLayoutChange: (layout) => this.saveModalLayout(layout),
+        onLayoutChange: (layout) => { this.draggedLayout = layout; },
       });
     }
     const job = extractJob(this.config!);
@@ -437,23 +445,12 @@ class Controller {
         : undefined,
       via: this.landedFrom ? hostOf(this.landedFrom) : undefined,
       session: this.session,
-      layout: this.settings.modalLayout,
+      // The drag wins for this page. `render` rebuilds `ModalData` from scratch,
+      // and `showModal` is re-entered by confirmField, pick, apply and the
+      // message handlers — without this the card would snap back to the stored
+      // default the moment any of them ran.
+      layout: this.draggedLayout ?? this.settings.modalLayout,
     });
-  }
-
-  /**
-   * Persist where the user dragged the card. Re-read before writing: several tabs
-   * run this script at once during a queue session, and a stale in-memory copy of
-   * the settings would otherwise stamp over whatever else was changed meanwhile.
-   */
-  private async saveModalLayout(layout: ModalLayout): Promise<void> {
-    this.settings = { ...this.settings, modalLayout: layout };
-    try {
-      const stored = await getSettings();
-      await saveSettings({ ...stored, modalLayout: layout });
-    } catch (e) {
-      console.warn(LOG, 'could not save the modal layout', e);
-    }
   }
 
   private confirmField(field: FieldKey): void {

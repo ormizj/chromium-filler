@@ -163,8 +163,13 @@ every fillable field (`resume` = the CV file).
 `submitCv`, `autoDetect`, `successSelector`.
 
 `settings.modalLayout` (`shared/modalLayout.ts`) is where the review modal sits and
-how big it is, set from the drag-and-resize simulator in Options → Settings and
-updated when the modal itself is dragged. It is **desktop only** — at or below
+how big it is. **The drag-and-resize simulator in Options → Settings is the only
+thing that writes it.** Dragging the modal on a job page is a page-lifetime
+override held in `Controller.draggedLayout` and never persisted: moving the card
+aside to read the field under it is a one-off gesture, and while it wrote storage
+it silently redefined where the modal opened on every posting afterwards. The
+override is what `showModal` renders from, or the card would snap back on the next
+re-render. It is **desktop only** — at or below
 `NARROW_WIDTH` (640px, shared with primitives.css) the modal is a full-width
 bottom sheet and `modal.ts` *clears* the inline styles, because an inline width
 would beat the media query. Every read goes through `clampLayout`, so a layout

@@ -262,8 +262,9 @@ export const SETTINGS_HELP: Record<keyof Settings, HelpEntry> = {
   modalLayout: {
     title: 'Review modal size & position',
     body: 'Where the review modal sits on screen and how big it is, set by dragging the '
-      + 'card in the simulator below. Desktop only: under 640px the modal is always a '
-      + 'full-width bottom sheet.',
+      + 'card in the simulator below. Dragging the modal on a job page moves it for that '
+      + 'page only and leaves this default alone. Desktop only: under 640px the modal is '
+      + 'always a full-width bottom sheet.',
   },
   helpSeen: {
     title: 'Help seen',

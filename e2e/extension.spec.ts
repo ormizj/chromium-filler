@@ -785,3 +785,56 @@ test('Options: resizing the window leaves the configured layout and its ratios a
     await page.close();
   }
 });
+
+test('Modal: dragging the card on a posting moves it for that page only', async () => {
+  // The simulator in Options is the only thing that sets the default. Nudging the
+  // card aside to read the field underneath it is a one-off gesture, and while it
+  // wrote storage it silently redefined where the modal opened on every posting
+  // afterwards. It must still stay where it was dropped, though, including across
+  // a controller re-render — a card that snaps back reads as a bug.
+  const chosen = { right: 40, bottom: 40, width: 420, height: 520 };
+  await patchSettings({ modalLayout: chosen });
+
+  const page = await context.newPage();
+  try {
+    await page.setViewportSize({ width: 1280, height: 900 });
+    await page.goto(urlFor('quick-plain'));
+    const card = page.locator('.cf-card');
+    await expect(card).toBeVisible({ timeout: 20_000 });
+
+    const box = async () => (await card.boundingBox())!;
+    const before = await box();
+
+    // Press the site name: it is part of the header (the drag handle), and
+    // `onDown` ignores the close button and the view toggle sharing that row. The
+    // grip is not an option — it is display:none above 640px.
+    const site = (await page.locator('.cf-site').boundingBox())!;
+    await page.mouse.move(site.x + site.width / 2, site.y + site.height / 2);
+    await page.mouse.down();
+    // Several moves, not one: the drag is driven by `pointermove`.
+    await page.mouse.move(site.x - 200, site.y - 100, { steps: 10 });
+    await page.mouse.up();
+
+    const dragged = await box();
+    expect(dragged.x, 'the card follows the pointer').toBeLessThan(before.x - 150);
+    expect(dragged.y).toBeLessThan(before.y - 50);
+
+    // Re-run rebuilds `ModalData` in the controller — the path that used to read
+    // the stored default back and throw the drag away.
+    await page.locator('.cf-more button').first().click();
+    await page.getByRole('button', { name: 'Re-run' }).click();
+    await expect(card).toBeVisible({ timeout: 20_000 });
+    await page.waitForTimeout(500);
+
+    const after = await box();
+    expect(after.x, 'a re-render must not snap the card back').toBeCloseTo(dragged.x, 0);
+    expect(after.y).toBeCloseTo(dragged.y, 0);
+
+    const stored = await onExtensionPage((p) => p.evaluate(
+      async () => (await chrome.storage.local.get('settings')).settings?.modalLayout,
+    ));
+    expect(stored, 'only the Options simulator may write the default').toEqual(chosen);
+  } finally {
+    await page.close();
+  }
+});
