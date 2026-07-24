@@ -67,8 +67,16 @@ button.cf-btn {
   transition: background-color 120ms ease, border-color 120ms ease;
 }
 
-.btn:hover,
-button.cf-btn:hover {
+/**
+ * The one hover for the paper button — and it must not reach the variants that
+ * paint their own fill. `background` is a shorthand, and this selector outranks
+ * `.btn-primary`, so hovering a primary reset its gradient to a flat paper fill
+ * and left the white label invisible on it (the popup's "Show report" blanked
+ * out under the pointer). options.css carries the same exclusion list for its
+ * own `button` rule; keep the two in step.
+ */
+.btn:not(.btn-primary, .btn-danger):hover,
+button.cf-btn:not(.primary):hover {
   background: var(--surface);
   border-color: var(--border-strong);
 }
@@ -128,8 +136,12 @@ button.cf-btn[aria-disabled='true'] {
   cursor: help;
   filter: none;
 }
-.btn[aria-disabled='true']:hover,
-button.cf-btn[aria-disabled='true']:hover {
+/* Cancels the hover above for a button that cannot act — and, like it, leaves
+   the primary alone: repainting a blocked Apply paper put its white label on
+   paper too, so the button the user hovers to ask "why is this grey?" is the
+   one that went blank. Faded by the `opacity` above, it needs nothing more. */
+.btn[aria-disabled='true']:not(.btn-primary):hover,
+button.cf-btn[aria-disabled='true']:not(.primary):hover {
   background: var(--bg);
   border-color: var(--border);
 }

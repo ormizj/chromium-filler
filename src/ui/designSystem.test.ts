@@ -117,6 +117,71 @@ describe('design system — one primary button, defined once', () => {
   });
 });
 
+/**
+ * The primary button's fill is a token, but nothing stopped a *later* rule from
+ * painting over it: `.btn:hover` outranks `.btn-primary`, so its `background`
+ * shorthand flattened the gradient to paper and the white label vanished. Rather
+ * than re-assert the specificity by hand, ask the DOM the question the browser
+ * asks — does this hover selector match a primary button? — with `:hover`
+ * dropped, since jsdom cannot hover.
+ */
+describe('design system — no hover repaints the primary button', () => {
+  /** Leaf declaration blocks: `[^{}]*` cannot cross a brace, so @media wrappers are skipped. */
+  const rules = (css: string): Array<{ selector: string; body: string }> =>
+    [...css.replace(/\/\*[\s\S]*?\*\//g, '').matchAll(/([^{}]*)\{([^{}]*)\}/g)]
+      .map((m) => ({ selector: m[1].trim(), body: m[2] }));
+
+  const button = (className: string, blocked = false): HTMLElement => {
+    const el = document.createElement('button');
+    el.className = className;
+    if (blocked) el.setAttribute('aria-disabled', 'true');
+    return el;
+  };
+
+  // The four primaries the extension renders: the light-DOM pages' `.btn`, the
+  // modal's shadow-DOM `.cf-btn`, and each of them blocked (the modal's Apply
+  // with no submit button, which is precisely the one users hover to ask why).
+  const PRIMARIES: Array<[string, HTMLElement]> = [
+    ['.btn.btn-primary', button('btn btn-primary')],
+    ['button.cf-btn.primary', button('cf-btn primary')],
+    ['.btn.btn-primary[aria-disabled]', button('btn btn-primary', true)],
+    ['button.cf-btn.primary[aria-disabled]', button('cf-btn primary', true)],
+  ];
+
+  /** Split a selector list on its top-level commas — `:not(a, b)` is one selector. */
+  const selectors = (list: string): string[] => {
+    const out: string[] = [];
+    let depth = 0;
+    let buf = '';
+    for (const ch of list) {
+      if (ch === '(') depth++;
+      else if (ch === ')') depth--;
+      if (ch === ',' && depth === 0) {
+        out.push(buf.trim());
+        buf = '';
+      } else buf += ch;
+    }
+    return [...out, buf.trim()].filter(Boolean);
+  };
+
+  it('every :hover rule that sets a background skips the primary', () => {
+    const offenders: string[] = [];
+    for (const { selector, body } of rules(primitivesCss)) {
+      if (!/(^|[;\s])background(-color|-image)?\s*:/.test(body)) continue;
+      // A hover may of course paint the primary — with the primary's own token.
+      if (/background[^;]*var\(--btn-primary\)/.test(body)) continue;
+      for (const one of selectors(selector)) {
+        if (!one.includes(':hover')) continue;
+        const resting = one.replace(/:hover/g, '');
+        for (const [name, el] of PRIMARIES) {
+          if (el.matches(resting)) offenders.push(`${one} repaints ${name}`);
+        }
+      }
+    }
+    expect(offenders, 'exclude the primary with :not(), as .btn:hover does').toEqual([]);
+  });
+});
+
 describe('design system — every status is complete', () => {
   const ICONS: Record<'ok' | 'warn' | 'none', string> = {
     ok: '--icon-check',
