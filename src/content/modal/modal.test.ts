@@ -15,7 +15,7 @@ const noop = () => {};
 
 function callbacks(over: Partial<ModalCallbacks> = {}): ModalCallbacks {
   return {
-    onRerun: noop, onReset: noop, onSubmitCv: noop, onConfirm: noop, onPick: noop,
+    onRerun: noop, onReset: noop, onApply: noop, onConfirm: noop, onPick: noop,
     onFollow: noop, onFillAnyway: noop, onSkip: noop, onClose: noop,
     ...over,
   };
@@ -33,7 +33,7 @@ const match = (over: Partial<FieldMatch> = {}): FieldMatch => ({
 const data = (matches: FieldMatch[], over: Partial<ModalData> = {}): ModalData => ({
   siteName: 'Test site',
   matches,
-  canSubmitCv: false,
+  applyState: 'ready',
   ...over,
 });
 
@@ -47,6 +47,12 @@ function setViewport(w: number, h: number): void {
   Object.defineProperty(window, 'innerWidth', { value: w, configurable: true });
   Object.defineProperty(window, 'innerHeight', { value: h, configurable: true });
   window.dispatchEvent(new Event('resize'));
+}
+
+/** One footer button by its visible label. */
+function footerBtn(shadow: ShadowRoot, label: string): HTMLButtonElement {
+  return [...shadow.querySelectorAll('.cf-footer button.cf-btn')]
+    .find((b) => b.textContent?.trim() === label) as HTMLButtonElement;
 }
 
 /** Render, then switch to the report — most of these tests are about the rows. */
@@ -247,8 +253,8 @@ describe('FillerModal — the posting comes first', () => {
 
 /**
  * Three colours and a row of buttons explain nothing on their own, and the one
- * fact a user most needs — that this never presses Send — appeared nowhere they
- * would actually read it.
+ * fact a user most needs at that moment — that nothing has gone anywhere yet,
+ * whatever the report says — appeared nowhere they would actually read it.
  */
 describe('FillerModal — the report says what it means', () => {
   it('keys the three dot colours under the rows', () => {
@@ -260,9 +266,9 @@ describe('FillerModal — the report says what it means', () => {
     expect(legend.querySelectorAll('.cf-dot').length).toBe(3);
   });
 
-  it('says that submitting is still the user’s job', () => {
+  it('says that nothing has been sent yet', () => {
     const body = render(data([match()])).querySelector('.cf-legend-send')!;
-    expect(body.textContent).toMatch(/nothing is sent/i);
+    expect(body.textContent).toMatch(/nothing has been sent/i);
   });
 
   // The two-step body has no report at all, so a report key there would be a lie.
@@ -271,6 +277,202 @@ describe('FillerModal — the report says what it means', () => {
       redirect: { host: 'jobs.acme.com', reason: 'apply link is cross-origin', followed: false },
     }));
     expect(shadow.querySelector('.cf-legend-line')).toBeNull();
+  });
+});
+
+/**
+ * The footer is where the user decides. Everything that acts on the *posting* —
+ * send it, or move on — has to be reachable without opening anything, and
+ * everything that acts on the *extension* has to be out of the way: at 390px a
+ * row of five buttons makes the two that matter no easier to hit.
+ */
+describe('FillerModal — the footer offers Apply and Skip', () => {
+  const labels = (shadow: ShadowRoot) =>
+    [...shadow.querySelectorAll('.cf-footer-actions > button.cf-btn')]
+      .map((b) => b.textContent?.trim());
+
+  it('shows exactly Apply and Skip, with the rest behind the overflow', () => {
+    const shadow = render(data([match()]));
+    expect(labels(shadow)).toEqual(['Apply', 'Skip']);
+    expect([...shadow.querySelectorAll('.cf-more-menu button')].map((b) => b.textContent?.trim()))
+      .toEqual(['Re-run', 'Reset']);
+  });
+
+  it('presses the site’s Send button through onApply', () => {
+    const onApply = vi.fn();
+    const shadow = render(data([match()]), callbacks({ onApply }));
+    footerBtn(shadow, 'Apply').click();
+    expect(onApply).toHaveBeenCalledOnce();
+  });
+
+  it('reports the skip through onSkip', () => {
+    const onSkip = vi.fn();
+    const shadow = render(data([match()]), callbacks({ onSkip }));
+    footerBtn(shadow, 'Skip').click();
+    expect(onSkip).toHaveBeenCalledOnce();
+  });
+
+  // Skip used to render only during a session, so a posting opened by hand
+  // could be closed but never recorded as one the user had decided against.
+  it('offers Skip outside a session too', () => {
+    expect(labels(render(data([match()])))).toContain('Skip');
+  });
+
+  it('names the consequence during a session, where skipping also opens the next', () => {
+    const shadow = render(data([match()], {
+      session: {
+        active: true,
+        batchSize: 5,
+        progress: { total: 4, queued: 2, inFlight: 1, applied: 1, skipped: 0, done: 1, ratio: 0.25 },
+      },
+    }));
+    expect(labels(shadow)).toEqual(['Apply', 'Skip → next']);
+  });
+
+  /**
+   * A two-step posting has no form to apply to, but wanting nothing to do with
+   * it is exactly as likely — more so, since following it costs a page load. It
+   * keeps the same shape as the quick-apply footer: the primary action, Skip,
+   * and the overflow. Three visible buttons clipped the primary one off the
+   * right edge at 390px, which is how this was found.
+   */
+  it('offers Skip on a posting that hands off elsewhere, without a third button', () => {
+    const shadow = render(data([], {
+      redirect: { host: 'jobs.acme.com', reason: 'apply link is cross-origin', followed: false },
+    }));
+    expect(labels(shadow)).toEqual(['Open application', 'Skip']);
+    expect([...shadow.querySelectorAll('.cf-more-menu button')].map((b) => b.textContent?.trim()))
+      .toEqual(['Fill this page instead']);
+  });
+});
+
+/**
+ * Apply greys out when no Send button could be found. A greyed control that
+ * cannot say why it is grey is how a user concludes the extension is broken —
+ * which is exactly what happened to the button this one replaced.
+ */
+describe('FillerModal — the greyed Apply button explains itself', () => {
+  it('stays pressable when there is nothing to press, so the press can answer', () => {
+    const button = footerBtn(render(data([match()], { applyState: 'noButton' })), 'Apply');
+    expect(button.getAttribute('aria-disabled')).toBe('true');
+    // `disabled` would swallow the click and leave the question unanswered.
+    expect(button.hasAttribute('disabled')).toBe(false);
+  });
+
+  it('opens a note saying what Apply does and how to point it at the button', () => {
+    const shadow = render(data([match()], { applyState: 'noButton' }));
+    expect(shadow.querySelector('.cf-footer .cf-help')).toBeNull();
+
+    footerBtn(shadow, 'Apply').click();
+    const note = shadow.querySelector('.cf-footer .cf-help')!;
+    expect(note).not.toBeNull();
+    expect(note.textContent).toMatch(/set up this site|send button/i);
+    // Pressing again puts it away.
+    footerBtn(shadow, 'Apply').click();
+    expect(shadow.querySelector('.cf-footer .cf-help')).toBeNull();
+  });
+
+  it('does not fire onApply while it is grey', () => {
+    const onApply = vi.fn();
+    const shadow = render(data([match()], { applyState: 'noButton' }), callbacks({ onApply }));
+    footerBtn(shadow, 'Apply').click();
+    expect(onApply).not.toHaveBeenCalled();
+  });
+
+  it('never opens the note on a page with a Send button', () => {
+    const onApply = vi.fn();
+    const shadow = render(data([match()], { applyState: 'ready' }), callbacks({ onApply }));
+    const button = footerBtn(shadow, 'Apply');
+    expect(button.getAttribute('aria-disabled')).toBeNull();
+
+    button.click();
+    expect(onApply).toHaveBeenCalledOnce();
+    expect(shadow.querySelector('.cf-footer .cf-help')).toBeNull();
+  });
+
+  /**
+   * The other reason Apply is grey, and the one nobody would guess: no
+   * confirmation element is configured, so a submission's outcome could not be
+   * read back. The user's next action is completely different from "find the
+   * button", so the note must be too.
+   */
+  it('says the confirmation is missing, not that the button is', () => {
+    const shadow = render(data([match()], { applyState: 'noConfirmation' }));
+    const apply = footerBtn(shadow, 'Apply');
+    expect(apply.getAttribute('aria-disabled')).toBe('true');
+    expect(apply.getAttribute('aria-label')).toMatch(/confirmation/i);
+
+    apply.click();
+    const note = shadow.querySelector('.cf-footer .cf-help')!;
+    expect(note.textContent).toMatch(/confirmation element/i);
+    // It must not send the user hunting for a button that was already found.
+    expect(note.textContent).not.toMatch(/no such button could be found/i);
+  });
+
+  // Picking the Send button mid-session flips Apply live; a note about a button
+  // that now works is just wrong text left on screen.
+  it('drops an open note once the page gains a Send button', () => {
+    modal = new FillerModal(callbacks());
+    modal.render(data([match()], { applyState: 'noButton' }));
+    modal.setApplyHelp(true);
+    expect(shadow().querySelector('.cf-footer .cf-help')).not.toBeNull();
+
+    modal.render(data([match()], { applyState: 'ready' }));
+    expect(shadow().querySelector('.cf-footer .cf-help')).toBeNull();
+  });
+});
+
+/**
+ * The one unambiguous good-news state. The site's own confirmation is routinely
+ * below the fold or hidden behind this very card, so "did that actually go
+ * through?" was a question the user answered by scrolling around the page they
+ * had just submitted.
+ */
+describe('FillerModal — it says when the application went through', () => {
+  const sent = (over: Partial<ModalData> = {}) =>
+    data([match()], { jobTitle: 'A job', applied: true, ...over });
+
+  it('shows a confirmation banner on the posting', () => {
+    modal = new FillerModal(callbacks());
+    modal.render(sent());
+    const banner = shadow().querySelector('.cf-applied')!;
+    expect(banner).not.toBeNull();
+    expect(banner.textContent).toMatch(/sent/i);
+    // Live region, because it appears without the user having moved focus.
+    expect(banner.getAttribute('role')).toBe('status');
+  });
+
+  it('shows it on the report too, where the legend would otherwise deny it', () => {
+    const shadow = render(sent());
+    expect(shadow.querySelector('.cf-applied')).not.toBeNull();
+    expect(shadow.querySelector('.cf-legend-send')!.textContent).toMatch(/already sent/i);
+    expect(shadow.querySelector('.cf-legend-send')!.textContent).not.toMatch(/nothing has been sent/i);
+  });
+
+  // Pressing Apply twice would send a second application to the same posting.
+  it('retires Apply rather than leaving it live', () => {
+    const onApply = vi.fn();
+    const shadow = render(sent(), callbacks({ onApply }));
+    expect(footerBtn(shadow, 'Apply')).toBeUndefined();
+    const done = footerBtn(shadow, 'Applied ✓');
+    expect(done.getAttribute('aria-disabled')).toBe('true');
+    done.click();
+    expect(onApply).not.toHaveBeenCalled();
+  });
+
+  // Collapsed, the pill is the only thing left on screen; a fill count there
+  // reads as unfinished work on a posting that is already done.
+  it('says so on the minimized pill', () => {
+    const shadow = render(sent());
+    modal!.minimize();
+    expect(shadow.querySelector('.cf-pill')!.textContent).toMatch(/sent/i);
+    expect(shadow.querySelector('.cf-pill .cf-dot')!.className).toContain('ok');
+  });
+
+  it('stays quiet until the confirmation actually appeared', () => {
+    const shadow = render(data([match()], { jobTitle: 'A job' }));
+    expect(shadow.querySelector('.cf-applied')).toBeNull();
+    expect(footerBtn(shadow, 'Apply')).toBeDefined();
   });
 });
 

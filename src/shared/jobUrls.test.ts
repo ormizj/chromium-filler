@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import {
-  addUrls, applyStatus, applyStatusChain, jobUrlStats, linkRedirect, normalizeEntry, removeUrl,
+  addUrls, applyStatus, applyStatusChain, jobUrlStats, linkRedirect, normalizeEntry,
+  recordStatus, removeUrl,
 } from './jobUrls';
 import type { JobUrlEntry } from './types';
 
@@ -60,6 +61,51 @@ describe('applyStatus — history + timestamps', () => {
   it('is a no-op for an unknown url', () => {
     const list = applyStatus(base, 'https://nope.com', 'applied', 2000);
     expect(list).toEqual(base);
+  });
+});
+
+/**
+ * Skipping and applying happen on whatever posting is in front of the user, and
+ * that is often one they opened by hand rather than imported. `applyStatus`
+ * alone silently drops those, so the record the user thinks they just made never
+ * existed. `recordStatus` is the pairing that cannot be forgotten at a call site.
+ */
+describe('recordStatus — records a posting that was never queued', () => {
+  const base = addUrls([], ['https://x.com/1'], 1000).list;
+
+  it('adds an unknown url and gives it the status', () => {
+    const list = recordStatus([], 'https://x.com/1', 'skipped', 2000);
+    expect(list).toHaveLength(1);
+    expect(list[0].status).toBe('skipped');
+    expect(list[0].addedAt).toBe(2000);
+  });
+
+  it('keeps the full history when the url was already known', () => {
+    const list = recordStatus(base, 'https://x.com/1', 'skipped', 2000);
+    expect(list).toHaveLength(1);
+    expect(list[0].history).toEqual([
+      { status: 'new', at: 1000 },
+      { status: 'skipped', at: 2000 },
+    ]);
+  });
+
+  it('stamps appliedAt on a url it had to add itself', () => {
+    const list = recordStatus([], 'https://x.com/1', 'applied', 2000);
+    expect(list[0].appliedAt).toBe(2000);
+  });
+});
+
+describe('applyStatusChain — records an unqueued destination too', () => {
+  it('adds the url it is given before walking the chain', () => {
+    const list = applyStatusChain([], 'https://ats.com/apply', 'applied', 2000);
+    expect(list).toHaveLength(1);
+    expect(list[0].status).toBe('applied');
+  });
+
+  it('still propagates up an existing sourceUrl', () => {
+    const linked = linkRedirect([], 'https://board.com/1', 'https://ats.com/apply', 1000);
+    const list = applyStatusChain(linked, 'https://ats.com/apply', 'applied', 2000);
+    expect(list.find((e) => e.url === 'https://board.com/1')?.status).toBe('applied');
   });
 });
 

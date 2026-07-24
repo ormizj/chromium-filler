@@ -97,6 +97,21 @@ button.cf-btn:disabled {
   filter: none;
 }
 
+/* Muted but still pressable. `disabled` swallows pointer events, so a control
+   that cannot act could not answer the one question it provokes — "why is this
+   grey?". `aria-disabled` keeps the press, and with it the full tap target. */
+.btn[aria-disabled='true'],
+button.cf-btn[aria-disabled='true'] {
+  opacity: 0.45;
+  cursor: help;
+  filter: none;
+}
+.btn[aria-disabled='true']:hover,
+button.cf-btn[aria-disabled='true']:hover {
+  background: var(--surface);
+  border-color: var(--border);
+}
+
 /* Touch: every control gets a full-size target. Desktop keeps the denser 32px —
    the two are different jobs, not one compromise. */
 @media (pointer: coarse) {
@@ -362,6 +377,20 @@ button.cf-btn:disabled {
   min-height: var(--tap);
   min-width: 96px;
   font-size: var(--text-md);
+}
+
+/* A footer that has something to say stacks: the note takes a full row above the
+   controls. Both children claim 100% of the basis so the parent's `flex-wrap`
+   does the stacking — the footer itself stays a row, because the surfaces that
+   append plain buttons to it (the setup panel) still want them side by side. */
+.cf-footer-actions {
+  display: flex;
+  gap: var(--space-3);
+  flex: 1 0 100%;
+}
+.cf-footer > .cf-help {
+  flex: 1 0 100%;
+  margin: 0;
 }
 
 /**

@@ -158,6 +158,36 @@ button.cf-view .cf-dot {
   margin: 0 0 var(--space-2);
 }
 
+/**
+ * The application went through. Deliberately louder than `.cf-notice`: it is the
+ * answer to the only question that matters after pressing Apply, and the site's
+ * own confirmation is routinely below the fold or behind this card.
+ */
+.cf-applied {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  font-size: var(--text-md);
+  font-weight: 700;
+  color: var(--ok);
+  background: var(--ok-weak);
+  border-radius: var(--radius-md);
+  padding: var(--space-3) var(--space-4);
+  margin: 0 0 var(--space-4);
+}
+
+/* The footer's Apply once it has nothing left to do. Green rather than greyed:
+   it is reporting success, not refusing to act, and the two must not look the
+   same. `aria-disabled` still keeps it out of the tab order's promises. */
+button.cf-btn.cf-applied-btn,
+button.cf-btn.cf-applied-btn[aria-disabled='true'] {
+  background: var(--ok);
+  border-color: var(--ok);
+  color: #fff;
+  opacity: 1;
+  cursor: default;
+}
+
 .cf-empty {
   font-size: var(--text-md);
   color: var(--muted);
@@ -179,9 +209,9 @@ button.cf-view .cf-dot {
 
 /**
  * The report's key, under the rows. Three colours and a row of buttons mean
- * nothing on their own, and the one thing a user most needs to know about this
- * extension — that it will not press Send — was never written down anywhere
- * they would see it.
+ * nothing on their own, and the one thing a user most needs to know at this
+ * moment — that nothing has been sent yet, whatever the report says — was never
+ * written down anywhere they would see it.
  */
 .cf-legend-line {
   display: flex;
@@ -245,8 +275,9 @@ button.cf-view .cf-dot {
   white-space: nowrap;
 }
 
-/* The overflow menu that holds Submit CV / Re-run / Reset while a session is
-   running, so the primary action keeps the full thumb-sized width. */
+/* The overflow menu behind the footer's two decisions. Everything that acts on
+   the extension rather than the posting lives in here, so Apply and Skip keep
+   the full thumb-sized width at 390px. */
 .cf-more {
   position: relative;
   flex: 0 0 auto;

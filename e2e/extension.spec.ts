@@ -118,6 +118,27 @@ async function patchSettings(patch: Record<string, unknown>): Promise<void> {
   }, patch));
 }
 
+/**
+ * Teach the config that matches `url` what this site's confirmation looks like —
+ * what the user does with the setup panel's "Confirmation element" row.
+ *
+ * Auto-created destination configs have no `successSelector`, and nothing is
+ * ever recorded as applied without one, so a handoff destination needs this step
+ * before it can be finished. Simulated here rather than driven through the
+ * picker: the picker has its own coverage, and this is about what happens after.
+ */
+async function teachConfirmation(url: string, selector: string): Promise<void> {
+  await onExtensionPage((page) => page.evaluate(async ({ u, sel }) => {
+    const { siteConfigs } = await chrome.storage.local.get('siteConfigs');
+    const glob = (p: string) => new RegExp(`^${p.replace(/[.+?^${}()|[\]\\]/g, '\\$&')
+      .replace(/\*/g, '.*')}$`).test(u);
+    for (const c of siteConfigs) {
+      if (c.urlPatterns.some(glob)) c.successSelector = sel;
+    }
+    await chrome.storage.local.set({ siteConfigs });
+  }, { u: url, sel: selector }));
+}
+
 /** Poll the job-URL database until `check` passes (the link is written async). */
 async function waitForJobUrl(
   url: string,
@@ -176,6 +197,150 @@ test('ChaosForm: hashed ids + multi-step; disguised city stays unmatched', async
   await expect(page.getByLabel('Where are you located?')).toHaveValue('');
   await expect(page.locator('.cf-dot.none').first()).toBeVisible();
   await page.close();
+});
+
+/**
+ * Apply, end to end, on the fixture that makes both of its phases matter. This
+ * ATS only records the CV once "Attach" is pressed (`submitCv`), and its form
+ * refuses to submit without a recorded CV — so an Apply that pressed Send first,
+ * or skipped the confirmation, would produce a form that silently does nothing.
+ * Then the site's own confirmation appears, which is what marks it applied.
+ */
+test('DialogATS: Apply confirms the CV, presses Send, and the posting lands applied', async () => {
+  const page = await context.newPage();
+  const url = urlFor('cv-confirm');
+  await page.goto(url);
+
+  await expect(page.locator('#email')).toHaveValue('ada@example.com');
+  const cvCount = await page.locator('#cv-file').evaluate((el) => (el as HTMLInputElement).files?.length ?? 0);
+  expect(cvCount).toBe(1);
+  // Attached, but the site has not accepted it — nothing on the page says so,
+  // which is exactly why Apply runs the confirmation before sending.
+  await expect(page.locator('#cv-attached')).toBeHidden();
+
+  const apply = page.locator('.cf-footer button.cf-btn', { hasText: 'Apply' });
+  await expect(apply).not.toHaveAttribute('aria-disabled', 'true');
+  await apply.click();
+
+  // Phase one: the CV is now genuinely accepted.
+  await expect(page.locator('#cv-attached')).toBeVisible();
+  await expect(page.locator('#cv-attached')).toContainText('cv.pdf');
+  // Phase two: the site's own Send button was pressed, and it went through.
+  await expect(page.locator('#dialog-success')).toBeVisible();
+
+  // And the visible confirmation — not the click — is what records the apply.
+  const entry = await waitForJobUrl(url, (e) => e.status === 'applied');
+  expect(entry.appliedAt).toBeTruthy();
+
+  // Said on screen too. The site's own banner is often below the fold or behind
+  // this card, so the modal answering "did that go through?" is the point.
+  await expect(page.locator('.cf-applied')).toContainText(/sent/i);
+  await expect(page.locator('.cf-footer button.cf-btn', { hasText: 'Applied' })).toBeVisible();
+  await page.close();
+});
+
+/**
+ * Nothing is sent to a site whose outcome cannot be read back. This is the
+ * second reason Apply greys out, and it needs its own answer: the user has to
+ * teach the site its confirmation, not go hunting for a button.
+ */
+test('QuickBoard: Apply refuses to send when the site has no confirmation configured', async () => {
+  const page = await context.newPage();
+  await page.goto(urlFor('quick-plain'));
+  await expect(page.locator('.cf-card')).toBeVisible({ timeout: 20_000 });
+
+  // This config has a successSelector, so Apply is live — the control case.
+  const apply = page.locator('.cf-footer button.cf-btn', { hasText: 'Apply' });
+  await expect(apply).not.toHaveAttribute('aria-disabled', 'true');
+
+  // Take it away and the button must go grey without the page reloading.
+  await onExtensionPage((opts) => opts.evaluate(async () => {
+    const { siteConfigs } = await chrome.storage.local.get('siteConfigs');
+    for (const c of siteConfigs) if (c.id === 'quick-board') delete c.successSelector;
+    await chrome.storage.local.set({ siteConfigs });
+  }));
+  await page.reload();
+  await expect(page.locator('.cf-card')).toBeVisible({ timeout: 20_000 });
+
+  await expect(apply).toHaveAttribute('aria-disabled', 'true');
+  await apply.click({ force: true });
+  await expect(page.locator('.cf-footer .cf-help')).toContainText(/confirmation element/i);
+
+  await onExtensionPage((opts) => opts.evaluate(async () => {
+    const { siteConfigs } = await chrome.storage.local.get('siteConfigs');
+    for (const c of siteConfigs) if (c.id === 'quick-board') c.successSelector = '#quick-success';
+    await chrome.storage.local.set({ siteConfigs });
+  }));
+  await page.close();
+});
+
+/**
+ * Apply on a page with nothing that reads as a Send button. It must stay
+ * pressable and say why it cannot act: a greyed control that swallows the press
+ * is how a user concludes the extension is broken.
+ */
+test('ListingBoard: the greyed Apply explains itself instead of doing nothing', async () => {
+  const page = await context.newPage();
+  await page.goto(urlFor('listing'));
+  await expect(page.locator('.cf-card')).toBeVisible({ timeout: 20_000 });
+
+  const apply = page.locator('.cf-footer button.cf-btn', { hasText: 'Apply' });
+  await expect(apply).toHaveAttribute('aria-disabled', 'true');
+  await expect(page.locator('.cf-footer .cf-help')).toHaveCount(0);
+
+  // `force` because Playwright's actionability check honours `aria-disabled`
+  // and refuses the click. That attribute is the truth about the *action* — it
+  // cannot run here — while a real press still lands and is answered, which is
+  // the whole behaviour under test.
+  await apply.click({ force: true });
+  const note = page.locator('.cf-footer .cf-help');
+  await expect(note).toContainText(/Send button/i);
+  // The confirmation IS configured here, so it must not send the user off to
+  // fix that instead — the two grey reasons need two different answers.
+  await expect(note).not.toContainText(/no confirmation element set/i);
+  await page.close();
+});
+
+/**
+ * Skip outside a queue session. It used not to render at all there, and the
+ * status write was a no-op for a URL nobody had imported — so the one decision
+ * a user makes most often, on a posting they opened themselves, was recorded
+ * nowhere. Both halves are asserted here.
+ */
+test('QuickBoard: Skip records a posting that was never queued, and closes it', async () => {
+  await patchSettings({ closeTabOnSkip: true, closeTabDelayMs: 0 });
+  const page = await context.newPage();
+  const url = urlFor('quick-plain');
+  await page.goto(url);
+  await expect(page.locator('.cf-card')).toBeVisible({ timeout: 20_000 });
+
+  // Nothing put this URL in the database: it was opened by hand.
+  expect((await readJobUrls()).find((e) => e.url === url)).toBeUndefined();
+
+  const closed = page.waitForEvent('close', { timeout: 20_000 });
+  await page.locator('.cf-footer button.cf-btn', { hasText: 'Skip' }).click();
+
+  const entry = await waitForJobUrl(url, (e) => e.status === 'skipped');
+  expect(entry.status).toBe('skipped');
+  await closed;
+});
+
+/** The same press with auto-close off: still recorded, tab left alone. */
+test('QuickBoard: Skip leaves the tab open when auto-close is off', async () => {
+  await patchSettings({ closeTabOnSkip: false });
+  const page = await context.newPage();
+  const url = urlFor('quick-nolink');
+  await page.goto(url);
+  await expect(page.locator('.cf-card')).toBeVisible({ timeout: 20_000 });
+
+  await page.locator('.cf-footer button.cf-btn', { hasText: 'Skip' }).click();
+  await waitForJobUrl(url, (e) => e.status === 'skipped');
+
+  // Give the close path every chance to fire before claiming it did not.
+  await page.waitForTimeout(2000);
+  expect(page.isClosed()).toBe(false);
+  await page.close();
+  await patchSettings({ closeTabOnSkip: true });
 });
 
 test('Popup: opens at a usable width (no vw sliver) and renders cleanly', async () => {
@@ -243,8 +408,16 @@ test('MixedBoard: external posting saves on the board, hands off, and links both
   expect(landed.sourceUrl).toBe(boardUrl);
   expect(landed.status).toBe('opened');
 
+  // The auto-created config knows nothing about this ATS's confirmation, and
+  // nothing is recorded as applied without one — so teach it, then reload so the
+  // watcher arms. This is the setup step a real handoff destination now needs.
+  await teachConfirmation(atsUrl, '#ats-success');
+  await dest.reload();
+  await expect(dest.locator('#ats-first')).toHaveValue('Ada', { timeout: 30_000 });
+
   // Submitting on the ATS marks the application AND the posting it came from.
   await dest.locator('#ats-submit').click();
+  await expect(dest.locator('#ats-success')).toBeVisible();
   await waitForJobUrl(atsUrl, (e) => e.status === 'applied');
   await waitForJobUrl(boardUrl, (e) => e.status === 'applied');
 
@@ -441,11 +614,19 @@ test('NavATS: a destination that submits by navigating still counts as applied',
   await expect(dest.locator('#nav-first')).toHaveValue('Ada', { timeout: 30_000 });
   await expect(dest.locator('#nav-email')).toHaveValue('ada@example.com');
 
-  // No successSelector exists here, so the submit event is the only "sent"
-  // signal — the tab leaves before any confirmation could render.
+  // The confirmation is on a *different page* — this form navigates to
+  // thanks.html, exactly as Greenhouse lands on its own `/confirmation` URL. The
+  // content script that sees it is a fresh one with no memory of the posting, so
+  // this asserts the background attributed it to the posting rather than to the
+  // page showing the message. Without that, `navUrl` would sit at "opened"
+  // forever and a junk entry for thanks.html would be marked applied instead.
   await dest.locator('#nav-submit').click();
   await dest.waitForURL(/thanks\.html/, { timeout: 20_000 });
   await waitForJobUrl(navUrl, (e) => e.status === 'applied');
+
+  const thanksUrl = `${TRACKER}/sites/thanks.html`;
+  const stray = (await readJobUrls()).find((e) => e.url.startsWith(thanksUrl));
+  expect(stray, 'the confirmation page must not be recorded as a posting').toBeUndefined();
 
   await dest.close();
   await board.close();

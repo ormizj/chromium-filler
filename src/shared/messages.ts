@@ -23,6 +23,11 @@ export const MSG = {
   OPEN_OPTIONS: 'CF_OPEN_OPTIONS',
   /** content -> background: submission detected; mark applied + maybe close tab. */
   SUBMITTED: 'CF_SUBMITTED',
+  /**
+   * content -> background: this tab is working on this posting. Recorded so a
+   * confirmation that appears on a *different* URL still marks the posting.
+   */
+  APPLYING: 'CF_APPLYING',
   /** content -> background: this posting redirects; watch where the handoff lands. */
   FOLLOW_REDIRECT: 'CF_FOLLOW_REDIRECT',
   /** background -> content: this tab is where a tracked redirect landed. */
@@ -89,6 +94,7 @@ export type Message =
   // already routes on its own hash, so this only has to survive the open.
   | { type: typeof MSG.OPEN_OPTIONS; createForUrl?: string; hash?: string }
   | { type: typeof MSG.SUBMITTED; url: string }
+  | { type: typeof MSG.APPLYING; url: string }
   | { type: typeof MSG.FOLLOW_REDIRECT; sourceUrl: string; href?: string }
   | { type: typeof MSG.REDIRECT_LANDED; sourceUrl: string }
   | { type: typeof MSG.SESSION_START; batchSize?: number }

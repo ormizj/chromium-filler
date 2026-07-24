@@ -19,7 +19,7 @@
 
 import type { SessionState } from '../shared/messages';
 import { getJobUrls, getSettings, mutateJobUrls } from '../shared/storage';
-import { applyStatus } from '../shared/jobUrls';
+import { applyStatus, recordStatus } from '../shared/jobUrls';
 import { nextBatch, queueProgress } from '../shared/queue';
 
 const LOG = '[chromium-filler:session]';
@@ -145,9 +145,18 @@ export async function stopSession(): Promise<SessionState> {
   return sessionState();
 }
 
-/** Mark a posting skipped, close its tab, and pull in the next one. */
+/**
+ * Mark a posting skipped, optionally close its tab, and pull in the next one.
+ *
+ * `recordStatus`, not `applyStatus`: Skip is a button in the review modal, so it
+ * is pressed just as often on a posting the user opened by hand as on a queued
+ * one, and the latter is not in the database yet.
+ *
+ * The slot is freed here rather than by waiting for `onRemoved`, which is what
+ * lets `closeTabOnSkip` be off without stalling the queue.
+ */
 export async function skipUrl(url: string, senderTabId?: number): Promise<SessionState> {
-  await mutateJobUrls((list) => applyStatus(list, url, 'skipped'));
+  await mutateJobUrls((list) => recordStatus(list, url, 'skipped'));
 
   const tabs = await getTabs();
   const tabId = senderTabId ?? Number(
@@ -156,7 +165,13 @@ export async function skipUrl(url: string, senderTabId?: number): Promise<Sessio
   if (Number.isFinite(tabId)) {
     delete tabs[String(tabId)];
     await setTabs(tabs);
-    await chrome.tabs.remove(tabId).catch(() => {});
+    const settings = await getSettings();
+    if (settings.closeTabOnSkip) {
+      // Delayed like the submit path, and for the same reason: the tab vanishing
+      // under the press reads as a crash rather than as the skip landing.
+      const wait = Math.max(0, settings.closeTabDelayMs ?? 1500);
+      setTimeout(() => chrome.tabs.remove(tabId).catch(() => {}), wait);
+    }
   }
   // Closing the tab fires onRemoved, which tops up — but only if the tab was
   // ours to begin with, so top up here too. `serialize` keeps that idempotent.

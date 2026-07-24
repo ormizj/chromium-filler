@@ -92,8 +92,17 @@ export interface SiteConfig {
   fieldOverrides?: Partial<Record<FieldKey, string>>;
   /** Override selector for the CV file input. */
   cvUpload?: string;
-  /** Steps run by the modal "Submit CV" button (e.g. re-open an attach modal). */
+  /**
+   * Steps run as the first phase of the modal's Apply (e.g. re-open and confirm
+   * an attach dialog), for sites that only record the CV once it is confirmed.
+   */
   submitCv?: PrepStep[];
+  /**
+   * The site's own Send button — the control Apply presses. Omit it and the
+   * heuristic in `shared/submitDetect.ts` looks for it; save one when the page
+   * has several plausible buttons, or when nothing is found and Apply greys out.
+   */
+  submitSelector?: string;
   /** When false, heuristics are disabled and only overrides are used. Default true. */
   autoDetect?: boolean;
   /** Quick-apply vs. external-redirect classification + handoff for this site. */
@@ -172,7 +181,15 @@ export interface Settings {
   autoFillLowConfidence: boolean;
   /** Close the tab automatically once a submission is detected. */
   closeTabOnSubmit: boolean;
-  /** Milliseconds to wait after detecting submit before closing the tab. */
+  /**
+   * Close the tab when the review modal's Skip is pressed. Shares
+   * `closeTabDelayMs` with the submit path deliberately: two timeouts for the
+   * same "tidy this tab away" behaviour is a distinction nobody wants to make.
+   * Turning it off never stalls a queue session — `skipUrl` frees the slot
+   * itself rather than waiting for the tab to go.
+   */
+  closeTabOnSkip: boolean;
+  /** Milliseconds to wait before closing the tab, after a submit or a skip. */
   closeTabDelayMs: number;
   /**
    * Where an external ("two-step") application opens when a redirect posting is

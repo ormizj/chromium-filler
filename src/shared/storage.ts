@@ -98,6 +98,34 @@ export async function clearFieldOverride(configId: string, field: string): Promi
   });
 }
 
+/** Save the control the modal's Apply presses — the site's own Send button. */
+export async function saveSubmitSelector(configId: string, selector: string): Promise<void> {
+  await mutateSiteConfig(configId, (cfg) => {
+    cfg.submitSelector = selector;
+  });
+}
+
+/** Forget the saved Send button and go back to the heuristic. */
+export async function clearSubmitSelector(configId: string): Promise<void> {
+  await mutateSiteConfig(configId, (cfg) => {
+    delete cfg.submitSelector;
+  });
+}
+
+/** Save the site's confirmation element — the only thing that marks it applied. */
+export async function saveSuccessSelector(configId: string, selector: string): Promise<void> {
+  await mutateSiteConfig(configId, (cfg) => {
+    cfg.successSelector = selector;
+  });
+}
+
+/** Forget it, which also greys Apply out again: nothing unverifiable is sent. */
+export async function clearSuccessSelector(configId: string): Promise<void> {
+  await mutateSiteConfig(configId, (cfg) => {
+    delete cfg.successSelector;
+  });
+}
+
 /** Save one of the job-info container selectors into a config's `extract` map. */
 export async function saveExtractSelector(
   configId: string,

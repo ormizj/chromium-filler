@@ -113,10 +113,19 @@ export const CONFIG_HELP: Record<keyof SiteConfig, HelpEntry> = {
   },
   submitCv: {
     title: 'submitCv',
-    body: 'Steps run by the review modal\'s "Submit CV" button — for sites where '
-      + 'attaching the file is a separate dialog that has to be re-opened and confirmed.',
+    body: 'Steps run first, whenever you press Apply — for sites where attaching the CV '
+      + 'is a separate dialog that has to be re-opened and confirmed before the form '
+      + 'will accept it.',
     when: 'The CV attaches but the site needs an extra confirmation click.',
     example: '[{ "action": "click", "selector": "#attach-confirm" }]',
+  },
+  submitSelector: {
+    title: 'submitSelector',
+    body: 'The site\'s own Send button — the control Apply presses for you. Leave it '
+      + 'unset and the button is found by its label; save one to settle it for good.',
+    when: 'Apply is greyed out because nothing was found, or the page has several '
+      + 'buttons and you want to be certain which one is pressed.',
+    example: 'button[data-qa="submit-application"]',
   },
   autoDetect: {
     title: 'autoDetect',
@@ -224,10 +233,19 @@ export const SETTINGS_HELP: Record<keyof Settings, HelpEntry> = {
     when: '"Sent" is detected by that site\'s successSelector. Without one, a plain '
       + 'form submit is the fallback, and that only fits sites that navigate away.',
   },
+  closeTabOnSkip: {
+    title: 'Auto-close the tab after I skip',
+    body: 'Closes the posting when you press Skip in the review modal, which also frees '
+      + 'a slot for the next posting in a queue session. Uses the same close delay as '
+      + 'the setting above.',
+    when: 'Turn it off to keep skipped postings open for a second look. The queue moves '
+      + 'on either way — a skip frees its slot whether or not the tab goes.',
+  },
   closeTabDelayMs: {
     title: 'Close delay',
-    body: 'How long to leave the confirmation on screen before closing the tab, in '
-      + 'milliseconds. Set it high enough to actually read the confirmation.',
+    body: 'How long to leave the page on screen before closing the tab, in milliseconds. '
+      + 'Used by both auto-close settings above; set it high enough to actually read a '
+      + 'confirmation.',
     example: '1500',
   },
   redirectTarget: {
@@ -360,6 +378,14 @@ export const SETUP_GROUP_HELP: Record<SetupGroupKey, GroupHelp> = {
         body: 'Picks the file input your stored CV is attached to. Pick the input '
           + 'itself, not the button that opens the file dialog, if you can reach it.',
       },
+      {
+        label: 'After attaching',
+        body: CONFIG_HELP.submitCv.body,
+      },
+      {
+        label: 'Send button',
+        body: CONFIG_HELP.submitSelector.body,
+      },
     ],
   },
 };
@@ -368,7 +394,8 @@ export const SETUP_GROUP_HELP: Record<SetupGroupKey, GroupHelp> = {
 
 export type ConceptKey =
   | 'dots' | 'autoVsSaved' | 'todoChip' | 'picker' | 'neverSubmits'
-  | 'twoStep' | 'sessions' | 'urlPattern' | 'successSelector' | 'howItWorks';
+  | 'twoStep' | 'sessions' | 'urlPattern' | 'successSelector' | 'howItWorks'
+  | 'apply' | 'applyUnverified';
 
 export const CONCEPT_HELP: Record<ConceptKey, HelpEntry> = {
   dots: {
@@ -403,11 +430,45 @@ export const CONCEPT_HELP: Record<ConceptKey, HelpEntry> = {
       + 'has no hover and would otherwise commit to whatever it landed on. Clear throws '
       + 'the saved selector away.',
   },
+  /**
+   * What the review modal's greyed-out Apply button says when pressed. It has to
+   * answer both halves of the user's question — what the button would do, and
+   * why it is grey here — or a dead control has simply learned to talk.
+   */
+  apply: {
+    title: 'Apply',
+    short: 'Presses the site’s own Send button for you, once you press this one.',
+    body: 'Apply confirms the CV if this site needs that, then presses the site\'s own '
+      + 'Send button. It is greyed out here because no such button could be found on the '
+      + 'page — usually because the form is behind a step that has not opened yet, or '
+      + 'because the button is unusually named. Point it at the right one with “Set up '
+      + 'this site” → Send button, and it goes live.',
+    when: 'Apply is grey on a page that clearly has a submit button.',
+  },
+  /**
+   * The other reason Apply is grey, and the one nobody would guess: the site has
+   * no confirmation element configured, so there would be no way to tell whether
+   * the application was accepted. Kept separate from `apply` because the user's
+   * next action is completely different — teach it the confirmation, not the
+   * button.
+   */
+  applyUnverified: {
+    title: 'Apply needs a confirmation element',
+    short: 'Nothing is sent to a site that cannot tell us it worked.',
+    body: 'This site has no confirmation element set, so there would be no way to know '
+      + 'whether the application was accepted — a form can be rejected after it is sent, '
+      + 'and recording that as applied is worse than not sending at all. Open “Set up '
+      + 'this site” → Confirmation element and Pick the “thank you” or “application '
+      + 'received” message the site shows after a successful send. Then Apply goes live, '
+      + 'and that same element is what marks the posting applied.',
+    when: 'Apply is grey on a site you have not finished setting up.',
+  },
   neverSubmits: {
-    title: 'It never presses Send',
-    body: 'The extension fills and reports. Submitting is always yours: read the review, '
-      + 'fix what it flagged, then press the site\'s own button. Nothing is sent on your '
-      + 'behalf, ever.',
+    title: 'Nothing is sent until you say so',
+    body: 'The extension fills and reports; it never sends anything by itself, however '
+      + 'confident it is. The one thing that submits is Apply, and Apply only runs '
+      + 'because you pressed it. Read the review, fix what it flagged, then press Apply '
+      + '— or ignore it and press the site\'s own button yourself.',
   },
   twoStep: {
     title: 'Two-step (external) postings',
@@ -431,17 +492,21 @@ export const CONCEPT_HELP: Record<ConceptKey, HelpEntry> = {
   },
   successSelector: {
     title: 'How “applied” is decided',
-    body: 'Pressing Send proves nothing — the server can still reject the form. So a '
-      + 'posting counts as applied only when the site\'s own confirmation element '
-      + 'becomes visible, which is what `successSelector` points at. Sites that navigate '
-      + 'away instead fall back to the form submit itself.',
+    body: 'Pressing Send proves nothing — the server can still reject the form, and a '
+      + 'site that checks your answers in JavaScript rejects it after the browser has '
+      + 'already announced the submission. So a posting counts as applied only when the '
+      + 'site\'s own confirmation element becomes *visible*, which is what '
+      + '`successSelector` points at. Nothing else counts, which is why Apply stays grey '
+      + 'until a site has one. The confirmation may be on a different page — many boards '
+      + 'land on their own “thank you” URL — and that still counts for the posting you '
+      + 'were applying to.',
   },
   howItWorks: {
     title: 'How it works',
     body: 'On a page one of your site configs matches: wait for the form to exist, run '
       + 'the setup steps, work out whether the posting applies here or on the employer\'s '
       + 'site, read the job text, find each field, fill the confident ones — CV '
-      + 'included — and show you the review. Then you press Send.',
+      + 'included — and show you the review. Then you press Apply, or Skip.',
   },
 };
 
@@ -484,6 +549,15 @@ export function describeConfig(config: SiteConfig): string {
   const overrides = Object.keys(config.fieldOverrides ?? {}).length;
   if (overrides > 0) parts.push(`${count(overrides, 'field')} you picked yourself override the guessing.`);
   if (config.cvUpload) parts.push(`Your CV goes to ${code(config.cvUpload)}.`);
+  const confirmCv = config.submitCv ?? [];
+  if (confirmCv.length > 0) {
+    parts.push(`Apply first ${describeStep(confirmCv[0])}`
+      + `${confirmCv.length > 1 ? `, and ${count(confirmCv.length - 1, 'step')} more` : ''} `
+      + 'to confirm the upload.');
+  }
+  parts.push(config.submitSelector
+    ? `Apply presses ${code(config.submitSelector)}.`
+    : 'Apply presses whichever button reads as the site’s own Send.');
   if (config.autoDetect === false) {
     parts.push('Automatic field guessing is off — only your own selectors are used.');
   }

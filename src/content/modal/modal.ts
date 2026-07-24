@@ -25,6 +25,8 @@ import type { JobBlock } from '../../shared/jobText';
 import { FIELD_LABELS } from '../../shared/fieldKeys';
 import { STATUS_LABELS, matchStatus } from '../../shared/fieldStatus';
 import { clampLayout, layoutLimits, NARROW_WIDTH } from '../../shared/modalLayout';
+import { CONCEPT_HELP } from '../../shared/help';
+import { helpPanel } from '../../ui/help';
 import { BASE_CSS } from '../../ui/shadowCss';
 import { clearLimitAttrs, setLimitAttrs } from '../../ui/limits';
 import modalCss from './modal.css?inline';
@@ -32,14 +34,15 @@ import modalCss from './modal.css?inline';
 export interface ModalCallbacks {
   onRerun(): void;
   onReset(): void;
-  onSubmitCv(): void;
+  /** Run the CV-confirmation steps, then press the site's own Send button. */
+  onApply(): void;
   onConfirm(field: FieldMatch['field']): void;
   onPick(field: FieldMatch['field']): void;
   /** Follow (or re-try) the external application handoff. */
   onFollow(): void;
   /** Ignore the redirect verdict and fill this page after all. */
   onFillAnyway(): void;
-  /** Mark this posting skipped and move the session on to the next one. */
+  /** Mark this posting skipped, and move a session on to the next one. */
   onSkip(): void;
   onClose(): void;
   /** The card was dragged to a new spot; persist it so it stays there. */
@@ -66,6 +69,13 @@ export interface RedirectNotice {
 /** Which of the two views the card is showing. */
 export type ModalView = 'job' | 'fields';
 
+/**
+ * Whether Apply can run here. The two failures are kept apart because they need
+ * different answers from the user: find the button, or teach the site what its
+ * confirmation looks like. One shared "unavailable" told them neither.
+ */
+export type ApplyState = 'ready' | 'noButton' | 'noConfirmation';
+
 export interface ModalData {
   siteName: string;
   jobTitle?: string;
@@ -73,7 +83,10 @@ export interface ModalData {
   jobDescription?: JobBlock[];
   jobRequirements?: JobBlock[];
   matches: FieldMatch[];
-  canSubmitCv: boolean;
+  /** Whether Apply may run, and which half is missing when it may not. */
+  applyState: ApplyState;
+  /** The site's own confirmation appeared — this posting really was sent. */
+  applied?: boolean;
   redirect?: RedirectNotice;
   /** Host of the board posting this page was reached from. */
   via?: string;
@@ -101,6 +114,12 @@ export class FillerModal {
    * report unusable exactly when it is being used.
    */
   private view: ModalView = 'job';
+  /**
+   * Whether the note explaining the greyed-out Apply button is open. Lives here
+   * rather than in `ModalData` for the same reason `view` does: it is the user's
+   * reading state, and a re-render must not close what they just opened.
+   */
+  private applyHelp = false;
   private onViewportResize = () => this.applyLayout();
 
   constructor(cb: ModalCallbacks) {
@@ -122,6 +141,9 @@ export class FillerModal {
 
   render(data: ModalData): void {
     this.data = data;
+    // A note about a button that is no longer grey is just wrong text on screen:
+    // picking the Send button mid-session flips this without a further click.
+    if (data.applyState === 'ready') this.applyHelp = false;
     this.shadow.querySelector('.cf-card')?.remove();
     this.shadow.querySelector('.cf-pill')?.remove();
 
@@ -184,6 +206,17 @@ export class FillerModal {
     if (this.data) this.render(this.data);
   }
 
+  /**
+   * Open or close the note behind the greyed-out Apply button. Public for the
+   * same reason `setView` is: it is only reachable by clicking, and a screenshot
+   * cannot click.
+   */
+  setApplyHelp(open: boolean): void {
+    if (this.applyHelp === open) return;
+    this.applyHelp = open;
+    if (this.data) this.render(this.data);
+  }
+
   /* ---------------- Chrome ---------------- */
 
   private header(data: ModalData, card: HTMLElement): HTMLElement {
@@ -237,32 +270,85 @@ export class FillerModal {
     return wrap;
   }
 
+  /**
+   * Two decisions and nothing else: send this one, or move on. Everything that
+   * is about the *extension* rather than the posting — Re-run, Reset — goes
+   * behind the overflow, because at 390px a row of five buttons makes the two
+   * that matter no easier to hit than the three that do not.
+   */
   private footer(data: ModalData): HTMLElement {
     const footer = el('div', 'cf-footer');
+    const actions = el('div', 'cf-footer-actions');
+    // A posting you do not want is worth skipping whether or not you can apply
+    // to it here, so Skip is on both branches. The label names the consequence:
+    // during a session skipping also pulls in the next posting.
+    const skip = btn(data.session?.active ? 'Skip → next' : 'Skip', () => this.cb.onSkip());
 
     if (data.redirect) {
-      footer.append(
-        btn('Fill this page instead', () => this.cb.onFillAnyway()),
+      // Same shape as below — the primary action, Skip, then the overflow. "Fill
+      // this page instead" is an override of a verdict the user has not been
+      // given reason to doubt, and as a third button it pushed the primary one
+      // off the right edge at 390px.
+      actions.append(
         btn(data.redirect.followed ? 'Open again' : 'Open application', () => this.cb.onFollow(), true),
+        skip,
+        this.overflow([btn('Fill this page instead', () => this.cb.onFillAnyway())]),
       );
+      footer.append(actions);
       return footer;
     }
 
-    const submitCv = btn('Submit CV', () => this.cb.onSubmitCv());
-    if (!data.canSubmitCv) submitCv.setAttribute('disabled', 'true');
-    const rerun = btn('Re-run', () => this.cb.onRerun());
-    const reset = btn('Reset', () => this.cb.onReset());
-
-    if (data.session?.active) {
-      // During a session the thumb-sized action is "move on"; the rest of the
-      // controls are still one tap away, just not competing for the width.
-      footer.append(
-        btn('Skip → next', () => this.cb.onSkip(), true),
-        this.overflow([submitCv, rerun, reset]),
+    // Sent and confirmed: there is nothing left to press here, and an Apply that
+    // still looked live would invite a second application to the same posting.
+    if (data.applied) {
+      const done = btn('Applied ✓', () => {}, true);
+      done.setAttribute('aria-disabled', 'true');
+      done.classList.add('cf-applied-btn');
+      actions.append(
+        done,
+        skip,
+        this.overflow([
+          btn('Re-run', () => this.cb.onRerun()),
+          btn('Reset', () => this.cb.onReset()),
+        ]),
       );
-    } else {
-      footer.append(submitCv, rerun, reset);
+      footer.append(actions);
+      return footer;
     }
+
+    const apply = btn('Apply', () => this.cb.onApply(), true);
+    if (data.applyState !== 'ready') {
+      // `aria-disabled`, not `disabled`: a disabled button swallows pointer
+      // events, so the one thing the user does — press it — could not answer
+      // them. It still takes the tap, and the tap explains why it is grey.
+      apply.setAttribute('aria-disabled', 'true');
+      // Say so in the name as well. "Unavailable" is true of the action, but a
+      // screen-reader user would otherwise never learn that pressing it is
+      // still worth doing. The visible label stays a prefix of the spoken one.
+      apply.setAttribute('aria-label', data.applyState === 'noConfirmation'
+        ? 'Apply — this site has no confirmation configured, press to find out why'
+        : 'Apply — no Send button found on this page, press to find out why');
+      apply.onclick = () => this.setApplyHelp(!this.applyHelp);
+    }
+
+    actions.append(
+      apply,
+      skip,
+      this.overflow([
+        btn('Re-run', () => this.cb.onRerun()),
+        btn('Reset', () => this.cb.onReset()),
+      ]),
+    );
+
+    // Above the buttons, not beside them: the answer belongs where the question
+    // was asked, rather than behind a second control the user would have to find
+    // first — and appearing beside them would shift the row under their thumb.
+    if (this.applyHelp && data.applyState !== 'ready') {
+      footer.append(helpPanel(
+        data.applyState === 'noConfirmation' ? CONCEPT_HELP.applyUnverified : CONCEPT_HELP.apply,
+      ));
+    }
+    footer.append(actions);
     return footer;
   }
 
@@ -271,6 +357,11 @@ export class FillerModal {
   /** The posting. The default view, and the reason the modal is worth reading. */
   private jobBody(data: ModalData): HTMLElement {
     const body = el('div', 'cf-body');
+
+    // Top of the body, above the title: the site's own confirmation is often
+    // below the fold or hidden behind this very card, so "did that go through?"
+    // was a question the user answered by scrolling around the page they sent.
+    if (data.applied) body.append(this.appliedBanner());
 
     if (data.jobTitle) {
       const t = el('h2', 'cf-title');
@@ -309,9 +400,27 @@ export class FillerModal {
     return body;
   }
 
+  /**
+   * The one unambiguous good-news state. Worded as what the *site* said, not as
+   * what the extension did: the claim is only as good as the confirmation
+   * element it saw, and saying so is what keeps it honest.
+   */
+  private appliedBanner(): HTMLElement {
+    const banner = el('p', 'cf-applied');
+    const dot = el('span', 'cf-dot ok');
+    dot.setAttribute('role', 'img');
+    dot.setAttribute('aria-label', 'applied');
+    const text = el('span');
+    text.textContent = 'Application sent — the site confirmed it.';
+    banner.append(dot, text);
+    banner.setAttribute('role', 'status');
+    return banner;
+  }
+
   /** The fill report: what went in, what needs a look, what was never found. */
   private fieldsBody(data: ModalData): HTMLElement {
     const body = el('div', 'cf-body');
+    if (data.applied) body.append(this.appliedBanner());
 
     const filled = data.matches.filter((m) => m.filled).length;
     const missing = data.matches.filter((m) => m.confidence === 'none').length;
@@ -324,7 +433,7 @@ export class FillerModal {
     body.append(report);
 
     // The report is three colours and a set of buttons, and nothing on screen
-    // says what any of them mean — or that sending is still the user's job.
+    // says what any of them mean — or that nothing has been sent yet.
     const legend = el('p', 'cf-legend-line');
     for (const [cls, text] of [['ok', 'filled'], ['low', 'check it'], ['none', 'not found']] as const) {
       const dot = el('span', `cf-dot ${cls}`);
@@ -333,7 +442,9 @@ export class FillerModal {
       legend.append(dot, label);
     }
     const sent = el('small', 'cf-legend-send');
-    sent.textContent = 'Nothing is sent — press the site’s own button when you are ready.';
+    sent.textContent = data.applied
+      ? 'Already sent — this report is what went in.'
+      : 'Nothing has been sent. Press Apply when you are ready, or Skip.';
     body.append(legend, sent);
 
     return body;
@@ -344,11 +455,13 @@ export class FillerModal {
     const filled = data.matches.filter((m) => m.filled).length;
     // Collapsed, the dot is the only status left on screen, so it has to carry
     // the same meaning as the rows it is hiding.
-    const dot = el('span', `cf-dot ${pillStatus(data, filled)}`);
+    const dot = el('span', `cf-dot ${data.applied ? 'ok' : pillStatus(data, filled)}`);
     pill.setAttribute('aria-label', 'Reopen the fill report');
     const label = el('span');
-    label.textContent = data.redirect
-      ? 'External application'
+    // Collapsed, this is the only thing left on screen — so once the posting is
+    // sent, that is what it has to say. A fill count reads as unfinished work.
+    label.textContent = data.applied ? 'Application sent'
+      : data.redirect ? 'External application'
       : `${filled}/${data.matches.length} filled`;
     pill.append(dot, label);
     pill.onclick = () => this.restore();

@@ -18,8 +18,11 @@ import setupCss from './setupPanel.css?inline';
 
 export type ContainerKey = 'jobTitle' | 'jobDescription' | 'jobRequirements';
 
-/** Which step list a prep row belongs to: pre-fill steps, or pre-handoff steps. */
-export type PrepListKey = 'prep' | 'beforeFollow';
+/**
+ * Which step list a prep row belongs to: pre-fill steps, pre-handoff steps, or
+ * the CV-confirmation steps the review modal's Apply runs before sending.
+ */
+export type PrepListKey = 'prep' | 'beforeFollow' | 'submitCv';
 
 /** Dot colour: high = matched (green), low = weak match (yellow), none = nothing (grey). */
 export type RowStatus = 'high' | 'low' | 'none';
@@ -59,6 +62,24 @@ export interface SetupData {
   /** Steps run on the posting before following an external apply link. */
   beforeFollow: PrepRow[];
   /**
+   * Steps the review modal's Apply runs before pressing Send, for sites where
+   * attaching the file is a separate dialog that has to be confirmed. Empty is
+   * the normal state: most sites take the CV the moment it is attached.
+   */
+  submitCv: PrepRow[];
+  /**
+   * The site's Send button — the control the review modal's Apply presses. Grey
+   * means none was found, which is what greys Apply out, so this row is the one
+   * place a user can do something about it.
+   */
+  submit: SetupRow;
+  /**
+   * The site's confirmation element. Grey means the posting can never be
+   * recorded as applied — and, because nothing unverifiable is sent, that Apply
+   * is greyed out too. It is the one row that has to be filled in per site.
+   */
+  success: SetupRow;
+  /**
    * Whether the user has already dismissed the legend. False opens it, so a
    * first-time user is told what the dots and the `auto ·` prefixes mean before
    * being asked to act on them.
@@ -79,6 +100,12 @@ export interface SetupCallbacks {
   onClearField(field: FieldKey): void;
   onPickRedirect(key: string): void;
   onClearRedirect(key: string): void;
+  /** Save the control Apply should press on this site. */
+  onPickSubmit(): void;
+  onClearSubmit(): void;
+  /** Save the element that only appears once the application really went in. */
+  onPickSuccess(): void;
+  onClearSuccess(): void;
   onRename(name: string, urlPattern: string): void;
   onOpenOptions(): void;
   /** The legend was dismissed — persist it so the next posting stays quiet. */
@@ -147,7 +174,8 @@ export class SetupPanel {
     // One sentence answering "what am I looking at", above everything. The
     // panel used to open straight onto five jargon headings.
     const intro = el('p', 'cf-intro');
-    intro.textContent = 'Teach the extension how to read and fill this site. It never presses Send.';
+    intro.textContent = 'Teach the extension how to read and fill this site. '
+      + 'It sends nothing until you press Apply.';
     body.append(intro, this.legend(data));
 
     // Identity
@@ -163,7 +191,16 @@ export class SetupPanel {
     // the ones still holding unresolved rows open themselves — so the panel
     // opens on exactly the work that is left.
     const jobInfoTodo = countTodo(data.containers);
-    const fieldsTodo = countTodo(data.fields);
+    // The Send button counts with the fields, but only when nothing was found:
+    // a greyed Apply is real work. A button found by its label is the ordinary
+    // healthy state, and counting that labelled every site "1 to do" — the same
+    // mistake the redirect selectors below are careful not to make.
+    const fieldsTodo = countTodo(data.fields)
+      + (data.submit.status === 'none' ? 1 : 0)
+      // Always work when unset: without it nothing on this site can ever be
+      // recorded as applied, and Apply refuses to send. There is no healthy
+      // "not set" for this one, unlike the redirect selectors.
+      + (data.success.status === 'none' ? 1 : 0);
     // Redirect selectors are optional overrides — "not set" is the ordinary
     // state for a quick-apply site, so only a saved selector that no longer
     // resolves counts as work. Counting them like the other groups labelled
@@ -211,6 +248,25 @@ export class SetupPanel {
         () => this.cb.onPickField(row.key as FieldKey),
         () => this.cb.onClearField(row.key as FieldKey)));
     }
+    // Sits under the CV row it is about: a few sites only register the file once
+    // a dialog is confirmed, and these are the clicks that do it.
+    fields.body.append(sectionHead('After attaching the CV — extra clicks this site needs'));
+    this.appendPrepList(fields.body, data.submitCv, 'submitCv');
+
+    // Last, in the order they happen: press this, then look for that.
+    fields.body.append(sectionHead('The button Apply presses'));
+    fields.body.append(this.row(data.submit,
+      () => this.cb.onPickSubmit(),
+      () => this.cb.onClearSubmit()));
+    // Pick this one *after* sending, when the confirmation is on screen — which
+    // is the only moment it exists. The note on the row says so.
+    // The instruction lives in the heading rather than the row's note: the note
+    // truncates to one line, and "pick this once a confirmation is on screen" is
+    // the whole trick — it does not exist on the page you are looking at.
+    fields.body.append(sectionHead('How this site says it worked — pick it with a confirmation on screen'));
+    fields.body.append(this.row(data.success,
+      () => this.cb.onPickSuccess(),
+      () => this.cb.onClearSuccess()));
 
     body.append(site.el, steps.el, kind.el, info.el, fields.el);
 

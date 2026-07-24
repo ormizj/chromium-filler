@@ -43,6 +43,12 @@ chrome.runtime.onMessage.addListener((msg: Message, _sender, sendResponse) => {
       .catch((e) => sendResponse({ ok: false, error: String(e) }));
     return true;
   }
+  if (msg.type === MSG.APPLYING) {
+    noteApplying(msg.url, _sender.tab?.id)
+      .then(() => sendResponse({ ok: true }))
+      .catch((e) => sendResponse({ ok: false, error: String(e) }));
+    return true;
+  }
   if (msg.type === MSG.FOLLOW_REDIRECT) {
     followRedirect(msg.sourceUrl, msg.href, _sender.tab)
       .then(sendResponse)
@@ -83,7 +89,64 @@ chrome.runtime.onMessage.addListener((msg: Message, _sender, sendResponse) => {
   return false;
 });
 
-async function handleSubmitted(url: string, tabId: number | undefined): Promise<void> {
+/* ---------------- Which posting a tab is applying to ---------------- */
+
+/**
+ * The confirmation is frequently not on the page the form was: Greenhouse lands
+ * on `…/jobs/<id>/confirmation`, Lever on its own confirmation page. The content
+ * script there is a *fresh* one — it has no memory of the posting, so reporting
+ * its own `location.href` would mark the confirmation page applied and leave the
+ * job posting sitting at "opened" forever.
+ *
+ * So each tab remembers the posting it filled. Session storage, keyed by tab,
+ * for the same reason the redirect watches are: the worker can be torn down
+ * between the submit and the landing, and the navigation itself is what makes
+ * that likely.
+ */
+interface ApplyingRecord {
+  url: string;
+  at: number;
+}
+
+const APPLYING_KEY = 'applyingTabs';
+/** A posting still unconfirmed after this is not one this submission finished. */
+const APPLYING_TTL_MS = 30 * 60_000;
+
+async function getApplying(): Promise<Record<string, ApplyingRecord>> {
+  const raw = await chrome.storage.session.get(APPLYING_KEY);
+  return (raw[APPLYING_KEY] as Record<string, ApplyingRecord>) ?? {};
+}
+
+/** This tab is working on this posting. Overwrites: a tab holds one at a time. */
+async function noteApplying(url: string, tabId: number | undefined): Promise<void> {
+  if (tabId == null) return;
+  const all = await getApplying();
+  all[String(tabId)] = { url, at: Date.now() };
+  await chrome.storage.session.set({ [APPLYING_KEY]: all });
+}
+
+/**
+ * The posting `tabId` was filling, if it is still fresh. Falls back to the URL
+ * the page reported, which is already correct whenever the confirmation renders
+ * in place — there the two are the same URL.
+ */
+async function applyingUrl(tabId: number | undefined, reported: string): Promise<string> {
+  if (tabId == null) return reported;
+  const all = await getApplying();
+  const record = all[String(tabId)];
+  if (!record) return reported;
+
+  delete all[String(tabId)];
+  await chrome.storage.session.set({ [APPLYING_KEY]: all });
+  if (Date.now() - record.at > APPLYING_TTL_MS) return reported;
+  return record.url;
+}
+
+async function handleSubmitted(reportedUrl: string, tabId: number | undefined): Promise<void> {
+  // Attribute the confirmation to the posting that was filled, not to whatever
+  // page happens to be showing it.
+  const url = await applyingUrl(tabId, reportedUrl);
+
   // Mark the URL applied, and with it the board posting it was reached from —
   // the application belongs to that posting even though it was sent elsewhere.
   await mutateJobUrls((list) => applyStatusChain(list, url, 'applied'));

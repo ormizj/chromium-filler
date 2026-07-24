@@ -1,0 +1,87 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>DialogATS — Infrastructure Engineer</title>
+    <style>
+      body { font: 15px/1.6 system-ui, sans-serif; max-width: 640px; margin: 40px auto; padding: 0 16px; }
+      label { display: block; margin: 12px 0 4px; font-weight: 600; }
+      input, textarea { width: 100%; padding: 8px; box-sizing: border-box; font: inherit; }
+      #cv-dialog { display: none; border: 1px solid #d1d5db; border-radius: 8px; padding: 12px; margin-top: 8px; }
+      #cv-dialog.open { display: block; }
+      #cv-attached { display: none; color: #15803d; font-weight: 700; margin-top: 8px; }
+      #cv-status { color: #b91c1c; margin-top: 8px; }
+      #dialog-success { display: none; color: #15803d; font-weight: 700; margin-top: 16px; }
+      button { margin-top: 12px; padding: 10px 18px; }
+    </style>
+  </head>
+  <body>
+    <!--
+      HARD CASE — the CV is attached but not *accepted*.
+      The file input lives in a dialog opened on demand (prep click). Dropping a
+      file into it is not enough: this ATS only records the CV when "Attach"
+      is pressed, which is what the review modal's Apply runs first (`submitCv`
+      in the site config) before it presses Send. Without that click the form
+      still reports no file, exactly like the real dialogs this models.
+    -->
+    <h1 id="job-title">Infrastructure Engineer</h1>
+    <div id="job-description">
+      DialogATS is hiring an Infrastructure Engineer to run our fleet. The
+      application form is on this page, but the CV upload is a two-step dialog.
+    </div>
+
+    <form id="application-form">
+      <label for="first_name">First name</label>
+      <input id="first_name" name="first_name" />
+
+      <label for="last_name">Last name</label>
+      <input id="last_name" name="last_name" />
+
+      <label for="email">Email</label>
+      <input id="email" name="email" type="email" />
+
+      <button type="button" id="open-cv">Add a résumé</button>
+      <div id="cv-dialog">
+        <label for="cv-file">Résumé file</label>
+        <input id="cv-file" name="resume" type="file" />
+        <button type="button" id="cv-attach">Attach</button>
+      </div>
+      <p id="cv-status">No résumé attached.</p>
+      <p id="cv-attached"></p>
+
+      <button id="submit" type="submit">Send application</button>
+    </form>
+    <div id="dialog-success">✓ Application submitted to DialogATS.</div>
+
+    <script>
+      const dialog = document.getElementById('cv-dialog');
+      const input = document.getElementById('cv-file');
+      const status = document.getElementById('cv-status');
+      const attached = document.getElementById('cv-attached');
+      // The application only knows about a file once Attach is pressed; the
+      // input's own change event is deliberately ignored.
+      let acceptedName = '';
+
+      document.getElementById('open-cv').addEventListener('click', () => {
+        dialog.classList.add('open');
+      });
+
+      document.getElementById('cv-attach').addEventListener('click', () => {
+        const file = input.files && input.files[0];
+        if (!file) return;
+        acceptedName = file.name;
+        attached.textContent = '✓ ' + acceptedName;
+        attached.style.display = 'block';
+        status.style.display = 'none';
+        dialog.classList.remove('open');
+      });
+
+      document.getElementById('application-form').addEventListener('submit', (e) => {
+        e.preventDefault();
+        if (!acceptedName) return; // an unconfirmed file is no file at all
+        document.getElementById('dialog-success').style.display = 'block';
+      });
+    </script>
+  </body>
+</html>

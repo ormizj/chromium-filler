@@ -114,7 +114,7 @@ const BASE_MODAL: ModalData = {
     { kind: 'list', items: ['8+ years', 'Kubernetes', 'Go or Rust', 'On-call experience'] },
   ],
   matches: REPORT,
-  canSubmitCv: true,
+  applyState: 'ready',
   // What a fresh install gets. Without it the card falls back to the CSS
   // defaults, which is a size no real user would ever see.
   layout: DEFAULT_MODAL_LAYOUT,
@@ -205,6 +205,17 @@ const MODAL_STATES: Record<string, Partial<ModalData>> = {
       match('resume', 'high', false, { selectorUsed: '.dropzone' }),
     ],
   },
+  // A page where no Send button could be found, so the footer's Apply is greyed
+  // out. `&note=apply` opens the note that says why — the whole point of the
+  // state, and only reachable by pressing the button.
+  'apply-unset': { applyState: 'noButton' },
+  // The *other* reason Apply is grey, and the one a user cannot guess: the site
+  // has no confirmation element, so a submission's outcome could not be read
+  // back. A different note entirely — pair it with `&note=apply`.
+  'apply-unverified': { applyState: 'noConfirmation' },
+  // Sent and confirmed. The banner, the retired Apply, and the pill all change,
+  // and none of it is reachable without actually submitting a real application.
+  applied: { applied: true },
   empty: {
     siteName: 'ListingBoard',
     jobTitle: 'Platform engineering jobs',
@@ -214,7 +225,7 @@ const MODAL_STATES: Record<string, Partial<ModalData>> = {
     jobRequirements: undefined,
     matches: ['fullName', 'email', 'phone', 'coverLetter', 'city', 'resume']
       .map((f) => match(f as FieldMatch['field'], 'none', false)),
-    canSubmitCv: false,
+    applyState: 'noConfirmation',
   },
 };
 
@@ -223,7 +234,7 @@ function bootModal(): void {
   const modal = new FillerModal({
     onRerun: () => console.log('[harness] re-run'),
     onReset: () => console.log('[harness] reset'),
-    onSubmitCv: () => console.log('[harness] submit CV'),
+    onApply: () => console.log('[harness] apply'),
     onConfirm: (f) => console.log('[harness] confirm', f),
     onPick: (f) => console.log('[harness] pick', f),
     onFollow: () => console.log('[harness] follow'),
@@ -236,8 +247,7 @@ function bootModal(): void {
   modal.render({
     ...BASE_MODAL,
     ...(MODAL_STATES[state] ?? {}),
-    // `?session=1` shows the queue strip and the overflow menu that holds
-    // Submit CV / Re-run / Reset while a session is running.
+    // `?session=1` shows the queue strip, and turns Skip into "Skip → next".
     session: params.get('session') === '1' ? SESSION : undefined,
     // Kept alongside `state=landed` because the README links `?via=1`.
     via: params.get('via') === '1' ? 'boards.example' : MODAL_STATES[state]?.via,
@@ -248,6 +258,11 @@ function bootModal(): void {
   // screenshot cannot do.
   const view = params.get('view');
   if (view === 'fields' || view === 'job') modal.setView(view as ModalView);
+
+  // `&note=apply` opens the explanation behind the greyed-out Apply button, for
+  // the same reason `&view=` exists: a click is not reachable from a screenshot,
+  // and an unpressed button looks identical to a broken one.
+  if (params.get('note') === 'apply') modal.setApplyHelp(true);
 }
 
 function bootSetup(): void {
@@ -265,6 +280,10 @@ function bootSetup(): void {
     onClearField: (f) => console.log('[harness] clear field', f),
     onPickRedirect: (k) => console.log('[harness] pick redirect', k),
     onClearRedirect: (k) => console.log('[harness] clear redirect', k),
+    onPickSubmit: () => console.log('[harness] pick send button'),
+    onClearSubmit: () => console.log('[harness] clear send button'),
+    onPickSuccess: () => console.log('[harness] pick confirmation'),
+    onClearSuccess: () => console.log('[harness] clear confirmation'),
     onRename: (n, p) => console.log('[harness] rename', n, p),
     onOpenOptions: () => console.log('[harness] open options'),
     onDismissHelp: () => console.log('[harness] legend dismissed'),
@@ -298,6 +317,15 @@ function bootSetup(): void {
       { key: 'markerSelector', label: 'External marker', status: 'none', note: 'not set', hasSave: false },
     ],
     beforeFollow: [{ action: 'click', selector: '#save-job', resolves: true }],
+    // Empty is the normal state: most sites take the CV the moment it is
+    // attached. `state=cv-steps` is the site that needs the extra clicks.
+    submitCv: [],
+    // Found by its label rather than saved — the ordinary case, and the one that
+    // shows the row still offering Pick when it already resolved something.
+    submit: { key: 'submitSelector', label: 'Send button', status: 'low', note: 'auto · Submit application', hasSave: false },
+    // Green while merely saved: there is nothing to verify until an application
+    // has actually been sent, so absence here is not a fault.
+    success: { key: 'successSelector', label: 'Confirmation element', status: 'high', note: 'saved · #app-success', hasSave: true },
     // The returning user, whose legend is folded away. `state=help` is the
     // first-run view.
     helpSeen: true,
@@ -317,6 +345,39 @@ function bootSetup(): void {
      * dismissing it is persistent.
      */
     help: { helpSeen: false },
+    /**
+     * A site whose CV only counts once a dialog is confirmed — the one shape
+     * that puts steps in the Form fields section, which Apply then runs before
+     * it presses Send.
+     */
+    'cv-steps': {
+      name: 'DialogATS',
+      submitCv: [
+        { action: 'click', selector: '#cv-attach', resolves: true },
+        { action: 'waitFor', selector: '#cv-attached', ms: 4000, resolves: false },
+      ],
+    },
+    /**
+     * The page where nothing reads as a Send button, so the row is grey and the
+     * modal's Apply is greyed with it. Pair with `?page=modal&state=apply-unset`.
+     */
+    'submit-unset': {
+      submit: { key: 'submitSelector', label: 'Send button', status: 'none', note: 'not found — Apply is greyed out', hasSave: false },
+    },
+    /**
+     * The site nobody has finished setting up: no confirmation element, so
+     * nothing here can ever be recorded as applied and Apply refuses to send.
+     * Pair with `?page=modal&state=apply-unverified&note=apply`.
+     */
+    'success-unset': {
+      success: {
+        key: 'successSelector',
+        label: 'Confirmation element',
+        status: 'none',
+        note: 'not set — Apply is greyed out',
+        hasSave: false,
+      },
+    },
     external: {
       name: 'ExternalBoard',
       urlPattern: '*://*/sites/external-board.html*',

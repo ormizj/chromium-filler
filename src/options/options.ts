@@ -254,7 +254,7 @@ function initHelp(): void {
   }));
 
   const concepts: Array<keyof typeof CONCEPT_HELP> = [
-    'howItWorks', 'neverSubmits', 'dots', 'autoVsSaved', 'picker', 'todoChip',
+    'howItWorks', 'neverSubmits', 'apply', 'dots', 'autoVsSaved', 'picker', 'todoChip',
     'urlPattern', 'twoStep', 'sessions', 'successSelector',
   ];
   $('help-concepts').replaceChildren(...concepts.map((key) => helpPanel(CONCEPT_HELP[key])));
@@ -302,12 +302,14 @@ function initHelp(): void {
 async function initSettings(): Promise<void> {
   const autoRun = $<HTMLInputElement>('auto-run');
   const closeOnSubmit = $<HTMLInputElement>('close-on-submit');
+  const closeOnSkip = $<HTMLInputElement>('close-on-skip');
   const closeDelay = $<HTMLInputElement>('close-delay');
   const redirectTarget = $<HTMLSelectElement>('redirect-target');
 
   const settings = await getSettings();
   autoRun.checked = settings.autoRunOnLoad;
   closeOnSubmit.checked = settings.closeTabOnSubmit;
+  closeOnSkip.checked = settings.closeTabOnSkip;
   closeDelay.value = String(settings.closeTabDelayMs);
   redirectTarget.value = settings.redirectTarget;
 
@@ -317,6 +319,7 @@ async function initSettings(): Promise<void> {
       ...s,
       autoRunOnLoad: autoRun.checked,
       closeTabOnSubmit: closeOnSubmit.checked,
+      closeTabOnSkip: closeOnSkip.checked,
       closeTabDelayMs: Math.max(0, Number(closeDelay.value) || 0),
       redirectTarget: redirectTarget.value as RedirectTarget,
     });
@@ -325,6 +328,7 @@ async function initSettings(): Promise<void> {
 
   autoRun.addEventListener('change', persist);
   closeOnSubmit.addEventListener('change', persist);
+  closeOnSkip.addEventListener('change', persist);
   closeDelay.addEventListener('change', persist);
   redirectTarget.addEventListener('change', persist);
 
@@ -332,6 +336,7 @@ async function initSettings(): Promise<void> {
   // panel goes after the control's own <label>, so it reads as an answer to it.
   attachHelp(autoRun.parentElement!, SETTINGS_HELP.autoRunOnLoad);
   attachHelp(closeOnSubmit.parentElement!, SETTINGS_HELP.closeTabOnSubmit);
+  attachHelp(closeOnSkip.parentElement!, SETTINGS_HELP.closeTabOnSkip);
   // These two are column labels, so the `?` hangs off the caption while the
   // panel still opens below the whole field.
   attachHelp($('close-delay-label'), SETTINGS_HELP.closeTabDelayMs, closeDelay.parentElement!);
@@ -633,7 +638,7 @@ function describeScreen(vp: ModelledViewport): string {
 
 /** The preview modal is a mannequin: its buttons must not do anything real. */
 const PREVIEW_CALLBACKS: ModalCallbacks = {
-  onRerun: () => {}, onReset: () => {}, onSubmitCv: () => {},
+  onRerun: () => {}, onReset: () => {}, onApply: () => {},
   onConfirm: () => {}, onPick: () => {}, onFollow: () => {},
   onFillAnyway: () => {}, onSkip: () => {}, onClose: () => {},
 };
@@ -654,7 +659,9 @@ function previewData(layout: ModalLayout): ModalData {
       { field: 'fullName', source: 'heuristic', confidence: 'high', filled: true, required: false, valueToFill: 'Ada Lovelace' },
       { field: 'city', source: 'none', confidence: 'none', filled: false, required: false },
     ],
-    canSubmitCv: false,
+    // Ready, so the preview shows the live Apply the user will actually meet
+    // rather than a greyed one — this panel exists to judge the layout.
+    applyState: 'ready',
     layout,
   };
 }

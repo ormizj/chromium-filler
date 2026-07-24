@@ -25,6 +25,18 @@
     "autoDetect": true
   },
   {
+    "id": "cv-confirm",
+    "name": "DialogATS (test)",
+    "urlPatterns": ["*://*/sites/cv-confirm.html*", "file://*cv-confirm.html*"],
+    "waitFor": "#application-form",
+    "prep": [{ "action": "click", "selector": "#open-cv", "optional": true }],
+    "extract": { "jobTitle": "#job-title", "jobDescription": "#job-description" },
+    "cvUpload": "#cv-file",
+    "submitCv": [{ "action": "click", "selector": "#cv-attach" }],
+    "successSelector": "#dialog-success",
+    "autoDetect": true
+  },
+  {
     "id": "redirect-board",
     "name": "MixedBoard (test)",
     "urlPatterns": ["*://*/sites/redirect-board.html*"],
@@ -61,6 +73,7 @@
     "name": "ListingBoard (test)",
     "urlPatterns": ["*://*/sites/listing-board.html*"],
     "extract": { "jobTitle": "#page-title", "jobDescription": "#page-blurb" },
+    "successSelector": "#application-received",
     "autoDetect": true
   },
   {
@@ -81,6 +94,14 @@
     "prep": [{ "action": "click", "selector": "#next-btn", "optional": true }],
     "extract": { "jobTitle": "#role-title", "jobDescription": "#role-desc" },
     "successSelector": "#chaos-success",
+    "autoDetect": true
+  },
+  {
+    "id": "nav-thanks",
+    "name": "NavATS confirmation (test)",
+    "urlPatterns": ["*://127.0.0.1:5200/sites/thanks.html*"],
+    "extract": {},
+    "successSelector": "#thanks",
     "autoDetect": true
   }
 ]

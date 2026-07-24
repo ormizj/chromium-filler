@@ -62,6 +62,14 @@ export const SCENARIOS = [
     expect: 'prep opens the modal and reveals the CV input; fields match by accessible name',
   },
   {
+    id: 'cv-confirm',
+    flow: 'quick-apply',
+    title: 'DialogATS — the CV is attached, but not accepted until confirmed',
+    url: site(HOSTS.board, 'cv-confirm'),
+    config: 'cv-confirm',
+    expect: 'fills + drops the CV in the dialog; Apply presses Attach, then Send, and it lands',
+  },
+  {
     id: 'chaos-form',
     flow: 'quick-apply',
     title: 'ChaosForm — hashed ids, multi-step, one disguised field',
@@ -159,7 +167,7 @@ export const SCENARIOS = [
     title: 'ListingBoard — three postings, three different apply links',
     url: site(HOSTS.board, 'listing-board'),
     config: 'listing-board',
-    expect: 'verdict is ambiguous → stays put; nothing is followed and no tab opens',
+    expect: 'verdict is ambiguous → stays put; nothing is followed, and Apply is grey (no Send button)',
   },
 
   /* ---------------- Destinations ---------------- */

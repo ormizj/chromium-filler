@@ -65,6 +65,19 @@ describe('help catalog', () => {
       expect(CONCEPT_HELP[key]).toBeTruthy();
     }
   });
+
+  /**
+   * The review modal's Apply button is greyed out on any page where no Send
+   * button could be found. Pressing it opens this entry — so it has to say what
+   * Apply does AND how to point it at the right control, or the user is left
+   * exactly where they started.
+   */
+  it('explains the greyed-out Apply button and how to enable it', () => {
+    const entry = CONCEPT_HELP.apply;
+    expect(entry).toBeTruthy();
+    expect(entry.body).toMatch(/set up this site|send button/i);
+    expect(entry.body).toMatch(/press|send/i);
+  });
 });
 
 describe('describeConfig', () => {
@@ -102,6 +115,17 @@ describe('describeConfig', () => {
     const text = describeConfig({ ...base, successSelector: '.thanks' });
     expect(text).toContain('.thanks');
     expect(text).toMatch(/sent|applied/i);
+  });
+
+  // A configured submitCv is the difference between a live button and a dead one
+  // in the review modal, so the Sites summary must not stay silent about it.
+  it('mentions the CV confirmation steps and what the first one does', () => {
+    const text = describeConfig({
+      ...base,
+      submitCv: [{ action: 'click', selector: '#cv-attach' }],
+    });
+    expect(text).toContain('#cv-attach');
+    expect(text).toMatch(/cv|résumé/i);
   });
 
   it('says overrides exist and how many', () => {

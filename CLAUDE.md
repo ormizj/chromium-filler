@@ -35,7 +35,9 @@ driving a real site. `?page=modal&session=1` shows the queue strip and the
 footer overflow menu.
 
 `&state=…` picks which **flow** the surface is showing — modal: `long`, `redirect`,
-`redirect-followed`, `landed`, `empty`, `failed-fill`; setup: `external`, `help`. A two-step posting
+`redirect-followed`, `landed`, `empty`, `failed-fill`, `apply-unset`,
+`apply-unverified`, `applied`; setup: `external`, `help`, `cv-steps`,
+`submit-unset`, `success-unset`. A two-step posting
 renders a different modal body entirely (notice + "Fill this page instead", no
 report), so it needs its own state rather than being inferred from the default
 data. Add a state here whenever a flow gains a distinct rendering. `state=long` is
@@ -44,19 +46,41 @@ three-line description proves nothing about it. `setup&state=help` is the
 first-run panel with the legend open, which is otherwise reachable exactly once
 per profile: dismissing it persists.
 
-`&view=job|fields` picks which of the modal's two views is open. The Job view is
-the default everywhere, so the report is otherwise only reachable by clicking,
-which a screenshot cannot do.
+`&view=job|fields` picks which of the modal's two views is open, and `&note=apply`
+opens the explanation behind the greyed-out Apply button (pair it with
+`state=apply-unset`). The Job view is the default everywhere and the note starts
+shut, so both are otherwise only reachable by clicking, which a screenshot cannot
+do.
 
 E2E loads the built extension into real Chromium (`npx playwright install chromium`
 once). Always `npm run build` before `npm run test:e2e` — the suite loads `dist/`.
 
 ## Architecture
 
-MV3 Chrome extension that auto-fills job-application forms. It **never submits** —
-the user presses the site's own Send button. Filling is automatic but **never
-silent**: a Shadow-DOM review modal reports every field as filled (green) /
-low-confidence (yellow) / unmatched (red).
+MV3 Chrome extension that auto-fills job-application forms. It **never submits on
+its own** — filling is automatic but **never silent**, and nothing leaves the page
+until the user presses something. A Shadow-DOM review modal reports every field as
+filled (green) / low-confidence (yellow) / unmatched (red), and its footer carries
+the two decisions: **Apply** (run any CV-confirmation steps, then press the site's
+own Send button) and **Skip** (record the posting as skipped, and close the tab if
+`settings.closeTabOnSkip`). Re-run and Reset live in the overflow behind them —
+the footer must never grow past two visible buttons plus `⋯`, because a third
+clipped the primary action off the right edge at 390px.
+
+The Send button is found by `shared/submitDetect.ts` — a saved
+`config.submitSelector` first, then a label heuristic that **vetoes** anything
+reading "save", "draft", "cancel" or "search" and returns *nothing* rather than a
+best guess. "Save job" sits an inch from the real button on most boards, and
+pressing it loses the application silently; a greyed Apply that explains itself is
+always the better failure. `settings.closeTabOnSkip` shares `closeTabDelayMs` with
+the submit path deliberately.
+
+**Apply also requires `successSelector`.** Nothing is sent to a site whose outcome
+cannot be read back, so `applyState` is `noButton` | `noConfirmation` | `ready`
+and the modal shows a *different* note for each — the two failures need different
+actions from the user. Once the confirmation appears the modal says so (banner,
+green `Applied ✓`, and the pill), because the site's own message is routinely
+below the fold or behind the card.
 
 The modal has **two views behind a header toggle**, and Job is the default: once
 the form is filled the user's question is "do I want this job?", not "which of
@@ -234,12 +258,31 @@ dashboard.
 - **Content scripts share the PAGE's origin**, not the extension's — so the CV
   is stored in `chrome.storage.local` (base64, needs `unlimitedStorage`), NOT
   extension IndexedDB. See `cvStore.ts`.
-- **`successSelector` must be VISIBLE**, not merely present — sites pre-render
-  hidden success nodes. The `MutationObserver` in `main.ts` watches `style`/
-  `class`/`hidden` attribute flips. This is the authoritative "actually sent"
-  signal; a bare `submit` event is only the fallback for full-page-nav flows
-  (AJAX fires `submit` before the server confirms and may still fail).
-- **Never auto-submit.** Only fill and report.
+- **`successSelector` becoming VISIBLE is the ONLY "actually sent" signal.**
+  Not merely present — sites pre-render hidden success nodes; the
+  `MutationObserver` in `main.ts` watches `style`/`class`/`hidden` flips. There is
+  deliberately **no `submit`-event fallback**: the event fires before the server
+  answers, and a site that validates in JS sees it in the capture phase *and then*
+  rejects the form, which recorded applications that never happened. Never
+  reinstate it — the cost of the strictness is paid in `applyState`, not here.
+- **The confirmation is often on a different URL** (Greenhouse lands on
+  `…/jobs/<id>/confirmation`). The content script there is a fresh one that knows
+  nothing about the posting, so the background keys `applyingTabs` by tab id in
+  `chrome.storage.session` (`MSG.APPLYING`) and attributes `SUBMITTED` to the
+  posting the tab was *filling*, not to the page reporting it. Without that the
+  posting stays `opened` forever and the confirmation page is recorded instead.
+  A consequence worth knowing: an auto-created destination config has no
+  `successSelector`, so a handoff destination needs that one setup step before
+  anything there can be recorded.
+- **Never submit unprompted.** Filling never sends. The *only* thing that presses
+  a site's Send button is `Controller.apply()`, reached solely by pressing Apply
+  in the review modal — no timer, no auto-run path, and no "it looked complete"
+  heuristic may ever call it. Note this is a rule about who decides, not about
+  capability: Apply presses Send with no guard once pressed, even with required
+  fields empty.
+- **The submit heuristic must fail closed.** `findSubmitControl` returns `none`
+  rather than a best guess, and its veto list beats any positive match. Never
+  "improve" it by falling back to the highest-scoring button.
 - **Never read a job container with `textContent`.** It welds every heading,
   paragraph and bullet into one string and preserves the HTML source's own
   indentation, which is what made the description unreadable. `shared/jobText.ts`

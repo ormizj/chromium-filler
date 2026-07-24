@@ -80,6 +80,26 @@ function ensureUrl(list: JobUrlEntry[], url: string, now: number): JobUrlEntry[]
   return list.some((e) => e.url === url) ? list : [...list, makeEntry(url, now)];
 }
 
+/**
+ * Set a URL's status, adding it to the database first if it is not there yet.
+ *
+ * This is what the *user's* actions want, as opposed to the queue's. Skipping or
+ * applying happens on whatever posting is on screen, and that is routinely one
+ * they opened by hand rather than imported — for which bare `applyStatus` maps
+ * over a list containing no such entry and quietly changes nothing, so a skip
+ * the user watched happen leaves no trace. Pairing the two here rather than at
+ * each call site is deliberate: the failure is invisible, so it must not be
+ * something a caller can forget.
+ */
+export function recordStatus(
+  list: JobUrlEntry[],
+  url: string,
+  status: JobUrlStatus,
+  now: number = Date.now(),
+): JobUrlEntry[] {
+  return applyStatus(ensureUrl(list, url, now), url, status, now);
+}
+
 function statusOf(list: JobUrlEntry[], url: string): JobUrlStatus | undefined {
   return list.find((e) => e.url === url)?.status;
 }
@@ -117,6 +137,10 @@ export function linkRedirect(
  * Apply a status to `url` and to every posting it came from, following
  * `sourceUrl` upward. Submitting on the ATS is what marks the board posting
  * applied, since that is where the application actually happened. Cycle-safe.
+ *
+ * Uses `recordStatus`, so applying on a page nobody imported still records it.
+ * For the hops above the first that is a no-op — an entry named by a live
+ * `sourceUrl` is by definition already in the list.
  */
 export function applyStatusChain(
   list: JobUrlEntry[],
@@ -130,7 +154,7 @@ export function applyStatusChain(
   while (current && !seen.has(current)) {
     const at: string = current;
     seen.add(at);
-    out = applyStatus(out, at, status, now);
+    out = recordStatus(out, at, status, now);
     current = out.find((e) => e.url === at)?.sourceUrl;
   }
   return out;

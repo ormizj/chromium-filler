@@ -275,7 +275,10 @@ options "Behavior" section.
   "extract": { "jobTitle": "h1", "jobDescription": "#content" },
   "fieldOverrides": { "phone": "#candidate_tel" }, // beat the heuristics
   "cvUpload": "input[type=file]",        // override CV file input
-  "submitCv": [ { "action": "click", "selector": "#attach-cv" } ], // "Submit CV" button
+  "submitCv": [ { "action": "click", "selector": "#attach-cv" } ], // run first by Apply
+  "submitSelector": "#send",                    // the button Apply presses
+  "successSelector": "#thanks",                 // REQUIRED for Apply: the only
+                                                // proof the application landed
   "successSelector": "#application-confirmation", // reliable "sent" signal (visible)
   "autoDetect": true,                    // false = overrides only
   "redirect": {                          // two-step postings (see above)

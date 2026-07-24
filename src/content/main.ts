@@ -1,8 +1,9 @@
 /**
  * Content-script orchestrator. On a matching page it waits for the form, runs
  * prep, extracts the job info, detects + fills fields (high-confidence only),
- * and shows the review modal. Never submits. Handles popup messages, the
- * modal's actions, and click-to-pick overrides.
+ * and shows the review modal. It never sends anything on its own: the modal's
+ * Apply presses the site's Send button, and only because the user pressed Apply.
+ * Handles popup messages, the modal's actions, and click-to-pick overrides.
  */
 
 import type {
@@ -16,6 +17,7 @@ import {
   getState, getSettings, saveSettings, saveFieldOverride, clearFieldOverride,
   saveExtractSelector, clearExtractSelector, ensureConfigForUrl, mutateSiteConfig,
   saveRedirectSelector, clearRedirectSelector, type RedirectSelectorKey,
+  saveSubmitSelector, clearSubmitSelector, saveSuccessSelector, clearSuccessSelector,
 } from '../shared/storage';
 import { BUILD_ID } from '../shared/buildId';
 import { getCv, cvFileToFile } from '../shared/cvStore';
@@ -25,6 +27,8 @@ import {
   MSG, type FollowRedirectResponse, type Message, type SessionState, type StatusResponse,
 } from '../shared/messages';
 import { hostOf } from '../shared/url';
+import { isRendered } from '../shared/visible';
+import { findSubmitControl } from '../shared/submitDetect';
 import { waitForSelector } from './waitForForm';
 import { runPrepSteps } from './prep';
 import { extractJob, previewContainer } from './extract';
@@ -32,7 +36,7 @@ import { detectFields } from './fieldDetect';
 import { detectRedirect, type RedirectDetection } from './redirectDetect';
 import { fillTextField, fillFileInput, highlight, clearHighlights } from './fill';
 import { startPicker } from './picker';
-import { FillerModal } from './modal/modal';
+import { FillerModal, type ApplyState } from './modal/modal';
 import { SetupPanel, type ContainerKey, type SetupRow, type PrepRow, type PrepListKey } from './setupPanel';
 
 const CONTAINER_LABELS: Record<ContainerKey, string> = {
@@ -62,6 +66,8 @@ class Controller {
   private hasRun = false;
   private submitReported = false;
   private submitArmed = false;
+  /** The site's own confirmation appeared: this posting really was sent. */
+  private applied = false;
   private successObserver?: MutationObserver;
   /** Latest quick-apply vs. external-redirect verdict for this page. */
   private detection?: RedirectDetection;
@@ -97,55 +103,58 @@ class Controller {
   }
 
   /**
-   * Detects that the application was *actually sent* — we never submit for the
-   * user, so this watches for their submission completing. Detecting "sent"
-   * reliably is the hard part, so the policy is deliberate:
+   * Detects that the application was *actually sent*. `successSelector` becoming
+   * VISIBLE is the only thing that counts, and that is a deliberate narrowing:
    *
-   *  - If the config defines `successSelector`, THAT is the authoritative signal:
-   *    we close only when the confirmation element appears. A bare `submit` event
-   *    is ignored, because AJAX submissions fire it before the server responds
-   *    and may still fail — we must not close a tab on a failed attempt.
-   *  - If no `successSelector` is set, we fall back to the form `submit` event.
-   *    This suits full-page-navigation flows, where the tab leaves before any
-   *    in-page confirmation could render, so the submit event is all we get.
+   *  - A `submit` event proves nothing. It fires before the server answers, and
+   *    a site that validates in JS sees it in the capture phase *and then*
+   *    rejects the form — which recorded an application that never happened.
+   *  - Presence in the DOM proves nothing either: sites routinely pre-render a
+   *    hidden thank-you node and only reveal it once the server confirms.
    *
-   * Either way we report once; the background marks the URL applied and, if the
-   * setting is on, closes the tab after the configured delay.
+   * The consequence is that Apply is greyed out until a site has a
+   * `successSelector` (see `applyState`), rather than sending something whose
+   * outcome cannot be read back.
+   *
+   * The confirmation is often on a *different page* — Greenhouse lands on
+   * `…/jobs/<id>/confirmation`. That is fine: this arms on every matching page,
+   * so the fresh content script there reports, and the background attributes it
+   * to the posting this tab was filling.
    */
   private setupSubmitDetection(): void {
     if (this.submitArmed) return;
+    const selector = this.config?.successSelector;
+    if (!selector) return;
     this.submitArmed = true;
+
     const report = () => {
       if (this.submitReported) return;
       this.submitReported = true;
       this.successObserver?.disconnect();
       chrome.runtime.sendMessage({ type: MSG.SUBMITTED, url: location.href });
+      // Say so on screen. The site's own confirmation is often below the fold,
+      // or behind this very modal, so "did that go through?" is otherwise a
+      // question the user answers by scrolling around the page they just sent.
+      this.applied = true;
+      if (this.modal) this.showModal();
     };
 
-    const selector = this.config?.successSelector;
-    if (selector) {
-      // Authoritative: wait for the confirmation element to be VISIBLE. Presence
-      // alone is not enough — sites commonly pre-render a hidden success node and
-      // only reveal it after the server confirms.
-      const check = () => {
-        const el = safeQuery(selector);
-        if (el && isVisible(el)) { report(); return true; }
-        return false;
-      };
-      if (check()) return;
-      this.successObserver = new MutationObserver(() => check());
-      // Observe both structure and the attributes that flip visibility, since the
-      // reveal is often a style/class/hidden change on an existing element.
-      this.successObserver.observe(document.documentElement, {
-        childList: true,
-        subtree: true,
-        attributes: true,
-        attributeFilter: ['style', 'class', 'hidden'],
-      });
-    } else {
-      // Fallback: best-effort for navigation flows with no in-page confirmation.
-      document.addEventListener('submit', report, true);
-    }
+    // Wait for the confirmation element to be VISIBLE, not merely present.
+    const check = () => {
+      const el = safeQuery(selector);
+      if (el && isRendered(el)) { report(); return true; }
+      return false;
+    };
+    if (check()) return;
+    this.successObserver = new MutationObserver(() => check());
+    // Observe both structure and the attributes that flip visibility, since the
+    // reveal is often a style/class/hidden change on an existing element.
+    this.successObserver.observe(document.documentElement, {
+      childList: true,
+      subtree: true,
+      attributes: true,
+      attributeFilter: ['style', 'class', 'hidden'],
+    });
   }
 
   private status(): StatusResponse {
@@ -234,8 +243,25 @@ class Controller {
     }
 
     this.detectAndFill();
+    // Picking a confirmation element mid-session has to arm the watcher now,
+    // not on the next page load — `setupSubmitDetection` is a no-op until the
+    // config has a `successSelector`, so the run at startup may have skipped it.
+    this.setupSubmitDetection();
+    this.noteApplying();
     this.showModal();
     this.hasRun = true;
+  }
+
+  /**
+   * Tell the background which posting this tab is working on, so a confirmation
+   * that renders on a *different* URL is still attributed here. Only once a
+   * field was actually filled: a confirmation page that happens to match a
+   * config would otherwise overwrite the posting with its own URL.
+   */
+  private noteApplying(): void {
+    if (!this.matches.some((m) => m.filled)) return;
+    chrome.runtime.sendMessage({ type: MSG.APPLYING, url: location.href })
+      .catch(() => {});
   }
 
   /* ---------------- Two-step (redirect) postings ---------------- */
@@ -382,7 +408,7 @@ class Controller {
       this.modal = new FillerModal({
         onRerun: () => this.run(),
         onReset: () => this.reset(),
-        onSubmitCv: () => this.submitCv(),
+        onApply: () => void this.apply(),
         onConfirm: (field) => this.confirmField(field),
         onPick: (field) => this.pick(field),
         onFollow: () => { this.followed = false; void this.followRedirect(this.detection!); },
@@ -404,7 +430,8 @@ class Controller {
       jobDescription: job.description,
       jobRequirements: job.requirements,
       matches: this.matches,
-      canSubmitCv: !!this.config!.submitCv?.length,
+      applyState: this.applyState(isRedirect),
+      applied: this.applied,
       redirect: isRedirect
         ? { host: det!.href ? hostOf(det!.href) : undefined, reason: det!.reason, followed: this.followed }
         : undefined,
@@ -471,6 +498,10 @@ class Controller {
         onClearField: (field) => this.clearFieldForSetup(field),
         onPickRedirect: (key) => this.pickRedirect(key as RedirectSelectorKey),
         onClearRedirect: (key) => this.clearRedirect(key as RedirectSelectorKey),
+        onPickSubmit: () => this.pickSubmit(),
+        onClearSubmit: () => void this.clearSubmit(),
+        onPickSuccess: () => this.pickSuccess(),
+        onClearSuccess: () => void this.clearSuccess(),
         onRename: (name, pattern) => this.renameConfig(name, pattern),
         onOpenOptions: () => chrome.runtime.sendMessage({ type: MSG.OPEN_OPTIONS }),
         onDismissHelp: () => void this.dismissHelp(),
@@ -485,6 +516,11 @@ class Controller {
     clearHighlights();
     this.setupPanel?.destroy();
     this.setupPanel = undefined;
+    // Re-render an existing report against the config that was just edited —
+    // picking the Send button has to bring Apply to life now, not after a
+    // re-run that would wipe every field already filled. Never creates
+    // a modal: a page the user only came to configure has nothing to report.
+    if (this.modal) this.showModal();
   }
 
   /**
@@ -511,6 +547,7 @@ class Controller {
     }));
     const prep = toPrepRows(config.prep);
     const beforeFollow = toPrepRows(config.redirect?.beforeFollow);
+    const submitCv = toPrepRows(config.submitCv);
 
     // How this posting applies: quick-apply here, or a handoff to the employer.
     const detection = detectRedirect({ root: document, pageUrl: location.href, config: config.redirect });
@@ -592,6 +629,44 @@ class Controller {
       };
     });
 
+    // The Send button, found the same way Apply will find it. Highlighted like
+    // the field rows, so "which button is that?" is answered on the page rather
+    // than by reading a selector.
+    const found = findSubmitControl(
+      document,
+      config.submitSelector,
+      detected.map((d) => d.element).filter((e): e is HTMLElement => e != null),
+    );
+    if (found.element) highlight(found.element, found.source === 'override' ? 'high' : 'low');
+    const submitRow: SetupRow = {
+      key: 'submitSelector',
+      label: 'Send button',
+      status: found.element ? (found.source === 'override' ? 'high' : 'low') : 'none',
+      note: !config.submitSelector
+        ? (found.element ? `auto · ${clip(found.element.textContent ?? '', 40) || generateSelector(found.element)}` : 'not found — Apply is greyed out')
+        : found.element ? `saved · ${config.submitSelector}`
+        : 'saved selector · no match',
+      hasSave: !!config.submitSelector,
+    };
+
+    // The confirmation element. Unlike every other row, "not set" is never fine:
+    // it is what marks a posting applied, and Apply will not send without it.
+    const successEl = config.successSelector ? safeQuery(config.successSelector) : null;
+    if (successEl) highlight(successEl, 'high');
+    const successRow: SetupRow = {
+      key: 'successSelector',
+      label: 'Confirmation element',
+      // Green as soon as one is saved, whether or not it resolves right now:
+      // being absent is the *normal* state before a submission, and the yellow
+      // "saved selector · no match" the other rows use would cry wolf on every
+      // healthy site. There is nothing to verify until an application is sent.
+      status: config.successSelector ? 'high' : 'none',
+      note: config.successSelector
+        ? `saved · ${config.successSelector}${successEl ? ' · on screen now' : ''}`
+        : 'not set — Apply is greyed out',
+      hasSave: !!config.successSelector,
+    };
+
     this.setupPanel.render({
       name: config.name,
       urlPattern: config.urlPatterns[0] ?? '',
@@ -601,6 +676,9 @@ class Controller {
       verdict,
       redirect: redirectRows,
       beforeFollow,
+      submitCv,
+      submit: submitRow,
+      success: successRow,
       helpSeen: (await getSettings()).helpSeen,
     });
   }
@@ -624,6 +702,39 @@ class Controller {
 
   private async clearRedirect(key: RedirectSelectorKey): Promise<void> {
     if (this.config) await clearRedirectSelector(this.config.id, key);
+    await this.refreshSetup();
+  }
+
+  /**
+   * Save the button Apply presses. No `resolveControl` here, unlike a field pick:
+   * the user is pointing at a button, and the wrapper it sits in is often what
+   * actually carries the click handler — "helpfully" resolving inward would save
+   * a selector for a `<span>` that does nothing when clicked.
+   */
+  private pickSubmit(): void {
+    this.pickInto('Send button', async (el) => {
+      if (this.config) await saveSubmitSelector(this.config.id, generateSelector(el));
+    });
+  }
+
+  private async clearSubmit(): Promise<void> {
+    if (this.config) await clearSubmitSelector(this.config.id);
+    await this.refreshSetup();
+  }
+
+  /**
+   * Save the site's confirmation element. Realistically picked with a real
+   * confirmation on screen — after sending one application by hand — which is
+   * why the row says so rather than assuming it can be guessed cold.
+   */
+  private pickSuccess(): void {
+    this.pickInto('Confirmation element', async (el) => {
+      if (this.config) await saveSuccessSelector(this.config.id, generateSelector(el));
+    });
+  }
+
+  private async clearSuccess(): Promise<void> {
+    if (this.config) await clearSuccessSelector(this.config.id);
     await this.refreshSetup();
   }
 
@@ -662,7 +773,10 @@ class Controller {
 
   /* --- Prerequisite steps --- */
 
-  /** Read-modify-write one of the config's step arrays (pre-fill or pre-handoff). */
+  /**
+   * Read-modify-write one of the config's step arrays: pre-fill, pre-handoff, or
+   * the CV-confirmation steps Apply runs before it presses Send.
+   */
   private async mutatePrep(fn: (prep: PrepStep[]) => void, list: PrepListKey = 'prep'): Promise<void> {
     if (!this.config) return;
     await mutateSiteConfig(this.config.id, (c) => {
@@ -670,6 +784,12 @@ class Controller {
         const steps = [...(c.redirect?.beforeFollow ?? [])];
         fn(steps);
         c.redirect = { ...c.redirect, beforeFollow: steps };
+        return;
+      }
+      if (list === 'submitCv') {
+        const steps = [...(c.submitCv ?? [])];
+        fn(steps);
+        c.submitCv = steps;
         return;
       }
       const prep = [...(c.prep ?? [])];
@@ -741,11 +861,61 @@ class Controller {
     }, label, restore);
   }
 
-  private async submitCv(): Promise<void> {
-    if (!this.config?.submitCv?.length) return;
-    await runPrepSteps(this.config.submitCv);
-    this.detectAndFill();
-    this.showModal();
+  /**
+   * Press the site's own Send button, because the user pressed Apply. This is
+   * the one place the extension acts on the form rather than reporting on it,
+   * and it is still not an *auto*-submit: nothing here runs without that press.
+   *
+   * The CV-confirmation steps run first. On the sites that need them the file is
+   * attached but not yet accepted, so sending before they run submits an
+   * application with no CV — the exact failure `submitCv` was added to prevent.
+   * Re-scanning between the two phases is deliberate: those steps often build
+   * the rest of the form.
+   */
+  private async apply(): Promise<void> {
+    if (this.config?.submitCv?.length) {
+      try {
+        await runPrepSteps(this.config.submitCv);
+      } catch (e) {
+        console.warn(LOG, 'CV confirmation steps failed', e);
+      }
+      this.detectAndFill();
+      this.showModal();
+    }
+
+    const target = this.submitControl();
+    if (!target) {
+      // The modal already explains this: Apply is greyed and says why. Acting on
+      // a guess here is how the wrong button gets pressed.
+      console.warn(LOG, 'apply: no submit control found');
+      return;
+    }
+    target.scrollIntoView({ block: 'center' });
+    target.click();
+  }
+
+  /**
+   * Whether Apply may run, and if not, which half is missing.
+   *
+   * A confirmation element is required, not merely useful: without one there is
+   * no way to read back whether the submission was accepted, and pressing Send
+   * anyway is how a rejected application gets recorded as sent. Refusing to send
+   * what cannot be verified is the whole point — so "no confirmation configured"
+   * greys Apply exactly as hard as "no button found", and says which it is.
+   */
+  private applyState(isRedirect: boolean): ApplyState {
+    if (isRedirect) return 'noButton';
+    if (!this.config?.successSelector) return 'noConfirmation';
+    return this.submitControl() ? 'ready' : 'noButton';
+  }
+
+  /** The control Apply presses: the saved selector, else the best-scoring button. */
+  private submitControl(): HTMLElement | null {
+    return findSubmitControl(
+      document,
+      this.config?.submitSelector,
+      [...this.elements.values()],
+    ).element;
   }
 
   private reset(): void {
@@ -805,14 +975,6 @@ function resolveControl(el: Element, forFile: boolean): Element {
   const near = wrapper?.querySelector(sel);
   if (near) return near;
   return el;
-}
-
-/** True when an element is actually rendered (not display:none/hidden/zero-box). */
-function isVisible(el: HTMLElement): boolean {
-  if (el.hidden) return false;
-  const style = getComputedStyle(el);
-  if (style.display === 'none' || style.visibility === 'hidden' || style.opacity === '0') return false;
-  return el.getClientRects().length > 0;
 }
 
 const controller = new Controller();

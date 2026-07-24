@@ -17,6 +17,7 @@ function callbacks(over: Partial<SetupCallbacks> = {}): SetupCallbacks {
     onAddPrep: noop, onPickPrepTarget: noop, onMovePrep: noop, onRemovePrep: noop,
     onSetPrepMs: noop, onRunPrep: noop, onPickContainer: noop, onClearContainer: noop,
     onPickField: noop, onClearField: noop, onPickRedirect: noop, onClearRedirect: noop,
+    onPickSubmit: noop, onClearSubmit: noop, onPickSuccess: noop, onClearSuccess: noop,
     onRename: noop, onOpenOptions: noop, onClose: noop, onDismissHelp: noop,
     ...over,
   };
@@ -32,6 +33,9 @@ function data(over: Partial<SetupData> = {}): SetupData {
     verdict: 'Quick-apply — a form was found here',
     redirect: [],
     beforeFollow: [],
+    submitCv: [],
+    submit: { key: 'submitSelector', label: 'Send button', status: 'low', note: 'auto · Apply', hasSave: false },
+    success: { key: 'successSelector', label: 'Confirmation element', status: 'high', note: 'saved · #done', hasSave: true },
     helpSeen: true,
     ...over,
   };
@@ -51,10 +55,10 @@ afterEach(() => {
 });
 
 describe('setup panel help', () => {
-  it('says what the panel is for, and that nothing is submitted', () => {
+  it('says what the panel is for, and that nothing is sent unasked', () => {
     const intro = render(data()).querySelector('.cf-intro');
     expect(intro?.textContent).toMatch(/set up|teach/i);
-    expect(intro?.textContent).toMatch(/never (presses |submits)/i);
+    expect(intro?.textContent).toMatch(/sends nothing until you press/i);
   });
 
   it('gives every section a help toggle', () => {
