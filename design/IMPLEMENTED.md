@@ -38,8 +38,28 @@ primitives.css), used by both the modal's Job view and the options Queue stats.
 | Options modal-layout simulator | Measurement/clamping untouched; frame + card recolour only |
 | Getting-started checklist | Recoloured (accent-weak card) |
 
+## Follow-up: matched to `reference-updated/`
+
+The first cut was "close but not quite" against the updated mockup
+(`reference-updated/design.html`), so a second pass re-tuned it to that file — the
+current source of truth. No new architecture, all through the same token layer:
+
+- **Rounder geometry** — new `--radius-btn`/`--radius-card`/`--radius-xl` (13/14/20);
+  cards/panels, buttons, and inset rows all pick these up.
+- **Buttons** — 44px on every pointer (no denser desktop button), weight 500, 13px
+  radius. This is most of the "buttons feel different" the reskin was reported for.
+- **Two-layer `--shadow-2`**, a third text level **`--muted-2`**, and the dark palette
+  retuned so insets are *darker* than the paper (`--bg` `#26231f`, `--surface` `#211e1a`).
+- **Segmented toggle** (Job/Fields) → rounded rectangle, not a pill.
+- **Popup** → brand mark, a progress card with a big done/total number and
+  filled/skipped/waiting chips, secondary actions as a button row.
+- **Options** → folder tabs and `.switch` toggle rows in Settings.
+
+Deferred (need data, not styling): the Job-view company/location/type meta chips and
+the Settings throughput/match-rate stat cards.
+
 ## Verification
 
 `npm run typecheck`, `npx vitest run` (incl. the labels + guardrail tests), and
 `npm run build && npm run test:e2e` all green; every surface screenshotted at
-desktop and 390px in both colour schemes against `reference/`.
+desktop and 390px in both colour schemes against the reference.

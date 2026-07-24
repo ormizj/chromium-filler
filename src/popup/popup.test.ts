@@ -154,9 +154,13 @@ describe('queue session', () => {
     mockSession(session());
     await mountPopup(matched());
     expect(document.getElementById('session')!.hidden).toBe(false);
-    expect(document.getElementById('session-count')!.textContent).toBe('7 of 60 done');
-    expect(document.getElementById('session-detail')!.textContent)
-      .toContain('48 waiting · 5 open · 6 applied');
+    // Big done/total number in the progress card, per-status breakdown in chips.
+    expect(document.getElementById('session-count')!.textContent).toBe('7');
+    expect(document.getElementById('session-total')!.textContent).toBe(' / 60');
+    const chips = document.getElementById('session-chips')!.textContent;
+    expect(chips).toContain('6 filled');
+    expect(chips).toContain('1 skipped');
+    expect(chips).toContain('48 waiting');
   });
 
   it('skipping reports this posting to the background so the next one opens', async () => {

@@ -33,7 +33,7 @@
 }
 
 .cf-heading {
-  font-weight: 700;
+  font-weight: 600;
   font-size: var(--text-base);
   flex: 1;
   min-width: 0;
@@ -89,7 +89,7 @@
 
 .cf-legend {
   border: 1px solid var(--border);
-  border-radius: var(--radius-md);
+  border-radius: var(--radius-card);
   margin-bottom: var(--space-5);
   overflow: hidden;
 }
@@ -162,7 +162,7 @@
  */
 .cf-group {
   border: 1px solid var(--border);
-  border-radius: var(--radius-md);
+  border-radius: var(--radius-card);
   margin-bottom: var(--space-3);
   overflow: hidden;
 }

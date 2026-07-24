@@ -1,9 +1,19 @@
 # Soft / Warm — design system
 
-The chosen visual direction for the chromium-filler redesign. This document is the source of
-truth for values; the reference HTML in `reference/` is the source of truth for how they
-compose. Everything here maps onto the token names that already exist in
-`src/ui/tokens.css`, so implementing it is mostly a matter of changing values, not structure.
+The chosen visual direction for the chromium-filler redesign. Everything here maps onto the
+token names that already exist in `src/ui/tokens.css`, so implementing it is mostly a matter
+of changing values, not structure.
+
+> **Superseded values — read `reference-updated/design.html` for the current numbers.**
+> After the first cut shipped, the direction was re-tuned against
+> `reference-updated/design.html`, and that file is now the source of truth for how the tokens
+> compose. Where this document and the reskin disagree, the reskin (and the updated reference)
+> win. The deltas: the geometry is **rounder** (new `--radius-btn`/`--radius-card`/`--radius-xl`
+> = 13/14/20 — the "Radii … stay as they are" note below is no longer true); **buttons are
+> 44px on every pointer** (no denser desktop size) at **weight 500** (controls/chips are 500,
+> not 600); `--shadow-2` gained a **second contact layer**; a **third text level `--muted-2`**
+> (`#a29b8f` / `#807a6f`) was added; and the **dark** palette was retuned so insets sit
+> *darker* than the paper (`--bg` `#26231f`, `--surface` `#211e1a`) rather than lighter.
 
 ## Design intent
 

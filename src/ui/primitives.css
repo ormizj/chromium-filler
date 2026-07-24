@@ -52,13 +52,13 @@ button.cf-btn {
   align-items: center;
   justify-content: center;
   gap: var(--space-2);
-  font: 600 var(--text-md) / 1.2 var(--font);
+  font: 500 var(--text-base) / 1.2 var(--font);
   color: var(--fg);
   background: var(--surface);
   border: 1px solid var(--border);
-  border-radius: var(--radius-md);
+  border-radius: var(--radius-btn);
   padding: var(--space-2) var(--space-4);
-  min-height: 32px;
+  min-height: var(--tap);
   cursor: pointer;
   white-space: nowrap;
   transition: background-color 120ms ease, border-color 120ms ease;
@@ -131,11 +131,11 @@ button.cf-btn[aria-disabled='true']:hover {
   border-color: var(--border);
 }
 
-/* Touch: every control gets a full-size target. Desktop keeps the denser 32px —
-   the two are different jobs, not one compromise. */
+/* Every control is a full 44px target (`.btn`/`button.cf-btn` set it above; this
+   extends the floor to the other native controls on touch). The reference sizes
+   its buttons at one comfortable height everywhere, so desktop no longer drops to
+   a denser 32px. */
 @media (pointer: coarse) {
-  .btn,
-  button.cf-btn,
   button,
   select,
   input[type='file'] {
@@ -278,7 +278,7 @@ button.cf-btn[aria-disabled='true']:hover {
   background: var(--bg);
   color: var(--fg);
   border: 1px solid var(--border);
-  border-radius: var(--radius-lg);
+  border-radius: var(--radius-xl);
   box-shadow: var(--shadow-2);
   font: var(--text-base) / 1.5 var(--font);
   z-index: 2147483645;
@@ -320,7 +320,7 @@ button.cf-btn[aria-disabled='true']:hover {
     bottom: 0;
     width: 100%;
     max-width: 100%;
-    border-radius: var(--radius-lg) var(--radius-lg) 0 0;
+    border-radius: var(--radius-xl) var(--radius-xl) 0 0;
     padding-bottom: env(safe-area-inset-bottom, 0);
   }
 }
@@ -452,13 +452,13 @@ button.cf-btn[aria-disabled='true']:hover {
   display: inline-flex;
   align-items: center;
   gap: var(--space-1);
-  padding: 2px var(--space-3);
+  padding: 4px 10px;
   border-radius: var(--radius-pill);
   border: 1px solid var(--border);
   background: var(--surface);
   color: var(--muted);
   font-size: var(--text-xs);
-  font-weight: 600;
+  font-weight: 500;
   white-space: nowrap;
 }
 

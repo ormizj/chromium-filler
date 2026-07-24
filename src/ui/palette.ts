@@ -42,7 +42,7 @@ export const DARK_PALETTE: Palette = {
   warn: '#e0b356',
   err: '#e07a6c',
   ink: '#f3efe8',
-  onInk: '#221e1a',
+  onInk: '#26231f',
   neutral: '#453f37',
   onStatus: '#ffffff',
 };

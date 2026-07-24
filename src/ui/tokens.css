@@ -20,16 +20,23 @@
      the two shadow surfaces used to have this inverted relative to the options
      page, so they disagreed at a glance.
 
-     Soft / Warm: warm paper neutrals rather than cool greys. See
-     design/design-system.md for the mapping. */
-  --canvas: #f4efe7;
+     Soft / Warm: warm paper neutrals rather than cool greys. Values follow
+     design/reference-updated/design.html (the current source of truth); see
+     design/design-system.md for the token mapping. `--muted-2` is a third,
+     lighter text level (the reference's `--ink-3`) for captions and de-emphasized
+     metadata. `--track`/`--track-off` are the progress-bar and off-switch rails
+     (the reference's `--bar`/`--bar-off`). */
+  --canvas: #f4f1ec;
   --bg: #fffdfa;
-  --surface: #f4efe7;
-  --surface-2: #faf6ee;
+  --surface: #f7f3ec;
+  --surface-2: #fbf8f2;
   --fg: #2c2a26;
   --muted: #6f6a61;
+  --muted-2: #a29b8f;
   --border: #eae4da;
   --border-strong: #ded6c9;
+  --track: #e9e2d6;
+  --track-off: #ddd5c8;
 
   /* Brand + status. A single clay accent; muted status colours paired with the
      soft `*-weak` tints the chips are built from. `--accent-fg` is what stays
@@ -72,6 +79,12 @@
   --radius-sm: 6px;
   --radius-md: 8px;
   --radius-lg: 12px;
+  /* Warmer, rounder than the old scale — the reference reads soft through
+     rounding as much as colour. `--radius-btn` is every button, `--radius-card`
+     an inset card/row, `--radius-xl` an outer sheet or panel. */
+  --radius-btn: 13px;
+  --radius-card: 14px;
+  --radius-xl: 20px;
   --radius-pill: 999px;
 
   --space-1: 4px;
@@ -82,7 +95,7 @@
   --space-6: 16px;
   --space-7: 24px;
 
-  --font: system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
+  --font: 'Inter', system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
   --mono: ui-monospace, SFMono-Regular, Menlo, monospace;
   --text-xs: 11px;
   --text-sm: 12px;
@@ -90,25 +103,34 @@
   --text-base: 14px;
   --text-lg: 17px;
   --text-xl: 22px;
+  --text-2xl: 24px;
+  --text-3xl: 32px;
 
   /* Warm, soft shadows — the direction reads warm through colour and shadow, not
-     through new geometry. */
+     through new geometry. `--shadow-2` is two layers (a soft cast plus a close
+     contact shadow) so a floating sheet reads grounded rather than pasted on. */
   --shadow-1: 0 1px 2px rgba(80, 60, 40, 0.1);
-  --shadow-2: 0 18px 40px -22px rgba(80, 60, 40, 0.35);
+  --shadow-2: 0 18px 40px -24px rgba(80, 60, 40, 0.35), 0 2px 6px -3px rgba(80, 60, 40, 0.12);
   --ring: 0 0 0 2px var(--bg), 0 0 0 4px var(--accent);
 }
 
 @media (prefers-color-scheme: dark) {
   :root,
   :host {
+    /* Retuned to the reference's dark values. Note the inset (`--surface`) is now
+       a shade DARKER than the paper (`--bg`), not lighter — the reference recesses
+       insets in dark rather than raising them, and matching it is the point here. */
     --canvas: #1a1815;
-    --bg: #221e1a;
-    --surface: #2c2823;
-    --surface-2: #322d27;
+    --bg: #26231f;
+    --surface: #211e1a;
+    --surface-2: #2b2721;
     --fg: #f3efe8;
     --muted: #b3aca0;
+    --muted-2: #807a6f;
     --border: #37322b;
     --border-strong: #453f37;
+    --track: #332e28;
+    --track-off: #332e28;
 
     --accent: #e08a54;
     --accent-fg: #2a1a10;
@@ -121,12 +143,13 @@
     --err-weak: #3a2622;
 
     /* A gradient glows against the dark card, so the primary falls back to the
-       solid accent and drops its coloured lift. */
+       solid accent — but it keeps a soft accent-tinted lift, as the reference does,
+       so the primary still stands off the dark surface. */
     --btn-primary: var(--accent);
-    --btn-primary-shadow: none;
+    --btn-primary-shadow: 0 6px 14px -6px rgba(224, 138, 84, 0.5);
 
     --shadow-1: 0 1px 2px rgba(0, 0, 0, 0.5);
-    --shadow-2: 0 24px 50px -26px rgba(0, 0, 0, 0.7);
+    --shadow-2: 0 26px 54px -28px rgba(0, 0, 0, 0.7);
   }
 }
 

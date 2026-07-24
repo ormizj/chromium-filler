@@ -152,10 +152,20 @@ if a second primary fill appears, if a status is missing its colour/icon/word, o
 if `palette.ts` drifts from the tokens it mirrors. It reads the sources off disk
 because Vite hands vitest an *empty* string for a `.css?inline` import.
 
-Mobile is the priority target (Kiwi). `--tap: 44px` under `@media (pointer:
-coarse)` is the floor for every control; status is never colour alone (dots carry
-an icon shape); and the modal/setup sheets become full-width bottom sheets under
-640px.
+Mobile is the priority target (Kiwi). `--tap: 44px` is the height of every
+button on *every* pointer (the reskin matched `design/reference-updated/` and
+dropped the old denser 32px desktop button — buttons are one comfortable size
+everywhere now), and `@media (pointer: coarse)` extends that floor to the other
+native controls; status is never colour alone (dots carry an icon shape); and the
+modal/setup sheets become full-width bottom sheets under 640px.
+
+`design/reference-updated/design.html` is the current visual source of truth (it
+supersedes the values in `design/design-system.md`): rounder than the first cut
+(`--radius-btn/-card/-xl` = 13/14/20), buttons and chips at weight 500, a
+two-layer `--shadow-2`, a third text level `--muted-2`, and a dark palette whose
+insets are *darker* than the paper (not lighter). The Job/Fields toggle is a
+rounded-rectangle segmented control; the options Settings tab uses folder tabs and
+`.switch` toggles; the popup leads with a progress card + status chips.
 
 ### In-app help
 `src/shared/help.ts` is the **only** place the extension explains itself. Every

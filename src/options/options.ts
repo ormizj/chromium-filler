@@ -332,11 +332,18 @@ async function initSettings(): Promise<void> {
   closeDelay.addEventListener('change', persist);
   redirectTarget.addEventListener('change', persist);
 
-  // A `?` on each control, disclosing the same words the setup panel uses. The
-  // panel goes after the control's own <label>, so it reads as an answer to it.
-  attachHelp(autoRun.parentElement!, SETTINGS_HELP.autoRunOnLoad);
-  attachHelp(closeOnSubmit.parentElement!, SETTINGS_HELP.closeTabOnSubmit);
-  attachHelp(closeOnSkip.parentElement!, SETTINGS_HELP.closeTabOnSkip);
+  // A `?` on each toggle row, disclosing the same words the setup panel uses. The
+  // switch itself is a <label> (so tapping it flips the box); the `?` goes in the
+  // row's text block instead, and its panel opens below the whole row.
+  const attachRowHelp = (input: HTMLInputElement, entry: HelpEntry): void => {
+    const row = input.closest('.setrow') as HTMLElement;
+    // Anchor the `?` in the title so it sits inline with it, but open the panel
+    // below the whole row (past any description line).
+    attachHelp(row.querySelector('h5') as HTMLElement, entry, row);
+  };
+  attachRowHelp(autoRun, SETTINGS_HELP.autoRunOnLoad);
+  attachRowHelp(closeOnSubmit, SETTINGS_HELP.closeTabOnSubmit);
+  attachRowHelp(closeOnSkip, SETTINGS_HELP.closeTabOnSkip);
   // These two are column labels, so the `?` hangs off the caption while the
   // panel still opens below the whole field.
   attachHelp($('close-delay-label'), SETTINGS_HELP.closeTabDelayMs, closeDelay.parentElement!);

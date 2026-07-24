@@ -10,6 +10,7 @@
   <body>
     <div class="wrap">
       <header>
+        <span class="mark" aria-hidden="true">F</span>
         <h1>Chromium Filler</h1>
         <span id="site-status" class="chip">…</span>
       </header>
@@ -22,11 +23,12 @@
       <a id="nudge" class="nudge" href="#" hidden></a>
 
       <div id="session" class="session" hidden>
-        <div class="progress">
-          <b id="session-count"></b>
-          <small id="session-detail"></small>
+        <div class="prog">
+          <div class="prog-n"><b id="session-count"></b><small id="session-total"></small></div>
+          <div class="prog-cap" id="session-detail"></div>
           <div class="bar"><i id="session-bar"></i></div>
         </div>
+        <div class="meta" id="session-chips"></div>
         <button id="session-skip" class="btn">Skip &amp; next</button>
       </div>
 

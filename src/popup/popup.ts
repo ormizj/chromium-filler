@@ -18,8 +18,10 @@ const openOptions = document.getElementById('open-options') as HTMLAnchorElement
 const openQueue = document.getElementById('open-queue') as HTMLAnchorElement;
 const sessionBox = document.getElementById('session')!;
 const sessionCount = document.getElementById('session-count')!;
+const sessionTotal = document.getElementById('session-total')!;
 const sessionDetail = document.getElementById('session-detail')!;
 const sessionBar = document.getElementById('session-bar')!;
+const sessionChips = document.getElementById('session-chips')!;
 const sessionSkip = document.getElementById('session-skip') as HTMLButtonElement;
 const nudge = document.getElementById('nudge') as HTMLAnchorElement;
 
@@ -95,11 +97,31 @@ function renderSession(): void {
   openQueue.hidden = active || !p || p.queued === 0;
 
   if (!active || !p) return;
-  sessionCount.textContent = `${p.done} of ${p.total} done`;
-  sessionDetail.textContent = `${p.queued} waiting · ${p.inFlight} open · ${p.applied} applied`;
+  // The prominent progress card: a big done/total number, a caption, and the
+  // fill bar — the reference's popup lead. The per-status breakdown moves to the
+  // chips below, where filled / skipped / waiting read at a glance.
+  sessionCount.textContent = `${p.done}`;
+  sessionTotal.textContent = ` / ${p.total}`;
+  sessionDetail.textContent = 'postings done this session';
   sessionBar.style.width = `${Math.round(p.ratio * 100)}%`;
+  renderSessionChips(p.applied, p.skipped, p.queued);
   // Only offer Skip for a page that is actually one of the session's postings.
   sessionSkip.disabled = !tabUrl;
+}
+
+/** filled / skipped / waiting, as the three tinted chips the reference popup shows. */
+function renderSessionChips(applied: number, skipped: number, queued: number): void {
+  const chip = (cls: string, text: string): HTMLSpanElement => {
+    const s = document.createElement('span');
+    s.className = cls;
+    s.textContent = text;
+    return s;
+  };
+  sessionChips.replaceChildren(
+    chip('chip ok', `${applied} filled`),
+    chip('chip warn', `${skipped} skipped`),
+    chip('chip', `${queued} waiting`),
+  );
 }
 
 /** Open the on-page visual Setup panel in the active tab, then close the popup. */

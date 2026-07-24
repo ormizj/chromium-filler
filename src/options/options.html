@@ -120,18 +120,26 @@
         <section id="settings-section">
           <h2>Behavior</h2>
           <p class="hint">These save as soon as you change them.</p>
-          <label class="check"><input type="checkbox" id="auto-run" /> Auto-run when a matching page loads</label>
-          <label class="check"><input type="checkbox" id="close-on-submit" /> Auto-close the tab after I submit an application</label>
-          <p class="hint" style="margin: 6px 0 0;">
-            "Sent" is detected per site via that config's <code>successSelector</code>
-            (a confirmation element) — the reliable signal. Without one, a plain form
-            submit is used as a fallback (navigation flows only).
-          </p>
-          <label class="check" style="margin-top: 8px;"><input type="checkbox" id="close-on-skip" /> Auto-close the tab after I skip a posting</label>
-          <p class="hint" style="margin: 6px 0 0;">
-            Skip is the review modal's "not this one". The queue moves on to the next
-            posting either way — this only decides whether the tab is left open.
-          </p>
+          <div class="settings-list">
+            <div class="setrow">
+              <div class="setrow-text"><h5>Auto-run when a matching page loads</h5></div>
+              <label class="switch"><input type="checkbox" id="auto-run" class="switch-input" /><span class="switch-track" aria-hidden="true"><i></i></span></label>
+            </div>
+            <div class="setrow">
+              <div class="setrow-text">
+                <h5>Auto-close the tab after I submit</h5>
+                <p>"Sent" is detected per site via that config's <code>successSelector</code>. Without one, a plain form submit is the fallback (navigation flows only).</p>
+              </div>
+              <label class="switch"><input type="checkbox" id="close-on-submit" class="switch-input" /><span class="switch-track" aria-hidden="true"><i></i></span></label>
+            </div>
+            <div class="setrow">
+              <div class="setrow-text">
+                <h5>Auto-close the tab after I skip a posting</h5>
+                <p>The queue moves on to the next posting either way — this only decides whether the tab is left open.</p>
+              </div>
+              <label class="switch"><input type="checkbox" id="close-on-skip" class="switch-input" /><span class="switch-track" aria-hidden="true"><i></i></span></label>
+            </div>
+          </div>
           <label class="fld" style="max-width: 240px; margin-top: 8px;">
             <!-- The caption is wrapped so the `?` sits on the label's line
                  rather than below the input, which a column flex would do. -->

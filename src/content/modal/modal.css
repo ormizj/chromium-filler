@@ -47,15 +47,15 @@
 /**
  * The header toggle. It is a segmented control rather than two plain buttons so
  * that "which view am I in" is answered by shape, not just by weight — on a phone
- * the header is read at a glance between taps.
+ * the header is read at a glance between taps. A rounded rectangle (not a pill),
+ * on the recessed `--surface` track, matching the reference toggle.
  */
 .cf-views {
   display: flex;
   flex: none;
   gap: 2px;
-  padding: 2px;
-  border: 1px solid var(--border);
-  border-radius: var(--radius-pill);
+  padding: var(--space-1);
+  border-radius: var(--radius-lg);
   background: var(--surface);
 }
 
@@ -63,11 +63,11 @@ button.cf-view {
   display: inline-flex;
   align-items: center;
   gap: var(--space-1);
-  font: 600 var(--text-sm) / 1 var(--font);
+  font: 500 var(--text-sm) / 1 var(--font);
   color: var(--muted);
   background: transparent;
   border: none;
-  border-radius: var(--radius-pill);
+  border-radius: var(--radius-md);
   padding: var(--space-2) var(--space-4);
   min-height: 26px;
   cursor: pointer;
@@ -101,9 +101,10 @@ button.cf-view .cf-dot {
 /* ---------------- Job view ---------------- */
 
 .cf-title {
-  font-size: var(--text-lg);
-  font-weight: 700;
-  line-height: 1.3;
+  font-size: var(--text-2xl);
+  font-weight: 600;
+  line-height: 1.2;
+  letter-spacing: -0.01em;
   margin: 0 0 var(--space-4);
 }
 

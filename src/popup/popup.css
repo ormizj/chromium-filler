@@ -22,13 +22,33 @@ body {
 header {
   display: flex;
   align-items: center;
-  justify-content: space-between;
   gap: var(--space-3);
+}
+
+/* The brand mark: an accent rounded square with the wordmark's initial, the
+   reference popup's identity anchor. */
+.mark {
+  flex: none;
+  width: 30px;
+  height: 30px;
+  border-radius: 9px;
+  background: var(--accent);
+  color: var(--accent-fg);
+  display: grid;
+  place-items: center;
+  font-weight: 600;
+  font-size: 15px;
 }
 
 h1 {
   font-size: 15px;
+  font-weight: 600;
   margin: 0;
+}
+
+/* The site-status chip sits at the far right of the brand row. */
+#site-status {
+  margin-left: auto;
 }
 
 .detail {
@@ -66,7 +86,7 @@ h1 {
 #primary {
   width: 100%;
   min-height: var(--tap);
-  border-radius: var(--radius-lg);
+  border-radius: var(--radius-btn);
   font-size: 15px;
 }
 
@@ -75,80 +95,101 @@ h1 {
 /**
  * Only rendered while a session is running. It is the popup's answer to "where
  * am I in these 60 links" — the question the old popup could not answer at all.
+ * A prominent progress card (big done/total number + bar), the per-status chips,
+ * and the Skip control, stacked — the reference popup's lead block.
  */
 .session {
   display: flex;
-  align-items: center;
-  gap: var(--space-3);
+  flex-direction: column;
+  gap: var(--space-4);
   margin-bottom: var(--space-5);
-  padding: var(--space-3) var(--space-4);
-  border: 1px solid var(--border);
-  border-radius: var(--radius-md);
-  background: var(--surface);
 }
 
 .session[hidden] {
   display: none;
 }
 
-.session .progress {
-  flex: 1;
-  min-width: 0;
+/* The recessed progress card. */
+.prog {
+  background: var(--surface);
+  border-radius: var(--radius-card);
+  padding: var(--space-6);
 }
 
-.session .progress b {
-  display: block;
-  font-size: var(--text-md);
+.prog-n {
+  font-size: var(--text-3xl);
+  font-weight: 600;
+  line-height: 1;
+}
+.prog-n small {
+  font-size: 15px;
+  font-weight: 500;
+  color: var(--muted-2);
 }
 
-.session .progress small {
-  display: block;
+.prog-cap {
+  margin-top: 5px;
+  font-size: var(--text-sm);
   color: var(--muted);
-  font-size: var(--text-xs);
 }
 
-.session .bar {
-  height: 4px;
-  margin-top: var(--space-1);
+.bar {
+  height: 8px;
+  margin-top: var(--space-5);
   border-radius: var(--radius-pill);
-  background: var(--border);
+  background: var(--track);
   overflow: hidden;
 }
 
-.session .bar > i {
+.bar > i {
   display: block;
   height: 100%;
   background: var(--accent);
+  border-radius: var(--radius-pill);
   transition: width 200ms ease;
 }
 
+/* The filled / skipped / waiting chip row. */
+.meta {
+  display: flex;
+  gap: var(--space-3);
+  flex-wrap: wrap;
+}
+
+#session-skip {
+  width: 100%;
+}
+
+/* The navigational actions as secondary buttons, wrapping two-up like the
+   reference's Reset/Queue row — a lone visible one takes the full width. */
 .links {
   margin-top: var(--space-5);
   display: flex;
-  flex-direction: column;
-  gap: var(--space-2);
-  text-align: center;
+  flex-wrap: wrap;
+  gap: var(--space-3);
 }
 .links a {
-  color: var(--accent);
+  flex: 1 1 140px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: var(--tap);
+  padding: 0 var(--space-4);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-btn);
+  background: var(--surface);
+  color: var(--fg);
   text-decoration: none;
-  font-size: var(--text-md);
-  padding: var(--space-1);
+  font-size: var(--text-base);
+  font-weight: 500;
+  text-align: center;
 }
 .links a[hidden] {
   display: none;
 }
 .links a:hover {
-  text-decoration: underline;
-}
-
-@media (pointer: coarse) {
-  .links a {
-    min-height: var(--tap);
-    display: flex;
-    align-items: center;
-    justify-content: center;
-  }
+  background: var(--surface-2);
+  border-color: var(--border-strong);
 }
 
 .build {
