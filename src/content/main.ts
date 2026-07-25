@@ -437,6 +437,7 @@ class Controller {
       jobTitle: job.title,
       jobDescription: job.description,
       jobRequirements: job.requirements,
+      meta: job.meta,
       matches: this.matches,
       applyState: this.applyState(isRedirect),
       applied: this.applied,

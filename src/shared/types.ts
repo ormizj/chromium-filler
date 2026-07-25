@@ -86,8 +86,21 @@ export interface SiteConfig {
   waitTimeoutMs?: number;
   /** Prerequisite steps run automatically before filling. */
   prep?: PrepStep[];
-  /** Selectors for pulling the job title, description + requirements into the modal. */
-  extract: { jobTitle?: string; jobDescription?: string; jobRequirements?: string };
+  /**
+   * Selectors for pulling the posting into the modal: the title, description and
+   * requirements containers, plus optional overrides for the three meta facts
+   * (company / location / employment type). The meta three are read from the page's
+   * JSON-LD by default (`shared/jobMeta.ts`) and only need a selector on a board
+   * that publishes none or publishes it wrong.
+   */
+  extract: {
+    jobTitle?: string;
+    jobDescription?: string;
+    jobRequirements?: string;
+    company?: string;
+    location?: string;
+    employmentType?: string;
+  };
   /** Explicit selector overrides per field; these always win over heuristics. */
   fieldOverrides?: Partial<Record<FieldKey, string>>;
   /** Override selector for the CV file input. */

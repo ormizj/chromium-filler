@@ -96,8 +96,54 @@ been ported. All fixed in the token/primitive layer plus two render changes:
 - **The options folder tabs** sat 16px left of their panel with a rule cutting
   across the active tab and 32px of air below it. Tab and panel are one sheet now.
 
+## Fourth pass: layout and interaction weight
+
+The palette matched after the second pass and the surface *tones* after the third.
+What was left was structure — where things sit, and how loud each control is. Found
+by screenshotting every surface (desktop + 390px, light + dark, and each modal
+state) beside **both** references and comparing them one at a time, which is also
+what turned up the fact that the two references answer different questions:
+`reference-updated/design.html` is authoritative for values, and
+`reference/states-gallery.html` for the flows and the per-row controls it is the
+only place that draws.
+
+- **Row actions are no longer the primary fill.** The modal's `Confirm` and the
+  setup panel's `Pick` / `Re-pick` / `Run steps` were coral gradients — four
+  competing CTAs in one setup panel, and a sixteen-row report drawing sixteen
+  buttons louder than Apply. Both references draw them as plain buttons.
+  `modal.test.ts` now asserts exactly one `.primary` per card.
+- **Overflow menu items are `.btn-ghost`** (the gallery's `.btn.ghost`); a bordered
+  button inside a bordered popover read as a stack of boxes. The selector list in
+  primitives.css spells `button.cf-btn.btn-ghost` too, or the shadow vocabulary's
+  own class wins on specificity.
+- **Popup secondary actions** are one- or two-word labels ("Site setup", "Queue",
+  "Options") instead of sentences with arrows, which wrapped inside 360px and made
+  the row ragged; `.links a` is `flex: 1 1 0` + `nowrap` so it cannot recur.
+- **The session strip has the reference's progress dots.** `shared/queue.progressDots`
+  (pure, unit-tested) is literal up to a cap and proportional past it, always
+  keeping one dot for the posting that is open.
+- **Options follows the reference's layering literally**: the tab panel is the
+  recessed body (`--surface`, and the active folder tab takes the same tone) and its
+  sections, rows, stat tiles and bare controls are paper objects on it, with insets
+  *inside* an object going back to `--surface`. This is the inverse of the third
+  pass, which was self-consistent but not what the reference draws — see CLAUDE.md
+  → "UI layer" for the alternation rule.
+- **Settings is a two-column grid** of rows, as the reference's body is, and the two
+  loose controls (close delay, redirect target) are now rows themselves — a value on
+  the right like the reference's "Batch size · 3", and a stacked row for the select
+  whose options are sentences. Each row's caption comes from
+  `SETTINGS_HELP[…].short` rather than from the HTML.
+- **The Job view leads with the meta chips** the reference shows, and they are real:
+  `shared/jobMeta.ts` reads company / location / employment type from the posting's
+  own `JobPosting` JSON-LD (what every board emits for Google Jobs), with optional
+  `extract.company/location/employmentType` selectors ahead of it and `og:site_name`
+  behind. `TELECOMMUTE` becomes "Remote (Berlin, DE)", `FULL_TIME` becomes
+  "Full-time", anything unreadable is left out and the chip is simply not rendered.
+  One E2E fixture carries a JSON-LD block so the path is proven in a real browser.
+
 ## Verification
 
-`npm run typecheck`, `npx vitest run` (incl. the labels + guardrail tests), and
-`npm run build && npm run test:e2e` all green; every surface screenshotted at
-desktop and 390px in both colour schemes against the reference.
+`npm run typecheck`, `npx vitest run` (406 tests, incl. the labels + guardrail +
+`jobMeta` + `progressDots` tests), and `npm run build && npm run test:e2e` (25
+specs) all green; every surface screenshotted at desktop and 390px in both colour
+schemes against the reference.

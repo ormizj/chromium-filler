@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import type { JobUrlEntry, JobUrlStatus } from './types';
 import { makeEntry } from './jobUrls';
-import { nextBatch, queueProgress } from './queue';
+import { nextBatch, queueProgress, progressDots, type QueueProgress } from './queue';
 
 /** Build a list from `[url, status]` pairs, preserving order. */
 function list(...pairs: Array<[string, JobUrlStatus]>): JobUrlEntry[] {
@@ -82,5 +82,45 @@ describe('queueProgress', () => {
     expect(queueProgress([], [])).toEqual({
       total: 0, queued: 0, inFlight: 0, applied: 0, skipped: 0, done: 0, ratio: 0,
     });
+  });
+});
+
+describe('progressDots', () => {
+  const progress = (over: Partial<QueueProgress> = {}): QueueProgress => ({
+    total: 0, queued: 0, inFlight: 0, applied: 0, skipped: 0, done: 0, ratio: 0,
+    ...over,
+  });
+
+  it('gives a small queue one dot per posting', () => {
+    expect(progressDots(progress({ total: 5, done: 2, inFlight: 1, queued: 2 })))
+      .toEqual(['done', 'done', 'now', 'waiting', 'waiting']);
+  });
+
+  it('has no "now" dot when no tab is open', () => {
+    expect(progressDots(progress({ total: 3, done: 1, queued: 2 })))
+      .toEqual(['done', 'waiting', 'waiting']);
+  });
+
+  it('scales a long queue down to the cap instead of drawing sixty dots', () => {
+    // The strip is one line inside a 380px card; the dots are a glance at "how far
+    // through am I", so past the cap they become proportional rather than literal.
+    const dots = progressDots(progress({ total: 60, done: 9, inFlight: 1, queued: 50 }), 7);
+    expect(dots).toHaveLength(7);
+    expect(dots.filter((d) => d === 'done')).toHaveLength(1);
+    expect(dots.filter((d) => d === 'now')).toHaveLength(1);
+  });
+
+  it('keeps room for the "now" dot when progress would round up to the whole row', () => {
+    const dots = progressDots(progress({ total: 60, done: 59, inFlight: 1, queued: 0 }), 7);
+    expect(dots).toEqual(['done', 'done', 'done', 'done', 'done', 'done', 'now']);
+  });
+
+  it('fills the row when everything is done', () => {
+    expect(progressDots(progress({ total: 4, done: 4, applied: 4, ratio: 1 })))
+      .toEqual(['done', 'done', 'done', 'done']);
+  });
+
+  it('draws nothing for an empty queue — an empty row of dots is not progress', () => {
+    expect(progressDots(progress())).toEqual([]);
   });
 });

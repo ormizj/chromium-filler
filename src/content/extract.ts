@@ -11,6 +11,7 @@
 
 import type { SiteConfig } from '../shared/types';
 import { blocksToText, extractBlocks, type JobBlock } from '../shared/jobText';
+import { readJobMeta, type JobMeta } from '../shared/jobMeta';
 
 export type ContainerKey = 'jobTitle' | 'jobDescription' | 'jobRequirements';
 
@@ -82,6 +83,8 @@ export interface ExtractedJob {
   title?: string;
   description: JobBlock[];
   requirements: JobBlock[];
+  /** Company / location / type, for the modal's chips. Any or all may be absent. */
+  meta: JobMeta;
 }
 
 export function extractJob(config: SiteConfig): ExtractedJob {
@@ -92,5 +95,8 @@ export function extractJob(config: SiteConfig): ExtractedJob {
     title: (title.text || document.title).replace(/\s+/g, ' ').trim(),
     description: previewContainer(config, 'jobDescription').blocks,
     requirements: previewContainer(config, 'jobRequirements').blocks,
+    // Not a container walk: these three are single facts, read from the posting's
+    // structured data rather than from its prose. See shared/jobMeta.ts.
+    meta: readJobMeta(document, config.extract),
   };
 }

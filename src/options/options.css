@@ -4,12 +4,20 @@
  */
 
 /**
- * Surface layering in Soft/Warm: the page is `--canvas`, the panels are the
- * paper `--bg` that floats on it, and anything inset within a panel (inputs,
- * secondary buttons, list rows, stat tiles) is `--surface` — which is the same
- * warm tone as the canvas, so it reads as a well cut into the paper. This is the
- * inverse of the old cool palette, where the page was white and panels were the
- * off-white; every `--surface`/`--bg` choice below follows from it.
+ * Surface layering, following the reference literally
+ * (`design/reference-updated/design.html` → `.opt-body` + `.card`/`.setrow`): the
+ * page behind everything is `--canvas`, a tab's panel is the recessed **body**
+ * `--surface` that the active folder tab joins, and every object standing on that
+ * body — a section card, a settings row, a queue row, a stat tile, a bare input —
+ * is the paper `--bg` with a hairline border.
+ *
+ * So the alternation is canvas → recessed body → paper object, and it continues
+ * one more step *inside* a paper object: an inset there (the status `<select>` in a
+ * queue row, the batch-size input) goes back to `--surface`. That alternation is
+ * the whole rule; if a new element looks flat, it is sitting on its own tone.
+ *
+ * This is the inverse of what the page did before — a paper panel holding recessed
+ * rows — which was self-consistent but not what the reference draws.
  */
 body {
   margin: 0;
@@ -102,8 +110,10 @@ h3 {
   white-space: nowrap;
 }
 
+/* The active tab takes the BODY's tone, not the paper's — tab and panel are one
+   sheet, and the sheet under the tabs is the recessed body. */
 .tab[aria-selected='true'] {
-  background: var(--bg);
+  background: var(--surface);
   color: var(--fg);
 }
 
@@ -111,8 +121,9 @@ h3 {
   display: none;
 }
 
+/* A section is the recessed body of its tab: the objects inside it are the paper. */
 section {
-  background: var(--bg);
+  background: var(--surface);
   border: 1px solid var(--border);
   border-radius: var(--radius-xl);
   padding: var(--space-6);
@@ -158,17 +169,30 @@ label.fld {
   color: var(--muted);
 }
 
+/* A control standing on the recessed body is paper, like every other object there.
+   The nested case — a control inside a paper row — is the exception below. */
 input,
 textarea,
 select {
   width: 100%;
   font: inherit;
   color: var(--fg);
-  background: var(--surface);
+  background: var(--bg);
   border: 1px solid var(--border);
   border-radius: var(--radius-md);
   padding: var(--space-3) var(--space-4);
   min-height: var(--tap);
+}
+
+/* One step further in: an inset inside a paper object goes back to `--surface`,
+   or a paper control on a paper row would have only its border to show for it. */
+.setrow input,
+.setrow select,
+.setrow textarea,
+.session-panel input,
+.urls li input,
+.urls li select {
+  background: var(--surface);
 }
 input[type='file'] {
   padding: var(--space-2);
@@ -226,7 +250,9 @@ button.primary:hover {
  * do it at a specificity this would otherwise outrank.
  */
 button:not(.primary, .tab, .filter, .chip, .sim-handle, .sim-grip):hover {
-  background: var(--surface);
+  /* Half a step off the paper, not a full one: a hover that lands exactly on the
+     recessed body's own tone makes the button look like a hole in it. */
+  background: var(--surface-2);
   border-color: var(--border-strong);
 }
 button:disabled {
@@ -264,24 +290,30 @@ label.check input {
  * checkbox (visually hidden) so every existing change handler and the saved
  * state work unchanged — only the presentation is the switch.
  */
+/**
+ * Two-up on a wide screen, as the reference's settings body is: a column of
+ * full-width rows on a 820px page left a stripe of empty body beside every switch
+ * and pushed the modal-layout simulator below the fold. One column under 640px,
+ * the breakpoint the rest of the design system uses — `auto-fit` does the
+ * collapsing, so the floor is what decides it rather than a second media query.
+ */
 .settings-list {
-  display: flex;
-  flex-direction: column;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
   gap: var(--space-4);
+  align-items: start;
 }
 
-/* Inset into the panel, like every other row on this page (`.urls li`, the
-   session panel). On the paper `--bg` these were the same tone as the panel
-   holding them, so a hairline border was the only thing saying "row" — the
-   reference's setting rows read as objects sitting on their body. */
+/* A paper object standing on the recessed body — the reference's `.setrow`. */
 .setrow {
   display: flex;
   align-items: center;
   gap: var(--space-5);
-  background: var(--surface);
+  background: var(--bg);
   border: 1px solid var(--border);
   border-radius: var(--radius-card);
   padding: var(--space-5);
+  height: 100%;
 }
 
 .setrow-text {
@@ -292,7 +324,10 @@ label.check input {
   align-items: center;
   gap: var(--space-2);
 }
-.setrow-text h5 {
+/* `.setrow-title` is the same object as the `h5` — a row whose text block is the
+   control's own <label> cannot use a heading inside it. */
+.setrow-text h5,
+.setrow-text .setrow-title {
   margin: 0;
   font-size: var(--text-md);
   font-weight: 600;
@@ -300,20 +335,35 @@ label.check input {
   align-items: center;
   gap: var(--space-2);
 }
-.setrow-text p {
+.setrow-text p,
+.setrow-caption {
   flex: 1 0 100%;
   margin: 2px 0 0;
   font-size: var(--text-sm);
   color: var(--muted-2);
   line-height: 1.5;
 }
-.setrow-text code {
-  font: 0.95em var(--mono);
-  background: var(--surface);
-  border-radius: var(--radius-sm);
-  padding: 1px 4px;
+
+/* A value control on the right of its row, sized to its content rather than
+   stretching across it — `input` is 100% wide by default on this page. */
+.setrow-value {
+  flex: 0 0 auto;
+  width: 88px;
+  text-align: center;
 }
 
+/* The label above a control too wide to sit beside it. */
+.setrow.stacked {
+  flex-direction: column;
+  align-items: stretch;
+  gap: var(--space-3);
+}
+
+/* A <label> used as the text block is a flex row like the div it replaces. */
+label.setrow-text {
+  display: flex;
+  cursor: pointer;
+}
 .switch {
   flex: none;
   position: relative;
@@ -410,6 +460,25 @@ label.fld.inline input {
   --min: 88px;
   margin: var(--space-3) 0 var(--space-1);
 }
+
+/**
+ * The two shared primitives that stand directly on this page's recessed body are
+ * paper here, where in the modal they are insets cut into a paper card. Same
+ * component, opposite side of the same alternation — the tone is a property of what
+ * a thing sits on, so it is stated by the surface rather than baked into the
+ * primitive. (Only these two: `.chip` and `.cf-help-btn` always sit inside a paper
+ * object on this page, so their `--surface` fill is already the nested case.)
+ */
+.cf-stat {
+  background: var(--bg);
+  border: 1px solid var(--border);
+}
+
+/* Background only — `.cf-help` carries an accent left edge, and the `border`
+   shorthand would reset it. */
+.cf-help {
+  background: var(--bg);
+}
 .cf-stat.applied .cf-stat-n {
   color: var(--ok);
 }
@@ -431,7 +500,7 @@ label.fld.inline input {
   padding: var(--space-5);
   border: 1px solid var(--border);
   border-radius: var(--radius-card);
-  background: var(--surface);
+  background: var(--bg);
 }
 
 .session-panel .lead {
@@ -473,7 +542,7 @@ label.fld.inline input {
   padding: 0 var(--space-4);
   border: 1px solid var(--border);
   border-radius: var(--radius-pill);
-  background: var(--surface);
+  background: var(--bg);
   color: var(--muted);
   font: 600 var(--text-sm) / 1 var(--font);
   cursor: pointer;
@@ -509,7 +578,7 @@ label.fld.inline input {
   border: 1px solid var(--border);
   border-radius: var(--radius-card);
   margin-bottom: var(--space-2);
-  background: var(--surface);
+  background: var(--bg);
   min-height: var(--tap);
 }
 
@@ -681,7 +750,7 @@ label.fld.inline input {
   background: transparent;
   border: none;
   color: var(--bg);
-  font-weight: 700;
+  font-weight: 600;
   text-decoration: underline;
   padding: var(--space-1) var(--space-2);
   min-height: 32px;
@@ -1048,7 +1117,7 @@ label.fld.inline input {
   background: var(--surface);
   color: var(--ok);
   font-size: var(--text-xs);
-  font-weight: 700;
+  font-weight: 600;
 }
 
 .startstep.done .startstep-mark {
@@ -1089,7 +1158,8 @@ label.fld.inline input {
   align-items: center;
   min-height: var(--tap);
   padding: 0 var(--space-5);
-  background: var(--surface);
+  /* Paper: the disclosure stands on the body like any other object here. */
+  background: var(--bg);
   cursor: pointer;
   font-size: var(--text-md);
   font-weight: 600;

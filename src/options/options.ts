@@ -332,22 +332,31 @@ async function initSettings(): Promise<void> {
   closeDelay.addEventListener('change', persist);
   redirectTarget.addEventListener('change', persist);
 
-  // A `?` on each toggle row, disclosing the same words the setup panel uses. The
-  // switch itself is a <label> (so tapping it flips the box); the `?` goes in the
-  // row's text block instead, and its panel opens below the whole row.
-  const attachRowHelp = (input: HTMLInputElement, entry: HelpEntry): void => {
-    const row = input.closest('.setrow') as HTMLElement;
-    // Anchor the `?` in the title so it sits inline with it, but open the panel
-    // below the whole row (past any description line).
-    attachHelp(row.querySelector('h5') as HTMLElement, entry, row);
+  /**
+   * Each row gets the catalog's one-line `short` as its caption and the full entry
+   * behind a `?`. The reference captions every settings row, and writing those
+   * lines into the HTML meant the row and the `?` beside it could disagree — which
+   * they had already started to. The `?` is anchored in the title so it sits inline
+   * with it; the panel opens below the whole row, past the caption.
+   */
+  const attachRowHelp = (control: HTMLElement, entry: HelpEntry): void => {
+    const row = control.closest('.setrow') as HTMLElement;
+    const text = row.querySelector('.setrow-text') as HTMLElement;
+    if (entry.short) {
+      // A span, not a <p>: half of these text blocks are the control's own <label>,
+      // which takes phrasing content only.
+      const caption = document.createElement('span');
+      caption.className = 'setrow-caption';
+      caption.textContent = entry.short;
+      text.append(caption);
+    }
+    attachHelp(text.querySelector('h5, .setrow-title') as HTMLElement, entry, row);
   };
   attachRowHelp(autoRun, SETTINGS_HELP.autoRunOnLoad);
   attachRowHelp(closeOnSubmit, SETTINGS_HELP.closeTabOnSubmit);
   attachRowHelp(closeOnSkip, SETTINGS_HELP.closeTabOnSkip);
-  // These two are column labels, so the `?` hangs off the caption while the
-  // panel still opens below the whole field.
-  attachHelp($('close-delay-label'), SETTINGS_HELP.closeTabDelayMs, closeDelay.parentElement!);
-  attachHelp($('redirect-target-label'), SETTINGS_HELP.redirectTarget, redirectTarget.parentElement!);
+  attachRowHelp(closeDelay, SETTINGS_HELP.closeTabDelayMs);
+  attachRowHelp(redirectTarget, SETTINGS_HELP.redirectTarget);
 
   await initModalLayout(settings.modalLayout);
 }

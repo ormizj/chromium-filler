@@ -58,6 +58,30 @@ export interface QueueProgress {
   ratio: number;
 }
 
+/** One mark in the session strip's progress row. */
+export type ProgressDot = 'done' | 'now' | 'waiting';
+
+/**
+ * The session strip's row of dots (the reference's `.qdots`) — the shape of the
+ * queue at a glance, beside the sentence that gives the numbers.
+ *
+ * Up to `max` postings it is literal: one dot each. Past that it is proportional,
+ * because the strip is a single line inside a 380px card and sixty dots is not a
+ * glance at anything. Either way the currently-open posting gets its own mark, and
+ * it is never squeezed out by rounding — knowing which one is live is the reason
+ * the row is more useful than the ratio alone.
+ */
+export function progressDots(progress: QueueProgress, max = 7): ProgressDot[] {
+  const { total, done, inFlight } = progress;
+  if (total <= 0) return [];
+  const slots = Math.min(total, max);
+  const live = inFlight > 0 ? 1 : 0;
+  const scaled = total <= max ? done : Math.round((done / total) * slots);
+  const filled = Math.min(scaled, slots - live);
+  return Array.from({ length: slots }, (_, i) =>
+    i < filled ? 'done' : i < filled + live ? 'now' : 'waiting');
+}
+
 /** Summarize the queue for the popup, modal, and options headers. */
 export function queueProgress(list: JobUrlEntry[], inFlight: string[]): QueueProgress {
   const open = new Set(inFlight);

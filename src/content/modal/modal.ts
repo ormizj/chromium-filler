@@ -21,7 +21,9 @@
 
 import type { FieldMatch, MatchConfidence, ModalLayout } from '../../shared/types';
 import type { SessionState } from '../../shared/messages';
+import { progressDots } from '../../shared/queue';
 import type { JobBlock } from '../../shared/jobText';
+import type { JobMeta } from '../../shared/jobMeta';
 import { FIELD_LABELS } from '../../shared/fieldKeys';
 import { STATUS_LABELS, matchStatus } from '../../shared/fieldStatus';
 import { ACTION_LABELS, STATUS_TEXT } from '../../shared/labels';
@@ -83,6 +85,8 @@ export interface ModalData {
   /** The posting, as blocks — see shared/jobText.ts. */
   jobDescription?: JobBlock[];
   jobRequirements?: JobBlock[];
+  /** Company / location / employment type, as far as the posting states them. */
+  meta?: JobMeta;
   matches: FieldMatch[];
   /** Whether Apply may run, and which half is missing when it may not. */
   applyState: ApplyState;
@@ -379,6 +383,21 @@ export class FillerModal {
       body.append(t);
     }
 
+    // Company · location · type, the reference's lead under the title. Rendered only
+    // from what the posting actually states (shared/jobMeta.ts), so a board that
+    // publishes none of it gets no empty row rather than three blank chips.
+    const meta = [data.meta?.company, data.meta?.location, data.meta?.employmentType]
+      .filter((v): v is string => !!v);
+    if (meta.length) {
+      const row = el('div', 'cf-jobmeta');
+      for (const value of meta) {
+        const chip = el('span', 'chip accent');
+        chip.textContent = value;
+        row.append(chip);
+      }
+      body.append(row);
+    }
+
     if (data.redirect) {
       // Two-step posting: say where the application actually lives, directly
       // under the title — a long description must never bury it.
@@ -511,6 +530,17 @@ export class FillerModal {
     const { done, total, applied, queued } = session.progress;
     text.textContent = `${done}/${total} done · ${applied} applied · ${queued} waiting`;
     strip.append(text);
+
+    // The reference's `.qdots`: the same progress as a shape, so the strip reads as
+    // a position in the queue and not only as a sentence. Aria-hidden — the sentence
+    // beside it already says all of this, and a screen reader does not need it twice.
+    const dots = progressDots(session.progress);
+    if (dots.length) {
+      const row = el('div', 'cf-qdots');
+      row.setAttribute('aria-hidden', 'true');
+      for (const kind of dots) row.append(el('span', `cf-qd ${kind}`));
+      strip.append(row);
+    }
     return strip;
   }
 
@@ -522,6 +552,10 @@ export class FillerModal {
     toggle.setAttribute('aria-expanded', 'false');
     const menu = el('div', 'cf-more-menu');
     (menu as HTMLElement).hidden = true;
+    // Ghost inside the popover, as the reference's menu is: the menu already has a
+    // border, and one around each item made it a stack of boxes. Applied here so
+    // every caller's items match, rather than at each call site.
+    for (const item of items) item.classList.add('btn-ghost');
     menu.append(...items);
     toggle.onclick = (e) => {
       e.stopPropagation();
@@ -562,8 +596,12 @@ export class FillerModal {
     const actions = el('div', 'cf-actions');
     // Anything matched but not filled can be retried in place; only a field with
     // no element at all has nothing for Confirm to act on.
+    // Secondary, deliberately: the reference draws every per-row action as a plain
+    // button (design/reference/states-gallery.html), and the coral fill belongs to
+    // the footer's Apply alone. As a primary, sixteen rows of Confirm outshouted
+    // the one control that actually sends anything.
     if (!m.filled && m.confidence !== 'none') {
-      actions.append(btn(ACTION_LABELS.confirm, () => this.cb.onConfirm(m.field), true));
+      actions.append(btn(ACTION_LABELS.confirm, () => this.cb.onConfirm(m.field)));
     }
     actions.append(btn(ACTION_LABELS.pick, () => this.cb.onPick(m.field)));
     row.append(actions);

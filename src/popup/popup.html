@@ -35,9 +35,13 @@
       <button id="primary" class="btn btn-primary" disabled>Fill</button>
 
       <div class="links">
-        <a id="reconfigure" href="#" hidden>Edit site setup →</a>
-        <a id="open-queue" href="#" hidden>Open the job queue →</a>
-        <a id="open-options" href="#">Manage profile, configs &amp; URLs →</a>
+        <!-- Short labels, and no arrow: these are button-shaped, and the reference's
+             secondary row is two one-word verbs (Reset / Queue). As sentences they
+             wrapped onto a second line in a 360px popup and left the row ragged.
+             The arrow stays on `.nudge`, which is a prompt rather than a button. -->
+        <a id="reconfigure" href="#" hidden>Site setup</a>
+        <a id="open-queue" href="#" hidden>Queue</a>
+        <a id="open-options" href="#">Options</a>
       </div>
       <div id="build" class="build"></div>
     </div>

@@ -115,8 +115,23 @@ button.cf-btn.primary:hover {
   border-color: var(--err);
 }
 
-.btn-ghost {
+/**
+ * No fill, no border — for a button that is already inside its own container and
+ * would otherwise draw a second box around itself. The overflow menu is the case
+ * the reference models (`design/reference/states-gallery.html` draws its menu items
+ * as `.btn.ghost`): a bordered button inside a bordered popover reads as a list of
+ * boxes rather than a list of actions. `button.cf-btn` carries a class of its own,
+ * so the shadow vocabulary is spelled at matching specificity or the fill wins.
+ */
+.btn-ghost,
+button.cf-btn.btn-ghost {
   background: transparent;
+  border-color: transparent;
+}
+
+.btn-ghost:hover,
+button.cf-btn.btn-ghost:hover {
+  background: var(--surface);
   border-color: transparent;
 }
 
@@ -623,7 +638,7 @@ button.cf-btn[aria-disabled='true']:not(.primary):hover {
 
 .cf-help-title {
   display: block;
-  font-weight: 700;
+  font-weight: 600;
   margin-bottom: var(--space-2);
 }
 
@@ -659,7 +674,7 @@ button.cf-btn[aria-disabled='true']:not(.primary):hover {
 
 .cf-help-when::before {
   content: 'When: ';
-  font-weight: 700;
+  font-weight: 600;
   color: var(--muted);
 }
 

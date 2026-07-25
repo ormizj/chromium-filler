@@ -168,6 +168,14 @@ test('SlowBoards: fills the late-injected form + attaches CV', async () => {
 
   // Review modal is present (pierced shadow DOM) and shows the title.
   await expect(page.locator('.cf-title')).toContainText('Staff Platform Engineer');
+
+  // And the meta chips under it, read from the posting's own JobPosting block:
+  // company, remote-with-place, and the employment code spelled as a word.
+  const chips = page.locator('.cf-jobmeta .chip');
+  await expect(chips).toHaveCount(3);
+  await expect(chips.nth(0)).toHaveText('SlowBoards');
+  await expect(chips.nth(1)).toHaveText('Remote (Berlin, DE)');
+  await expect(chips.nth(2)).toHaveText('Full-time');
   await page.close();
 });
 

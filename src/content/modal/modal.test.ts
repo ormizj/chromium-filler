@@ -157,6 +157,24 @@ describe('FillerModal — the report tells the truth about each field', () => {
     expect(onConfirm).toHaveBeenCalledWith('country');
     expect(onPick).toHaveBeenCalledWith('country');
   });
+
+  /**
+   * The design system has exactly one primary fill, and in this card it is Apply.
+   * Confirm shipped as a primary once: a report of sixteen rows then drew sixteen
+   * coral buttons around the one control that actually sends something, which is
+   * the opposite of what the fill is for. Asserted on the whole card, so a future
+   * row action cannot quietly claim it either.
+   */
+  it('spends the primary fill on the footer, not on a row', () => {
+    const shadow = render(data([
+      match({ field: 'email', filled: true }),
+      match({ field: 'country', confidence: 'high', filled: false }),
+      match({ field: 'phone', confidence: 'low', filled: false }),
+    ]));
+    expect(shadow.querySelectorAll('.cf-row button.primary')).toHaveLength(0);
+    expect(shadow.querySelectorAll('button.cf-btn.primary')).toHaveLength(1);
+    expect(footerBtn(shadow, 'Apply').classList.contains('primary')).toBe(true);
+  });
 });
 
 describe('FillerModal — the minimized pill', () => {

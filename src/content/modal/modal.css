@@ -108,6 +108,30 @@ button.cf-view .cf-dot {
 }
 
 /**
+ * The three meta facts under the title. Shared `.chip.accent` for the tint, at the
+ * reference's rounded-rectangle radius rather than the pill: `.jobmeta b` is a tag
+ * on a line of facts, not a status pill, and at this size a pill among three reads
+ * as a row of buttons.
+ */
+.cf-jobmeta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  margin: 0 0 var(--space-5);
+}
+
+/* The chips belong to the title, so they sit closer to it than a paragraph would —
+   the reference's 6px, against the 10px the title keeps when it stands alone. */
+.cf-title:has(+ .cf-jobmeta) {
+  margin-bottom: var(--space-2);
+}
+
+.cf-jobmeta .chip {
+  border-radius: var(--radius-md);
+  font-size: var(--text-sm);
+}
+
+/**
  * The posting, rendered as prose. This used to be one `pre-wrap` string in a
  * 160px inner scroller nested inside the already-scrolling body — a keyhole onto
  * ragged text. The body is now the only scroller, and the blocks
@@ -172,7 +196,7 @@ button.cf-view .cf-dot {
   align-items: center;
   gap: var(--space-2);
   font-size: var(--text-md);
-  font-weight: 700;
+  font-weight: 600;
   color: var(--ok);
   background: var(--ok-weak);
   border-radius: var(--radius-md);
@@ -318,6 +342,31 @@ button.cf-btn.cf-applied-btn[aria-disabled='true'] {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+/* The progress row, as in both references: done in the accent, the posting you are
+   on as a ring, the rest on the quiet track. It never wraps and never shrinks the
+   sentence — `shared/queue.progressDots` caps the count, so the row has a ceiling. */
+.cf-qdots {
+  display: flex;
+  gap: var(--space-1);
+  flex: none;
+}
+
+.cf-qd {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--track-off);
+}
+
+.cf-qd.done {
+  background: var(--accent);
+}
+
+.cf-qd.now {
+  background: var(--accent-weak);
+  box-shadow: inset 0 0 0 2px var(--accent);
 }
 
 /* The overflow menu behind the footer's two decisions. Everything that acts on

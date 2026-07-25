@@ -173,7 +173,11 @@ h1 {
   gap: var(--space-3);
 }
 .links a {
-  flex: 1 1 140px;
+  /* Equal shares of the row, and never a label broken across two lines — a
+     wrapped verb makes one button taller than its neighbour, and the grid then
+     stretches both. */
+  flex: 1 1 0;
+  white-space: nowrap;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -213,6 +217,6 @@ h1 {
   opacity: 0.7;
 }
 .build-label {
-  font-weight: 700;
+  font-weight: 600;
   color: var(--muted);
 }

@@ -14,6 +14,26 @@
       #app-success { display: none; color: #15803d; font-weight: 700; margin-top: 16px; }
       button { margin-top: 16px; padding: 10px 18px; }
     </style>
+    <!--
+      A schema.org JobPosting block, as almost every real board emits for Google
+      Jobs. It is where `shared/jobMeta.ts` reads the modal's company / location /
+      type chips from, so one fixture has to actually carry one — a heuristic
+      proven only in jsdom is not proven.
+    -->
+    <script type="application/ld+json">
+      {
+        "@context": "https://schema.org",
+        "@type": "JobPosting",
+        "title": "Staff Platform Engineer",
+        "hiringOrganization": { "@type": "Organization", "name": "SlowBoards" },
+        "jobLocationType": "TELECOMMUTE",
+        "jobLocation": {
+          "@type": "Place",
+          "address": { "@type": "PostalAddress", "addressLocality": "Berlin", "addressCountry": "DE" }
+        },
+        "employmentType": "FULL_TIME"
+      }
+    </script>
   </head>
   <body>
     <!--

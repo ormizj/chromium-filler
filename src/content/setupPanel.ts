@@ -215,7 +215,7 @@ export class SetupPanel {
     const steps = this.group('steps', 0, false);
     const prepHead = el('div', 'cf-section-row');
     prepHead.append(sectionHead('Run in order before filling'));
-    prepHead.append(btn('Run steps ▶', () => this.cb.onRunPrep(), true));
+    prepHead.append(btn('Run steps ▶', () => this.cb.onRunPrep()));
     steps.body.append(prepHead);
     this.appendPrepList(steps.body, data.prep, 'prep');
 
@@ -427,7 +427,7 @@ export class SetupPanel {
       actions.append(ms);
     }
     if (selectorBased) {
-      actions.append(btn(step.selector ? 'Re-pick' : 'Pick', () => this.cb.onPickPrepTarget(i, list), true));
+      actions.append(btn(step.selector ? 'Re-pick' : 'Pick', () => this.cb.onPickPrepTarget(i, list)));
     }
     const up = btn('↑', () => this.cb.onMovePrep(i, -1, list));
     const down = btn('↓', () => this.cb.onMovePrep(i, 1, list));
@@ -451,8 +451,10 @@ export class SetupPanel {
     info.append(name, detail);
     row.append(info);
 
+    // Plain, like every other per-row action here: the panel's one coral button is
+    // Done in the footer. A Pick on each of a dozen rows read as a dozen CTAs.
     const actions = el('div', 'cf-actions');
-    actions.append(btn(m.hasSave ? 'Re-pick' : ACTION_LABELS.pick, onPick, true));
+    actions.append(btn(m.hasSave ? 'Re-pick' : ACTION_LABELS.pick, onPick));
     if (m.hasSave) actions.append(btn('Clear', onClear));
     row.append(actions);
     return row;

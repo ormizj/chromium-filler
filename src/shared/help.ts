@@ -25,8 +25,9 @@ export interface HelpEntry {
   body: string;
   /**
    * A one-line form, for places that are a key rather than an explanation — the
-   * setup panel's legend, which is read at a glance above the work itself. The
-   * full `body` stays one tap away behind that section's `?`.
+   * setup panel's legend, which is read at a glance above the work itself, and the
+   * options settings rows, where the reference puts a caption under every title.
+   * The full `body` stays one tap away behind that section's `?`.
    */
   short?: string;
   /** "You need this when …" — whether to bother with it at all. */
@@ -91,9 +92,12 @@ export const CONFIG_HELP: Record<keyof SiteConfig, HelpEntry> = {
   },
   extract: {
     title: 'extract',
-    body: 'Selectors for the job title, description and requirements. These are read '
-      + 'into the review modal so you can decide whether you want the job without '
-      + 'leaving it. They never affect filling.',
+    body: 'Selectors for the job title, description and requirements — read into the '
+      + 'review modal so you can decide whether you want the job without leaving it. '
+      + 'It also takes `company`, `location` and `employmentType`, the three facts '
+      + 'shown as chips under the title; those are read from the posting\'s own '
+      + 'JobPosting data automatically, so set one only where that is missing or '
+      + 'wrong. None of these ever affect filling.',
     when: 'Optional. Without them the modal simply shows less.',
     example: '{ "jobTitle": "h1.posting-title", "jobDescription": ".posting-body" }',
   },
@@ -217,6 +221,7 @@ export const PREP_HELP: Record<PrepAction, HelpEntry> = {
 export const SETTINGS_HELP: Record<keyof Settings, HelpEntry> = {
   autoRunOnLoad: {
     title: 'Auto-run when a matching page loads',
+    short: 'Fill on open, without pressing anything',
     body: 'Fill automatically as soon as a page matching one of your site configs '
       + 'finishes loading. Turn it off to fill only when you press Fill in the popup.',
   },
@@ -228,6 +233,7 @@ export const SETTINGS_HELP: Record<keyof Settings, HelpEntry> = {
   },
   closeTabOnSubmit: {
     title: 'Auto-close the tab after I submit',
+    short: 'Free the slot once an application is confirmed sent',
     body: 'Closes the posting once the application is confirmed sent, which also frees '
       + 'a slot for the next posting in a queue session.',
     when: '"Sent" is detected by that site\'s successSelector. Without one, a plain '
@@ -235,6 +241,7 @@ export const SETTINGS_HELP: Record<keyof Settings, HelpEntry> = {
   },
   closeTabOnSkip: {
     title: 'Auto-close the tab after I skip',
+    short: 'Free the slot when a posting is skipped',
     body: 'Closes the posting when you press Skip in the review modal, which also frees '
       + 'a slot for the next posting in a queue session. Uses the same close delay as '
       + 'the setting above.',
@@ -243,6 +250,7 @@ export const SETTINGS_HELP: Record<keyof Settings, HelpEntry> = {
   },
   closeTabDelayMs: {
     title: 'Close delay',
+    short: 'Milliseconds on screen before either auto-close',
     body: 'How long to leave the page on screen before closing the tab, in milliseconds. '
       + 'Used by both auto-close settings above; set it high enough to actually read a '
       + 'confirmation.',
@@ -250,6 +258,7 @@ export const SETTINGS_HELP: Record<keyof Settings, HelpEntry> = {
   },
   redirectTarget: {
     title: 'When following an external application',
+    short: 'Where the employer\'s own application opens',
     body: 'Where the employer\'s application opens once a two-step posting is followed: '
       + 'in a new tab replacing the posting, in a new tab beside it, or in place.',
   },

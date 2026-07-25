@@ -95,7 +95,9 @@ pure, unit-tested logic):
   matching page: wait for slow form (`waitForForm.ts`) → run prep steps
   (`prep.ts`) → classify the posting (`redirectDetect.ts`) → **either** hand off
   to the external application **or** extract job title/description
-  (`extract.ts`, which walks containers into blocks via `shared/jobText.ts`) →
+  (`extract.ts`, which walks containers into blocks via `shared/jobText.ts`, and
+  reads the company/location/type chips from the posting's JSON-LD via
+  `shared/jobMeta.ts`) →
   detect fields (`fieldDetect.ts`) → fill high-confidence only, incl. CV via
   DataTransfer (`fill.ts`) → show modal (`modal/`).
   `picker.ts` = click/tap-to-pick override.
@@ -133,15 +135,36 @@ tiles are keyed on `.high/.low/.none` *and* `.ok/.warn/.none`, because the modal
 renders from the `MatchConfidence` value and the options queue from the tone —
 spell any new status in both lists or one surface silently loses its colour.
 
-Surfaces layer three warm tones: the page is `--canvas`, panels are the paper
-`--bg`, and insets within a panel (inputs, rows, tiles) are `--surface`, with
-`--surface-2` a shallower cut of the same kind for hovers. Both sit on the same
-side of `--bg` in either scheme. A **secondary button is not an inset** — it is
-paper with a border that fills in on hover, the reference's outlined button; and
-the popup is itself a panel (`--bg`), not a page, so its progress card has
+Surfaces layer the warm tones by **alternating**, which is what the reference
+does: the page behind everything is `--canvas`, and from there each level flips
+side — a recessed body (`--surface`), the paper objects standing on it (`--bg`,
+plus a hairline `--border`), and an inset *within* one of those objects back to
+`--surface` (`--surface-2` is a half step, for hovers on paper). Both surface
+tones sit on the same side of `--bg` in either scheme.
+
+The shadow sheets and the options page start that alternation at different
+levels, and neither is wrong: the **modal and setup panel** are a paper card
+floating on someone else's page, so their rows and tiles are `--surface` insets;
+the **options tab panel** is the recessed body (its active folder tab takes the
+same tone, because tab and body are one sheet) and its sections, rows, stat tiles
+and bare controls are paper objects on it. If a new element looks flat, it is
+sitting on its own tone — count the levels rather than picking a colour.
+
+A **secondary button is not an inset** — it is paper with a border that fills in
+on hover, the reference's outlined button. Nor is a **per-row action ever the
+primary fill**: the coral belongs to the one thing a surface is for (the modal's
+Apply, the setup panel's Done), and both references draw row actions as plain
+buttons. `modal.test.ts` asserts exactly one `.primary` in the card, because
+Confirm shipped as a primary once and turned a sixteen-row report into sixteen
+CTAs. Buttons inside a popover are `.btn-ghost` (the overflow menu): the popover
+already has a border, and one per item makes it a stack of boxes.
+
+The popup is itself a panel (`--bg`), not a page, so its progress card has
 something to recess into. Labels *inside* a surface are sentence case: uppercase
 plus letter-spacing is reserved for page furniture, and the reference has none of
-it in a control.
+it in a control. Secondary actions are labelled in **one or two words** ("Site
+setup", "Queue", "Options"), not sentences — as prose they wrapped inside a 360px
+popup and left the row ragged.
 
 `src/shared/labels.ts` is the wording counterpart to help.ts: `STATUS_TEXT`
 (tile / word / aria for each `MatchConfidence`) and `ACTION_LABELS` (Apply, Skip,
@@ -170,13 +193,23 @@ everywhere now), and `@media (pointer: coarse)` extends that floor to the other
 native controls; status is never colour alone (dots carry an icon shape); and the
 modal/setup sheets become full-width bottom sheets under 640px.
 
-`design/reference-updated/design.html` is the current visual source of truth (it
-supersedes the values in `design/design-system.md`): rounder than the first cut
+`design/reference-updated/design.html` is the current visual source of truth for
+**values** (it supersedes `design/design-system.md`): rounder than the first cut
 (`--radius-btn/-card/-xl` = 13/14/20), buttons and chips at weight 500, a
 two-layer `--shadow-2`, a third text level `--muted-2`, and a dark palette whose
 insets are *darker* than the paper (not lighter). The Job/Fields toggle is a
-rounded-rectangle segmented control; the options Settings tab uses folder tabs and
-`.switch` toggles; the popup leads with a progress card + status chips.
+rounded-rectangle segmented control; the options Settings tab uses folder tabs,
+`.switch` toggles and a **two-column** grid of setting rows; the popup leads with a
+progress card + status chips; the Job view leads with company / location / type
+chips and the session strip carries progress dots.
+
+`design/reference/states-gallery.html` is the source of truth for the **flows** the
+mockup never drew — the modal's redirect/applied/blocked states, the pill, the
+overflow menu, the help disclosure, and the whole setup panel. Where the two
+disagree, design.html wins on values (colour, radius, density, casing) and the
+gallery wins on structure (which controls a state has, and how loud each one is).
+Reading only one of them is how the third pass ended up with a coral Pick on every
+setup row.
 
 ### In-app help
 `src/shared/help.ts` is the **only** place the extension explains itself. Every
@@ -195,7 +228,10 @@ until it has an explanation**. That is what stops this going stale the way the
 `HelpEntry.short` is the one-line form, for places that are a *key* rather than
 an explanation. The setup panel's legend uses it and the full `body` stays behind
 that section's `?`; rendering the bodies there filled a whole 390px screen with
-prose before the user could reach a single row. `DOT_LEGEND` shows the real
+prose before the user could reach a single row. The options settings rows render
+their caption from it too (`attachRowHelp`), so the line under a switch and the
+panel behind its `?` cannot drift — those captions were written into
+`options.html` and had already started to disagree. `DOT_LEGEND` shows the real
 `.cf-dot` beside each meaning — a colour key made of words is not a key.
 
 `describeConfig()` turns a stored `SiteConfig` into a sentence, so the Sites tab
@@ -290,7 +326,10 @@ submitting there propagates `applied` up the `sourceUrl` chain
 
 ### Queue sessions
 `src/shared/queue.ts` (pure) — `nextBatch` picks the waiting URLs that fit the
-free slots, `queueProgress` summarizes for the headers. The queue is **derived**
+free slots, `queueProgress` summarizes for the headers, and `progressDots` turns
+that summary into the modal strip's row of dots: literal up to its cap, then
+proportional, and always keeping one dot for the posting that is open (sixty dots
+in a 380px strip is a glance at nothing). The queue is **derived**
 from the job-URL database (status `new`), never copied, so imports and manual
 status edits feed it automatically.
 

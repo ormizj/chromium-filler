@@ -113,6 +113,9 @@ const BASE_MODAL: ModalData = {
   jobRequirements: [
     { kind: 'list', items: ['8+ years', 'Kubernetes', 'Go or Rust', 'On-call experience'] },
   ],
+  // What `shared/jobMeta.ts` reads off a posting with JSON-LD. A board that
+  // publishes none renders no chip row at all — see `state=empty`.
+  meta: { company: 'Acme', location: 'Remote (Berlin, DE)', employmentType: 'Full-time' },
   matches: REPORT,
   applyState: 'ready',
   // What a fresh install gets. Without it the card falls back to the CSS
@@ -223,6 +226,9 @@ const MODAL_STATES: Record<string, Partial<ModalData>> = {
       { kind: 'para', text: '3 results. Each employer takes applications on its own site.' },
     ],
     jobRequirements: undefined,
+    // A listing page states none of the three facts, so the chip row is absent
+    // entirely — the case that proves the row is never rendered empty.
+    meta: undefined,
     matches: ['fullName', 'email', 'phone', 'coverLetter', 'city', 'resume']
       .map((f) => match(f as FieldMatch['field'], 'none', false)),
     applyState: 'noConfirmation',
