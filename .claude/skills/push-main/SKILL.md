@@ -38,11 +38,10 @@ would cost minutes per push. Do not add a check step here.
    > Stop the paper hover from blanking out the primary button
 
    Subject line only, unless the change genuinely needs a body. End the message
-   with:
-
-   ```
-   Co-Authored-By: Claude Opus 5 <noreply@anthropic.com>
-   ```
+   with the `Co-Authored-By:` trailer your harness rules give you — every commit
+   in this repo carries one. Do **not** hardcode a model name here: the harness
+   names whichever model is actually running, and a name pinned in this file
+   would attribute future commits to the wrong one.
 
    If the diff spans unrelated concerns, it is still one commit — write a subject
    that covers the theme and use body bullets for the parts.
