@@ -352,6 +352,39 @@ two-step posting (both ends, cross-linked, never demoting an existing status),
 dashboard.
 `urlImport.ts` extracts/normalizes/dedupes URLs from a pasted text blob.
 
+### The archive (captured postings + export)
+`extractJob` ran for the modal alone and threw its result away every re-render,
+so a posting became unreadable the moment its tab closed. `jobDetails.ts` (pure)
+keeps it: `Controller.captureJob` writes what the page said — title, description,
+requirements, chips — for **every** posting the extension reads, applied or
+skipped, and Options → Queue → **Archive** exports the applied ones as one JSON
+file (`jobExport.ts`).
+
+Kept under its **own storage key**, not as fields on `JobUrlEntry`: the job-URL
+list is read and rewritten whole on every status change, session tick and queue
+render, and prose is orders of magnitude bigger than the entry it belongs to.
+`mutateJobDetails` skips the write when the pure helper returns the map
+unchanged, and `captureJob` holds a signature of the last text written so the
+re-renders (`confirmField`, `pick`, `apply`, every message) don't rewrite it.
+
+Three rules the two-step case forces, each with a test:
+- **An empty capture never overwrites a non-empty one.** A re-run or a Reset
+  re-extracts against a page whose container may be gone, and writing that
+  through trades good text for nothing, silently.
+- **`resolveDetails` merges up the `sourceUrl` chain field by field**, not by
+  picking the nearest non-empty record. The ATS end always has *a* title
+  (`extractJob` falls back to `document.title`) and routinely no description, so
+  record-level resolution returns that title with an empty body and leaves the
+  board's description one hop away unread. This is what the E2E MixedBoard
+  assertion caught.
+- **`buildExport` collapses a chain to its destination.** `applyStatusChain`
+  marks both ends applied, so one application would otherwise arrive as two rows
+  — one holding the description, one holding the outcome.
+
+The download is an anchor + `URL.createObjectURL` on the **options page**: it
+needs no `downloads` permission, and an MV3 service worker has no
+`createObjectURL` to do it with. Do not add the permission.
+
 ## Non-obvious constraints (do not regress)
 
 - **Content scripts share the PAGE's origin**, not the extension's — so the CV

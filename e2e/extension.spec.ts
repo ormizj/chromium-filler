@@ -12,6 +12,8 @@
  */
 import { test, expect, chromium, type BrowserContext, type Page } from '@playwright/test';
 import type { JobUrlEntry } from '../src/shared/types';
+import type { JobDetailsMap } from '../src/shared/jobDetails';
+import type { ExportedJob } from '../src/shared/jobExport';
 import { MSG } from '../src/shared/messages';
 import { ATS_URL, HOSTS, queueSeedUrls, urlFor } from '../test/fixtures/scenarios.mjs';
 import path from 'node:path';
@@ -109,6 +111,36 @@ async function readJobUrls(): Promise<JobUrlEntry[]> {
   return onExtensionPage((page) => page.evaluate(
     async () => ((await chrome.storage.local.get('jobUrls')).jobUrls ?? []) as JobUrlEntry[],
   ));
+}
+
+async function readJobDetails(): Promise<JobDetailsMap> {
+  return onExtensionPage((page) => page.evaluate(
+    async () => ((await chrome.storage.local.get('jobDetails')).jobDetails ?? {}) as JobDetailsMap,
+  ));
+}
+
+/**
+ * Press the real Export button on the options page and read back the file it
+ * would have downloaded, by intercepting the object URL rather than letting
+ * Chromium write to disk.
+ */
+async function exportedJobs(): Promise<ExportedJob[]> {
+  const json = await onExtensionPage((page) => page.evaluate(async () => {
+    let blob: Blob | null = null;
+    const realCreate = URL.createObjectURL;
+    const realClick = HTMLAnchorElement.prototype.click;
+    URL.createObjectURL = (b: Blob | MediaSource) => { blob = b as Blob; return realCreate.call(URL, b); };
+    HTMLAnchorElement.prototype.click = function () { /* don't actually download */ };
+    try {
+      document.getElementById('export-jobs')!.click();
+      await new Promise((r) => setTimeout(r, 500));
+      return blob ? await (blob as Blob).text() : '';
+    } finally {
+      URL.createObjectURL = realCreate;
+      HTMLAnchorElement.prototype.click = realClick;
+    }
+  }));
+  return json ? (JSON.parse(json) as ExportedJob[]) : [];
 }
 
 async function patchSettings(patch: Record<string, unknown>): Promise<void> {
@@ -244,6 +276,17 @@ test('DialogATS: Apply confirms the CV, presses Send, and the posting lands appl
   // this card, so the modal answering "did that go through?" is the point.
   await expect(page.locator('.cf-applied')).toContainText(/sent/i);
   await expect(page.locator('.cf-footer button.cf-btn', { hasText: 'Applied' })).toBeVisible();
+
+  // And what the posting SAID is kept, not just that it was applied to. The tab
+  // is about to close and the page is then unreadable forever.
+  const captured = (await readJobDetails())[url];
+  expect(captured.title).toContain('Infrastructure Engineer');
+  expect(captured.description.length).toBeGreaterThan(0);
+
+  const [exported] = (await exportedJobs()).filter((j) => j.url === url);
+  expect(exported.status).toBe('applied');
+  expect(exported.appliedAt).toBeTruthy();
+  expect(exported.description.map((b) => b.text).join(' ')).toContain('Infrastructure Engineer');
   await page.close();
 });
 
@@ -428,6 +471,16 @@ test('MixedBoard: external posting saves on the board, hands off, and links both
   await expect(dest.locator('#ats-success')).toBeVisible();
   await waitForJobUrl(atsUrl, (e) => e.status === 'applied');
   await waitForJobUrl(boardUrl, (e) => e.status === 'applied');
+
+  // The archive's hard case. Both ends are applied, but this was one application
+  // and the two halves hold different things: the board has the description, the
+  // ATS has the outcome. It exports once, as the page it was sent from, carrying
+  // the board's text — not twice, and not without a description.
+  const rows = (await exportedJobs()).filter((j) => j.url === atsUrl || j.url === boardUrl);
+  expect(rows.map((j) => j.url)).toEqual([atsUrl]);
+  expect(rows[0].sourceUrl).toBe(boardUrl);
+  expect(rows[0].title).toContain('Senior Widget Engineer');
+  expect(rows[0].description.length).toBeGreaterThan(0);
 
   await dest.close();
   await board.close();

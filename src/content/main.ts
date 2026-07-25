@@ -18,7 +18,9 @@ import {
   saveExtractSelector, clearExtractSelector, ensureConfigForUrl, mutateSiteConfig,
   saveRedirectSelector, clearRedirectSelector, type RedirectSelectorKey,
   saveSubmitSelector, clearSubmitSelector, saveSuccessSelector, clearSuccessSelector,
+  mutateJobDetails,
 } from '../shared/storage';
+import { captureDetails, type JobDetails } from '../shared/jobDetails';
 import { BUILD_ID } from '../shared/buildId';
 import { getCv, cvFileToFile } from '../shared/cvStore';
 import { TEXT_FIELDS, FIELD_LABELS } from '../shared/fieldKeys';
@@ -31,7 +33,7 @@ import { isRendered } from '../shared/visible';
 import { findSubmitControl } from '../shared/submitDetect';
 import { waitForSelector } from './waitForForm';
 import { runPrepSteps } from './prep';
-import { extractJob, previewContainer } from './extract';
+import { extractJob, previewContainer, type ExtractedJob } from './extract';
 import { detectFields } from './fieldDetect';
 import { detectRedirect, type RedirectDetection } from './redirectDetect';
 import { fillTextField, fillFileInput, highlight, clearHighlights } from './fill';
@@ -89,6 +91,8 @@ class Controller {
    * opened on every posting after it. Lives exactly as long as the page does.
    */
   private draggedLayout?: ModalLayout;
+  /** The last posting text written to the archive, so re-renders don't rewrite it. */
+  private capturedSignature?: string;
 
   async init(): Promise<void> {
     console.info(`${LOG} content script ready — v${chrome.runtime.getManifest().version} · build ${BUILD_ID}`);
@@ -430,6 +434,7 @@ class Controller {
       });
     }
     const job = extractJob(this.config!);
+    this.captureJob(job);
     const det = this.detection;
     const isRedirect = det?.kind === 'redirect' && !this.fillAnyway;
     this.modal.render({
@@ -452,6 +457,35 @@ class Controller {
       // default the moment any of them ran.
       layout: this.draggedLayout ?? this.settings.modalLayout,
     });
+  }
+
+  /**
+   * Keep what this page said, so the posting can be judged after the tab is gone.
+   *
+   * Every posting the extension reads is recorded, applied or not — a decision to
+   * skip is only worth anything later if the thing skipped is still legible. The
+   * export in Options is what reads this back.
+   *
+   * Extraction already happens once per render, and `showModal` is re-entered by
+   * every confirmation, pick, apply and message; the signature guard turns that
+   * into one storage write per distinct reading of the page rather than one per
+   * render. Fire-and-forget, like `skipPosting`: nothing on screen waits for it.
+   */
+  private captureJob(job: ExtractedJob): void {
+    const details: JobDetails = {
+      url: location.href,
+      title: job.title,
+      site: this.config?.name,
+      description: job.description,
+      requirements: job.requirements,
+      meta: job.meta,
+      capturedAt: Date.now(),
+    };
+    const signature = JSON.stringify([details.title, details.description, details.requirements, details.meta]);
+    if (signature === this.capturedSignature) return;
+    this.capturedSignature = signature;
+    void mutateJobDetails((map) => captureDetails(map, details))
+      .catch((e) => console.warn(LOG, 'capture failed', e));
   }
 
   private confirmField(field: FieldKey): void {

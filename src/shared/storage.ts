@@ -4,6 +4,7 @@
  */
 
 import type { JobUrlEntry, Profile, Settings, SiteConfig, StoredState } from './types';
+import type { JobDetailsMap } from './jobDetails';
 import { DEFAULT_PROFILE, DEFAULT_SETTINGS } from './defaults';
 import { normalizeEntry } from './jobUrls';
 import { configTemplate } from './configTemplate';
@@ -13,6 +14,10 @@ const KEYS = {
   profile: 'profile',
   siteConfigs: 'siteConfigs',
   jobUrls: 'jobUrls',
+  // Deliberately not part of `jobUrls`: that list is read and rewritten whole on
+  // every status change, session tick and queue render, and the posting text is
+  // orders of magnitude bigger than the entry it belongs to. See jobDetails.ts.
+  jobDetails: 'jobDetails',
   settings: 'settings',
 } as const;
 
@@ -224,6 +229,30 @@ export async function mutateJobUrls(
 ): Promise<JobUrlEntry[]> {
   const next = fn(await getJobUrls());
   await saveJobUrls(next);
+  return next;
+}
+
+/** The captured posting text, keyed by URL. See jobDetails.ts. */
+export async function getJobDetails(): Promise<JobDetailsMap> {
+  const raw = await chrome.storage.local.get(KEYS.jobDetails);
+  return (raw[KEYS.jobDetails] as JobDetailsMap) ?? {};
+}
+
+export async function saveJobDetails(map: JobDetailsMap): Promise<void> {
+  await chrome.storage.local.set({ [KEYS.jobDetails]: map });
+}
+
+/**
+ * Read-modify-write helper for the captured postings. The pure helpers return
+ * the map unchanged when there is nothing to do, so an unchanged result skips
+ * the write — this runs from a content script on every posting.
+ */
+export async function mutateJobDetails(
+  fn: (map: JobDetailsMap) => JobDetailsMap,
+): Promise<JobDetailsMap> {
+  const before = await getJobDetails();
+  const next = fn(before);
+  if (next !== before) await saveJobDetails(next);
   return next;
 }
 

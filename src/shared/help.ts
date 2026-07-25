@@ -405,7 +405,7 @@ export const SETUP_GROUP_HELP: Record<SetupGroupKey, GroupHelp> = {
 export type ConceptKey =
   | 'dots' | 'autoVsSaved' | 'todoChip' | 'picker' | 'neverSubmits'
   | 'twoStep' | 'sessions' | 'urlPattern' | 'successSelector' | 'howItWorks'
-  | 'apply' | 'applyUnverified';
+  | 'apply' | 'applyUnverified' | 'exportJobs';
 
 export const CONCEPT_HELP: Record<ConceptKey, HelpEntry> = {
   dots: {
@@ -472,6 +472,24 @@ export const CONCEPT_HELP: Record<ConceptKey, HelpEntry> = {
       + 'received” message the site shows after a successful send. Then Apply goes live, '
       + 'and that same element is what marks the posting applied.',
     when: 'Apply is grey on a site you have not finished setting up.',
+  },
+  /**
+   * The archive button in the Queue tab. Two things need saying and neither is
+   * guessable from the label: that the text was already being kept as postings
+   * were read (so the file is not built from what is open now), and that a
+   * two-step posting arrives as one row rather than two.
+   */
+  exportJobs: {
+    title: 'Export applied jobs',
+    short: 'Downloads the postings you applied to, with their text, as one JSON file.',
+    body: 'Downloads one JSON file holding every posting you applied to: the job title, '
+      + 'the company, location and type, and the description and requirements as they '
+      + 'read on the page. The text is kept automatically as each posting is opened, so '
+      + 'the file covers applications made long after the tab was closed. A two-step '
+      + 'posting is one entry, not two — the board\'s description travels with the '
+      + 'application it handed off to. Skipped postings are kept as well but are not '
+      + 'part of this file.',
+    when: 'You want to look back over what you applied to and judge which roles fit.',
   },
   neverSubmits: {
     title: 'Nothing is sent until you say so',

@@ -33,7 +33,10 @@ import { MSG } from '../shared/messages';
 import {
   getProfile, saveProfile, getSettings, saveSettings,
   getSiteConfigs, saveSiteConfigs, getJobUrls, saveJobUrls, mutateJobUrls,
+  getJobDetails, saveJobDetails, mutateJobDetails,
 } from '../shared/storage';
+import { pruneDetails } from '../shared/jobDetails';
+import { buildExport, exportFilename } from '../shared/jobExport';
 import { getCv, setCv, clearCv } from '../shared/cvStore';
 import {
   CONCEPT_HELP, CONFIG_HELP, PREP_HELP, REDIRECT_HELP, SETTINGS_HELP, describeConfig,
@@ -1176,22 +1179,70 @@ async function initUrls(): Promise<void> {
   $('clear-urls').addEventListener('click', async () => {
     const list = await getJobUrls();
     if (list.length === 0) { setStatus($('queue-status'), 'Queue is already empty', 'err'); return; }
+    // The saved postings go with it, and that is the half worth warning about:
+    // the queue can be re-imported from the board, the archive cannot be re-read
+    // once the postings are down.
     $('clear-confirm-label').textContent =
-      `Delete all ${list.length} posting(s) and their history? This cannot be undone.`;
+      `Delete all ${list.length} posting(s), their history and the saved job archive? `
+      + 'Export first if you want to keep it. This cannot be undone.';
     confirmBox.hidden = false;
   });
   $('clear-cancel').addEventListener('click', () => { confirmBox.hidden = true; });
   $('clear-really').addEventListener('click', async () => {
     await saveJobUrls([]);
+    await saveJobDetails({});
     confirmBox.hidden = true;
     shownCount = PAGE_SIZE;
     await renderQueue();
     setStatus($('queue-status'), 'Queue cleared', 'ok');
   });
 
+  $('export-jobs').addEventListener('click', () => void exportApplied());
+  attachHelp($('archive-heading'), CONCEPT_HELP.exportJobs);
+
   document.addEventListener('click', () => closeAllMenus());
 
+  // Collect captures whose posting has since been deleted. Once per page load
+  // rather than per render, so a row removed with Undo still on screen keeps its
+  // text until the user has actually let it go.
+  const known = (await getJobUrls()).map((e) => e.url);
+  await mutateJobDetails((map) => pruneDetails(map, known));
+
   await renderQueue();
+}
+
+/**
+ * Write the applied postings out as one JSON file.
+ *
+ * A plain anchor download, deliberately: the options page is an extension page,
+ * so this needs no `downloads` permission, and the background could not do it
+ * anyway — an MV3 service worker has no `URL.createObjectURL`.
+ */
+async function exportApplied(): Promise<void> {
+  const status = $('export-status');
+  const [list, details] = await Promise.all([getJobUrls(), getJobDetails()]);
+  const jobs = buildExport(list, details);
+  if (jobs.length === 0) {
+    setStatus(status, 'No applied postings to export yet', 'err');
+    return;
+  }
+
+  const blob = new Blob([JSON.stringify(jobs, null, 2)], { type: 'application/json' });
+  const href = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = href;
+  a.download = exportFilename(new Date());
+  a.click();
+  URL.revokeObjectURL(href);
+
+  const missing = jobs.filter((j) => j.description.length === 0).length;
+  setStatus(
+    status,
+    missing === 0
+      ? `Exported ${jobs.length} posting(s)`
+      : `Exported ${jobs.length} posting(s) — ${missing} with no saved text`,
+    'ok',
+  );
 }
 
 /* ---------------- Getting started ---------------- */
