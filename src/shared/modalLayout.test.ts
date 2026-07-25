@@ -6,7 +6,7 @@
  */
 import { describe, it, expect } from 'vitest';
 import {
-  clampLayout, describeLimits, DEFAULT_MODAL_LAYOUT, layoutLimits, MIN_H, MIN_W,
+  clampLayout, describeLimits, DEFAULT_MODAL_LAYOUT, fullscreenLayout, layoutLimits, MIN_H, MIN_W,
   measureScreen, modelledViewport, NOMINAL_CHROME, REFERENCE_VIEWPORT, sampleScreen, snapLayout,
   type ScreenMetrics,
 } from './modalLayout';
@@ -60,6 +60,40 @@ describe('clampLayout', () => {
   it('rounds to whole pixels, so a drag cannot accumulate fractions', () => {
     const l = clampLayout({ right: 16.4, bottom: 16.6, width: 460.2, height: 720.7 }, 1440, 900);
     for (const v of Object.values(l)) expect(Number.isInteger(v)).toBe(true);
+  });
+});
+
+/**
+ * Fullscreen is expressed as a layout rather than as a special case in the modal,
+ * so it travels through the same clamp, the same limits and the same inline styles
+ * as any other. These three tests are what that reuse rests on.
+ */
+describe('fullscreenLayout', () => {
+  it('fills the viewport, flush on all four edges', () => {
+    expect(fullscreenLayout(1440, 900)).toEqual({ right: 0, bottom: 0, width: 1440, height: 900 });
+  });
+
+  it('survives the clamp every read goes through', () => {
+    // If it did not, the card would come out a pixel short of the edges it is
+    // meant to be flush against — and the flush styling is keyed off exactly that.
+    expect(clampLayout(fullscreenLayout(1280, 720), 1280, 720))
+      .toEqual(fullscreenLayout(1280, 720));
+  });
+
+  it('reads as flush against the screen on all four edges', () => {
+    // This is what buys the squared corners and the dropped borders in
+    // primitives.css: the CSS is keyed off `data-limit-*="screen"`, so assert the
+    // reading here rather than trusting the stylesheet to agree.
+    expect(layoutLimits(fullscreenLayout(1440, 900), 1440, 900)).toEqual({
+      top: 'screen', right: 'screen', bottom: 'screen', left: 'screen',
+    });
+  });
+
+  it('fills a viewport smaller than the minimum card, rather than overflowing it', () => {
+    // `clampLayout` deliberately lets a card fill a viewport below MIN_W/MIN_H,
+    // and fullscreen on a tiny window is exactly that case.
+    expect(clampLayout(fullscreenLayout(300, 200), 300, 200))
+      .toEqual({ right: 0, bottom: 0, width: 300, height: 200 });
   });
 });
 

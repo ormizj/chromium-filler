@@ -196,6 +196,15 @@ const MODAL_STATES: Record<string, Partial<ModalData>> = {
     jobRequirements: [],
     layout: { right: 0, bottom: 0, width: 460, height: 4000 },
   },
+  // Fullscreen, with a real posting in it — the state the button exists for, and
+  // the one place to check that the header still holds a site name, the segmented
+  // control and two icon buttons at 390px. Renders differently at each width: a
+  // squared, borderless card on desktop, a full-height sheet on the phone panel.
+  fullscreen: {
+    jobDescription: LONG_DESCRIPTION,
+    jobRequirements: [],
+    fullscreen: true,
+  },
   // A confident match that could not take the value — a <select> with no
   // matching option, or an override pointing at a wrapper. It reads as "needs
   // review" with a Confirm, never as filled: the dot is the user's only signal

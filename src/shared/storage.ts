@@ -213,6 +213,18 @@ export async function saveSettings(settings: Settings): Promise<void> {
   await chrome.storage.local.set({ [KEYS.settings]: settings });
 }
 
+/**
+ * Change some settings without writing back the ones you did not change.
+ *
+ * For callers holding a *snapshot* — the content script reads `settings` once at
+ * page load and a posting can sit open for an hour, so saving the whole object
+ * back would undo anything the user changed in Options meanwhile. Re-reading
+ * immediately before the write keeps the blast radius to the keys in `patch`.
+ */
+export async function patchSettings(patch: Partial<Settings>): Promise<void> {
+  await saveSettings({ ...(await getSettings()), ...patch });
+}
+
 export async function getJobUrls(): Promise<JobUrlEntry[]> {
   const raw = await chrome.storage.local.get(KEYS.jobUrls);
   const list = (raw[KEYS.jobUrls] as JobUrlEntry[]) ?? [];

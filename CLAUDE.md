@@ -36,8 +36,8 @@ footer overflow menu.
 
 `&state=…` picks which **flow** the surface is showing — modal: `long`, `redirect`,
 `redirect-followed`, `landed`, `empty`, `failed-fill`, `apply-unset`,
-`apply-unverified`, `applied`; setup: `external`, `help`, `cv-steps`,
-`submit-unset`, `success-unset`. A two-step posting
+`apply-unverified`, `applied`, `flush`, `fullscreen`; setup: `external`, `help`,
+`cv-steps`, `submit-unset`, `success-unset`. A two-step posting
 renders a different modal body entirely (notice + "Fill this page instead", no
 report), so it needs its own state rather than being inferred from the default
 data. Add a state here whenever a flow gains a distinct rendering. `state=long` is
@@ -265,6 +265,20 @@ re-render. It is **desktop only** — at or below
 bottom sheet and `modal.ts` *clears* the inline styles, because an inline width
 would beat the media query. Every read goes through `clampLayout`, so a layout
 chosen on a big monitor cannot strand the card off the edge of a laptop.
+
+`settings.modalFullscreen` **overrides that layout without writing it** — the
+configured card is what "exit fullscreen" gives back, so implementing this by
+saving a full-viewport rectangle would destroy the thing it is overriding.
+`applyLayout` swaps in `fullscreenLayout(innerWidth, innerHeight)`, which is flush
+on all four edges and therefore already squares the corners and drops the borders
+through the existing `data-limit-*` rules — desktop fullscreen needs no CSS of its
+own. Narrow does: inline styles are cleared there, so `.cf-card.cf-full` lifts the
+85vh cap in modal.css instead. The header's `.cf-fullscreen` toggle is the **only
+setting a content script writes** (via `patchSettings`, which re-reads first — the
+controller's `settings` snapshot is as old as the page). It is deliberately not a
+`draggedLayout`-style page-lifetime override: a drag is a nudge, this is a
+preference, and it holds until it is pressed again. Dragging is disabled while it
+is on, or the card would move out from under the flag.
 
 The simulator's frame is the user's **screen**, not the options window:
 `modelledViewport` takes `screen.avail*` and subtracts the browser chrome

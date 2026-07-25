@@ -14,7 +14,7 @@ import { generateSelector } from '../shared/selector';
 import { isExternalUrl } from '../shared/redirect';
 import { DEFAULT_SETTINGS } from '../shared/defaults';
 import {
-  getState, getSettings, saveSettings, saveFieldOverride, clearFieldOverride,
+  getState, getSettings, patchSettings, saveFieldOverride, clearFieldOverride,
   saveExtractSelector, clearExtractSelector, ensureConfigForUrl, mutateSiteConfig,
   saveRedirectSelector, clearRedirectSelector, type RedirectSelectorKey,
   saveSubmitSelector, clearSubmitSelector, saveSuccessSelector, clearSuccessSelector,
@@ -431,6 +431,15 @@ class Controller {
         // through a Reset & Re-run that would wipe them.
         onClose: () => this.modal?.minimize(),
         onLayoutChange: (layout) => { this.draggedLayout = layout; },
+        // The opposite of a drag, and the only setting a content script writes:
+        // "give this posting the whole window" is a preference, decided while
+        // looking at a posting, and it is meant to hold for the ones after it.
+        // Mutating the snapshot as well keeps one source of truth — the next
+        // `showModal` reads `this.settings` and renders the same answer.
+        onFullscreen: (on) => {
+          this.settings.modalFullscreen = on;
+          void patchSettings({ modalFullscreen: on });
+        },
       });
     }
     const job = extractJob(this.config!);
@@ -456,6 +465,7 @@ class Controller {
       // message handlers — without this the card would snap back to the stored
       // default the moment any of them ran.
       layout: this.draggedLayout ?? this.settings.modalLayout,
+      fullscreen: this.settings.modalFullscreen,
     });
   }
 
@@ -721,9 +731,8 @@ class Controller {
    * being re-taught the basics sixty times in a session is its own problem.
    */
   private async dismissHelp(): Promise<void> {
-    const settings = await getSettings();
-    if (settings.helpSeen) return;
-    await saveSettings({ ...settings, helpSeen: true });
+    if ((await getSettings()).helpSeen) return;
+    await patchSettings({ helpSeen: true });
   }
 
   private pickRedirect(key: RedirectSelectorKey): void {

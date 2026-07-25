@@ -27,7 +27,7 @@ import type { JobMeta } from '../../shared/jobMeta';
 import { FIELD_LABELS } from '../../shared/fieldKeys';
 import { STATUS_LABELS, matchStatus } from '../../shared/fieldStatus';
 import { ACTION_LABELS, STATUS_TEXT } from '../../shared/labels';
-import { clampLayout, layoutLimits, NARROW_WIDTH } from '../../shared/modalLayout';
+import { clampLayout, fullscreenLayout, layoutLimits, NARROW_WIDTH } from '../../shared/modalLayout';
 import { CONCEPT_HELP } from '../../shared/help';
 import { helpPanel } from '../../ui/help';
 import { BASE_CSS } from '../../ui/shadowCss';
@@ -57,6 +57,12 @@ export interface ModalCallbacks {
    * pointermove is what this split exists to avoid.
    */
   onLayoutPreview?(layout: ModalLayout): void;
+  /**
+   * The fullscreen toggle was pressed. Unlike a drag, this one *is* a preference:
+   * the controller persists it, and hands it straight back through `ModalData` on
+   * the next render, which is what keeps it on for the postings after this one.
+   */
+  onFullscreen?(on: boolean): void;
 }
 
 /** Set when the posting hands off to an external application instead of a form. */
@@ -99,6 +105,15 @@ export interface ModalData {
   session?: SessionState;
   /** Desktop size/position. Ignored on narrow screens (bottom sheet). */
   layout?: ModalLayout;
+  /**
+   * Fill the whole viewport, ignoring `layout` without discarding it.
+   *
+   * Data rather than instance state, unlike `view`/`peek`/`applyHelp`: those are
+   * this reader's state on this page, while this one is a stored setting that has
+   * to survive the tab. `showModal` rebuilds `ModalData` from controller state on
+   * every re-render, so anything that must outlive one has to arrive from there.
+   */
+  fullscreen?: boolean;
 }
 
 /** Below this width the card is a bottom sheet, and free-dragging makes no sense. */
@@ -166,6 +181,9 @@ export class FillerModal {
 
     const card = el('div', 'cf-card');
     if (this.peek) card.classList.add('peek');
+    // Desktop fullscreen is pure inline geometry (`applyLayout`); the class is
+    // what the narrow bottom sheet is styled off, where inline styles are barred.
+    if (data.fullscreen) card.classList.add('cf-full');
     card.setAttribute('role', 'dialog');
     card.setAttribute('aria-label', `${data.siteName} — ${data.jobTitle ?? 'fill report'}`);
 
@@ -231,6 +249,24 @@ export class FillerModal {
     if (this.data) this.render(this.data);
   }
 
+  /**
+   * Fill the viewport, or go back to the configured card.
+   *
+   * Writes the flag onto `this.data` *and* reports it, because the two have
+   * different jobs: the local write is what this render sees, and the callback is
+   * what makes it true of the next posting. `this.data.layout` is deliberately
+   * left alone — it is what "exit" has to give back.
+   */
+  setFullscreen(on: boolean): void {
+    if (!this.data || !!this.data.fullscreen === on) return;
+    this.data.fullscreen = on;
+    // A 40vh peek and a full-height sheet are contradictory answers to "how much
+    // room does this posting get"; the newer one wins.
+    if (on) this.peek = false;
+    this.render(this.data);
+    this.cb.onFullscreen?.(on);
+  }
+
   /* ---------------- Chrome ---------------- */
 
   private header(data: ModalData, card: HTMLElement): HTMLElement {
@@ -245,11 +281,23 @@ export class FillerModal {
     close.setAttribute('aria-label', 'Minimize');
     close.onclick = () => this.cb.onClose();
 
+    // Icon-only, so the label is spoken rather than shown, and `aria-pressed`
+    // carries the state — a toggle, not a button that does two different things.
+    // Offered on a two-step posting too: that page is nothing but prose to read,
+    // which is the case the extra room is worth the most in.
+    const full = document.createElement('button');
+    full.className = 'cf-fullscreen';
+    full.setAttribute('aria-pressed', String(!!data.fullscreen));
+    full.setAttribute('aria-label', data.fullscreen
+      ? ACTION_LABELS.exitFullscreen
+      : ACTION_LABELS.fullscreen);
+    full.onclick = () => this.setFullscreen(!data.fullscreen);
+
     header.append(site);
     // A two-step posting has no report to switch to: there is no form on this
     // page, so an empty Fields view would be a dead end.
     if (!data.redirect) header.append(this.viewToggle(data));
-    header.append(close);
+    header.append(full, close);
 
     this.makeDraggable(card, header);
     return header;
@@ -616,10 +664,11 @@ export class FillerModal {
   ];
 
   /**
-   * Size and place the card from the user's stored layout — but only on desktop.
-   * Under 640px the card is a full-width bottom sheet, and an inline width would
-   * beat the media query that makes it one, so the properties are cleared there
-   * rather than merely left unset.
+   * Size and place the card from the user's stored layout — or, when fullscreen
+   * is on, from the viewport — but only on desktop. Under 640px the card is a
+   * full-width bottom sheet, and an inline width would beat the media query that
+   * makes it one, so the properties are cleared there rather than merely left
+   * unset (fullscreen is a class there instead — see `.cf-card.cf-full`).
    *
    * The card is a FIXED size — the exact rectangle chosen in the Options
    * simulator, which is itself a fixed card drawn to scale. So `this.data.layout`
@@ -656,9 +705,16 @@ export class FillerModal {
       return;
     }
 
+    // Fullscreen overrides the stored rectangle without touching it, and is
+    // recomputed from the live viewport every call — so the card tracks a window
+    // being resized, and the configured layout is still there to go back to.
+    const intent = this.data.fullscreen
+      ? fullscreenLayout(window.innerWidth, window.innerHeight)
+      : this.data.layout;
+
     // The clamp is the only thing keeping the card on screen — the CSS caps that
     // used to do it are being turned off below.
-    const l = clampLayout(this.data.layout, window.innerWidth, window.innerHeight);
+    const l = clampLayout(intent, window.innerWidth, window.innerHeight);
     setLimitAttrs(card, layoutLimits(l, window.innerWidth, window.innerHeight));
     card.style.width = `${l.width}px`;
     card.style.height = `${l.height}px`;
@@ -696,7 +752,11 @@ export class FillerModal {
     let narrow = false;
 
     const onDown = (e: PointerEvent) => {
-      if ((e.target as HTMLElement).closest('.cf-close, .cf-views')) return;
+      if ((e.target as HTMLElement).closest('.cf-close, .cf-views, .cf-fullscreen')) return;
+      // Nothing to drag while fullscreen: moving the card would take it out from
+      // under the flag, leaving it looking restored while the setting still said
+      // fullscreen — and on narrow it would strand a 40vh peek claiming to be one.
+      if (this.data?.fullscreen) return;
       narrow = window.innerWidth <= NARROW;
       startX = e.clientX;
       startY = e.clientY;

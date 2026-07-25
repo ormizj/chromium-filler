@@ -18,6 +18,7 @@ export const DEFAULT_SETTINGS: Settings = {
   redirectTarget: 'newTabCloseSource',
   sessionBatchSize: 5,
   modalLayout: DEFAULT_MODAL_LAYOUT,
+  modalFullscreen: false,
   helpSeen: false,
 };
 

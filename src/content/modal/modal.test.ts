@@ -655,6 +655,142 @@ describe('FillerModal — flush edges', () => {
 });
 
 /**
+ * Fullscreen is an *override* of the stored layout, not a replacement for it: the
+ * user's configured card has to be waiting when they turn it off again. It is also
+ * the one modal state that outlives the page, so it arrives through `ModalData`
+ * from the controller rather than living on the instance the way `view` does.
+ */
+describe('FillerModal — fullscreen', () => {
+  const laid = (over: Partial<ModalData> = {}) => data([match()], {
+    jobTitle: 'A job',
+    layout: { right: 16, bottom: 16, width: 460, height: 720 },
+    ...over,
+  });
+
+  const card = () => shadow().querySelector('.cf-card') as HTMLElement;
+  const toggle = () => shadow().querySelector('.cf-fullscreen') as HTMLButtonElement;
+  const limits = () => {
+    const { limitTop, limitRight, limitBottom, limitLeft } = card().dataset;
+    return { top: limitTop, right: limitRight, bottom: limitBottom, left: limitLeft };
+  };
+
+  it('offers the toggle without spending the primary fill on it', () => {
+    // The coral belongs to Apply. A header control that took it would make a
+    // window decoration look like the decision the modal exists for.
+    setViewport(1440, 900);
+    modal = new FillerModal(callbacks());
+    modal.render(laid());
+    expect(toggle().getAttribute('aria-pressed')).toBe('false');
+    expect(toggle().getAttribute('aria-label')).toBe('Fullscreen');
+    expect(toggle().classList.contains('primary')).toBe(false);
+    expect(shadow().querySelectorAll('button.cf-btn.primary')).toHaveLength(1);
+  });
+
+  it('fills the viewport when pressed, and says so', () => {
+    setViewport(1440, 900);
+    const onFullscreen = vi.fn();
+    modal = new FillerModal(callbacks({ onFullscreen }));
+    modal.render(laid());
+
+    toggle().click();
+
+    expect(onFullscreen).toHaveBeenCalledWith(true);
+    expect(card().style.width).toBe('1440px');
+    expect(card().style.height).toBe('900px');
+    expect(card().style.right).toBe('0px');
+    expect(card().style.bottom).toBe('0px');
+    // All four edges flush is what squares the corners and drops the borders.
+    expect(limits()).toEqual({ top: 'screen', right: 'screen', bottom: 'screen', left: 'screen' });
+    expect(toggle().getAttribute('aria-pressed')).toBe('true');
+    expect(toggle().getAttribute('aria-label')).toBe('Exit fullscreen');
+  });
+
+  it('opens fullscreen when the stored setting says so', () => {
+    // The whole point of persisting it: the next posting must not need the click.
+    setViewport(1440, 900);
+    modal = new FillerModal(callbacks());
+    modal.render(laid({ fullscreen: true }));
+    expect(card().style.width).toBe('1440px');
+    expect(card().classList.contains('cf-full')).toBe(true);
+    expect(toggle().getAttribute('aria-pressed')).toBe('true');
+  });
+
+  it('gives back the configured card on the way out, untouched', () => {
+    // The regression this design exists to prevent: fullscreen must not be
+    // implemented by writing a full-viewport rectangle over `settings.modalLayout`,
+    // or turning it off would leave the user with no card to come back to.
+    setViewport(1440, 900);
+    const onFullscreen = vi.fn();
+    const d = laid({ fullscreen: true });
+    modal = new FillerModal(callbacks({ onFullscreen }));
+    modal.render(d);
+
+    toggle().click();
+
+    expect(onFullscreen).toHaveBeenCalledWith(false);
+    expect(card().style.width).toBe('460px');
+    expect(card().style.right).toBe('16px');
+    expect(d.layout).toEqual({ right: 16, bottom: 16, width: 460, height: 720 });
+  });
+
+  it('tracks the viewport as it changes', () => {
+    setViewport(1440, 900);
+    modal = new FillerModal(callbacks());
+    modal.render(laid({ fullscreen: true }));
+    expect(card().style.width).toBe('1440px');
+
+    setViewport(1000, 700);
+    expect(card().style.width).toBe('1000px');
+    expect(card().style.height).toBe('700px');
+  });
+
+  it('stops the header being a drag handle while it is on', () => {
+    // A drag would move the card out from under the flag: it would look
+    // un-fullscreened while the setting still said it was.
+    setViewport(1440, 900);
+    const onLayoutPreview = vi.fn();
+    const onLayoutChange = vi.fn();
+    modal = new FillerModal(callbacks({ onLayoutPreview, onLayoutChange }));
+    modal.render(laid({ fullscreen: true }));
+
+    const header = shadow().querySelector('.cf-header') as HTMLElement;
+    header.setPointerCapture = noop;
+    header.releasePointerCapture = noop;
+    const at = (type: string, x: number, y: number) =>
+      header.dispatchEvent(new MouseEvent(type, { clientX: x, clientY: y, bubbles: true }));
+
+    at('pointerdown', 500, 300);
+    at('pointermove', 400, 200);
+    at('pointerup', 400, 200);
+
+    expect(onLayoutPreview).not.toHaveBeenCalled();
+    expect(onLayoutChange).not.toHaveBeenCalled();
+    expect(card().style.width).toBe('1440px');
+  });
+
+  it('is a class and no inline geometry on a phone', () => {
+    // Under 640px the sheet is sized by the media query, and an inline width
+    // would beat it — so fullscreen there has to be CSS off this class.
+    setViewport(390, 800);
+    modal = new FillerModal(callbacks());
+    modal.render(laid({ fullscreen: true }));
+    expect(card().classList.contains('cf-full')).toBe(true);
+    expect(card().style.width).toBe('');
+    expect(card().style.maxHeight).toBe('');
+  });
+
+  it('is offered on a two-step posting too, which has no view toggle', () => {
+    // That page is nothing but a notice to read, so the room is worth more there
+    // than anywhere — and the header builds a different set of controls.
+    setViewport(1440, 900);
+    modal = new FillerModal(callbacks());
+    modal.render(laid({ redirect: { host: 'ats.example', reason: 'external', followed: false } }));
+    expect(shadow().querySelector('.cf-views')).toBeNull();
+    expect(toggle()).not.toBeNull();
+  });
+});
+
+/**
  * The Options simulator draws the same card at 1/3 scale, and the two are bound
  * both ways: the frame drives the preview, and dragging or closing the preview
  * drives the frame. These are the modal's half of that contract.

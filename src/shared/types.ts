@@ -226,6 +226,18 @@ export interface Settings {
    */
   modalLayout: ModalLayout;
   /**
+   * Open the review modal filling the whole viewport instead of at
+   * `modalLayout`. Toggled from the modal's own header button — the one setting
+   * the content script writes, because it is answering "I want to read this
+   * posting", which is a thing you decide while looking at a posting.
+   *
+   * It *overrides* `modalLayout` rather than replacing it, so turning it off
+   * returns the card to the rectangle the simulator configured. Not the
+   * browser's Fullscreen API: the card is a shadow root on someone else's page,
+   * which can refuse the request, and whose Escape would cancel it silently.
+   */
+  modalFullscreen: boolean;
+  /**
    * Whether the user has dismissed the setup panel's legend. The basics (what
    * the dots mean, auto vs. saved, what Pick does) are explained on top of the
    * panel until then, and one tap away afterwards — re-explaining them on every

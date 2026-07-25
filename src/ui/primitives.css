@@ -400,7 +400,11 @@ button.cf-btn[aria-disabled='true']:not(.primary):hover {
   }
 }
 
-.cf-close {
+/* The sheet's two header controls. One selector list, so the fullscreen toggle
+   and the close button cannot end up different sizes or weights beside each
+   other — which they did while each owned its own rule. */
+.cf-close,
+.cf-fullscreen {
   border: none;
   background: transparent;
   color: var(--muted);
@@ -411,10 +415,35 @@ button.cf-btn[aria-disabled='true']:not(.primary):hover {
   min-height: 32px;
 }
 @media (pointer: coarse) {
-  .cf-close {
+  .cf-close,
+  .cf-fullscreen {
     min-width: var(--tap);
     min-height: var(--tap);
   }
+}
+
+/* The fullscreen toggle carries an icon rather than a glyph, so it centres a
+   masked box instead of text — the same technique as `.cf-dot`. `--i` is keyed
+   off `aria-pressed`, so what the button looks like and what a screen reader
+   announces are one fact and cannot drift apart. */
+.cf-fullscreen {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex: none;
+  --i: var(--icon-expand);
+}
+.cf-fullscreen[aria-pressed='true'] {
+  --i: var(--icon-collapse);
+}
+.cf-fullscreen::before {
+  content: '';
+  display: block;
+  width: 16px;
+  height: 16px;
+  background: var(--muted);
+  -webkit-mask: var(--i) center / contain no-repeat;
+  mask: var(--i) center / contain no-repeat;
 }
 
 .cf-body {

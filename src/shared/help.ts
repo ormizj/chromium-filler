@@ -275,6 +275,16 @@ export const SETTINGS_HELP: Record<keyof Settings, HelpEntry> = {
       + 'page only and leaves this default alone. Desktop only: under 640px the modal is '
       + 'always a full-width bottom sheet.',
   },
+  modalFullscreen: {
+    title: 'Fullscreen review modal',
+    short: 'Overrides the size and position above until you turn it off.',
+    body: 'Opens the review modal filling the whole browser window instead of as a card in '
+      + 'the corner — worth it for reading a long description rather than skimming the '
+      + 'field report. The modal\'s own header button toggles this same switch, so you can '
+      + 'turn it on from a posting; it then stays on for every posting until you turn it '
+      + 'off. Your configured size and position are kept for when you do.',
+    when: 'You need this when the job description is the reason you opened the modal.',
+  },
   helpSeen: {
     title: 'Help seen',
     body: 'Records that you have dismissed the setup panel\'s legend, so the basics are '

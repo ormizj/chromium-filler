@@ -899,3 +899,74 @@ test('Modal: dragging the card on a posting moves it for that page only', async 
     await page.close();
   }
 });
+
+test('Modal: fullscreen fills the window and stays on for the next posting', async () => {
+  // The promise the button makes is "until you cancel it", so the test that
+  // matters is not the first click — it is the *second posting*, which is a fresh
+  // content script in a fresh tab that has to read the choice back out of storage.
+  // And the configured card has to survive being overridden, or there is nothing
+  // to come back to.
+  const chosen = { right: 40, bottom: 40, width: 420, height: 520 };
+  await patchSettings({ modalLayout: chosen, modalFullscreen: false });
+
+  const page = await context.newPage();
+  try {
+    await page.setViewportSize({ width: 1280, height: 900 });
+    await page.goto(urlFor('quick-plain'));
+    const card = page.locator('.cf-card');
+    await expect(card).toBeVisible({ timeout: 20_000 });
+
+    const box = async () => (await card.boundingBox())!;
+    expect((await box()).width, 'starts at the configured size').toBeCloseTo(420, 0);
+
+    await page.locator('.cf-fullscreen').click();
+    await expect.poll(async () => (await box()).width).toBeCloseTo(1280, 0);
+    const filled = await box();
+    expect(filled.height).toBeCloseTo(900, 0);
+    expect(filled.x).toBeCloseTo(0, 0);
+    expect(filled.y).toBeCloseTo(0, 0);
+
+    const settings = async () => await onExtensionPage((p) => p.evaluate(
+      async () => (await chrome.storage.local.get('settings')).settings,
+    ));
+    expect((await settings()).modalFullscreen, 'the choice is persisted').toBe(true);
+    expect((await settings()).modalLayout, 'fullscreen overrides the layout, it does not overwrite it')
+      .toEqual(chosen);
+
+    // Re-run rebuilds `ModalData` from controller state — the path a per-instance
+    // flag would be thrown away by.
+    await page.locator('.cf-more button').first().click();
+    await page.getByRole('button', { name: 'Re-run' }).click();
+    await expect(card).toBeVisible({ timeout: 20_000 });
+    await expect.poll(async () => (await box()).width).toBeCloseTo(1280, 0);
+  } finally {
+    await page.close();
+  }
+
+  // A different posting, in a tab that never saw the click.
+  const next = await context.newPage();
+  try {
+    await next.setViewportSize({ width: 1280, height: 900 });
+    await next.goto(urlFor('quick-nolink'));
+    const card = next.locator('.cf-card');
+    await expect(card).toBeVisible({ timeout: 20_000 });
+    const box = async () => (await card.boundingBox())!;
+    await expect.poll(async () => (await box()).width, {
+      message: 'the next posting opens fullscreen without being asked',
+    }).toBeCloseTo(1280, 0);
+
+    // And cancelling gives back exactly the card the simulator configured.
+    await next.locator('.cf-fullscreen').click();
+    await expect.poll(async () => (await box()).width).toBeCloseTo(420, 0);
+    const back = await box();
+    expect(back.height).toBeCloseTo(520, 0);
+    expect(back.x, 'right: 40 on a 1280 viewport').toBeCloseTo(1280 - 40 - 420, 0);
+
+    const stored = await onExtensionPage((p) => p.evaluate(
+      async () => (await chrome.storage.local.get('settings')).settings?.modalFullscreen,
+    ));
+    expect(stored, 'cancelling persists too').toBe(false);
+  } finally {
+    await next.close();
+  }
+});

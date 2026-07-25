@@ -77,6 +77,23 @@ export function clampLayout(layout: ModalLayout, vw: number, vh: number): ModalL
   };
 }
 
+/**
+ * The layout that fills a viewport: flush on all four edges, no gutter.
+ *
+ * Fullscreen is a *layout*, not a special case downstream of one. Expressed this
+ * way it travels through `clampLayout` unchanged and `layoutLimits` reads it as
+ * flush on all four sides, which is what already squares the card's corners and
+ * drops its borders (`.cf-card[data-limit-…]` in primitives.css) — so filling the
+ * screen needs no geometry code and no CSS of its own on desktop.
+ *
+ * Recomputed from the live viewport on every `resize`, never stored: the user's
+ * configured `settings.modalLayout` is what fullscreen is *overriding*, and it has
+ * to survive being overridden.
+ */
+export function fullscreenLayout(vw: number, vh: number): ModalLayout {
+  return { right: 0, bottom: 0, width: vw, height: vh };
+}
+
 /* ---------------- Modelling the user's screen ---------------- */
 
 /** Everything `modelledViewport` needs, taken from `window` and `window.screen`. */

@@ -308,6 +308,7 @@ async function initSettings(): Promise<void> {
   const closeOnSkip = $<HTMLInputElement>('close-on-skip');
   const closeDelay = $<HTMLInputElement>('close-delay');
   const redirectTarget = $<HTMLSelectElement>('redirect-target');
+  const modalFullscreen = $<HTMLInputElement>('modal-fullscreen');
 
   const settings = await getSettings();
   autoRun.checked = settings.autoRunOnLoad;
@@ -315,6 +316,7 @@ async function initSettings(): Promise<void> {
   closeOnSkip.checked = settings.closeTabOnSkip;
   closeDelay.value = String(settings.closeTabDelayMs);
   redirectTarget.value = settings.redirectTarget;
+  modalFullscreen.checked = settings.modalFullscreen;
 
   const persist = async () => {
     const s = await getSettings();
@@ -325,6 +327,7 @@ async function initSettings(): Promise<void> {
       closeTabOnSkip: closeOnSkip.checked,
       closeTabDelayMs: Math.max(0, Number(closeDelay.value) || 0),
       redirectTarget: redirectTarget.value as RedirectTarget,
+      modalFullscreen: modalFullscreen.checked,
     });
     setStatus($('settings-status'), 'Saved', 'ok');
   };
@@ -334,6 +337,7 @@ async function initSettings(): Promise<void> {
   closeOnSkip.addEventListener('change', persist);
   closeDelay.addEventListener('change', persist);
   redirectTarget.addEventListener('change', persist);
+  modalFullscreen.addEventListener('change', persist);
 
   /**
    * Each row gets the catalog's one-line `short` as its caption and the full entry
@@ -360,6 +364,7 @@ async function initSettings(): Promise<void> {
   attachRowHelp(closeOnSkip, SETTINGS_HELP.closeTabOnSkip);
   attachRowHelp(closeDelay, SETTINGS_HELP.closeTabDelayMs);
   attachRowHelp(redirectTarget, SETTINGS_HELP.redirectTarget);
+  attachRowHelp(modalFullscreen, SETTINGS_HELP.modalFullscreen);
 
   await initModalLayout(settings.modalLayout);
 }

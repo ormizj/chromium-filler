@@ -73,6 +73,14 @@
   --icon-x: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='3.2' stroke-linecap='round' stroke-linejoin='round'><path d='M6.5 6.5l11 11M17.5 6.5l-11 11'/></svg>");
   --icon-dash: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='3.2' stroke-linecap='round'><path d='M6 12h12'/></svg>");
 
+  /* The review modal's fullscreen toggle, masked the same way — four corner
+     brackets facing out to enter, in to exit. A glyph (⤢) would be less code and
+     is not reliably in the font on Android, where this button matters most.
+     Lighter stroke than the status dots: those are 14px circles, this is a 16px
+     icon, and 3.2 at that size closes the corners into blobs. */
+  --icon-expand: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2.4' stroke-linecap='round' stroke-linejoin='round'><path d='M9 3H3v6'/><path d='M15 3h6v6'/><path d='M9 21H3v-6'/><path d='M15 21h6v-6'/></svg>");
+  --icon-collapse: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2.4' stroke-linecap='round' stroke-linejoin='round'><path d='M3 9h6V3'/><path d='M21 9h-6V3'/><path d='M3 15h6v6'/><path d='M21 15h-6v6'/></svg>");
+
   /* Geometry. `--tap` is the minimum comfortable touch target; primitives.css
      applies it to every control under `@media (pointer: coarse)`. */
   --tap: 44px;

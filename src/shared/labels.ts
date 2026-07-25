@@ -55,7 +55,9 @@ export type ActionKey =
   | 'more'
   | 'openApplication'
   | 'openApplicationAgain'
-  | 'fillAnyway';
+  | 'fillAnyway'
+  | 'fullscreen'
+  | 'exitFullscreen';
 
 export const ACTION_LABELS: Record<ActionKey, string> = {
   apply: 'Apply',
@@ -72,4 +74,8 @@ export const ACTION_LABELS: Record<ActionKey, string> = {
   openApplication: 'Open application',
   openApplicationAgain: 'Open again',
   fillAnyway: 'Fill this page instead',
+  // Icon-only in the modal header, so these are read aloud rather than shown —
+  // which is exactly why they belong here and not inline as a string literal.
+  fullscreen: 'Fullscreen',
+  exitFullscreen: 'Exit fullscreen',
 };

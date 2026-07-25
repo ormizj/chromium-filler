@@ -178,6 +178,15 @@
           </div>
 
           <h3>Review modal — size &amp; position</h3>
+          <!-- Above the simulator, because it overrides it: reading the drag
+               instructions first and only then learning the card is fullscreen
+               anyway is the wrong order. Caption comes from SETTINGS_HELP. -->
+          <div class="settings-list">
+            <div class="setrow">
+              <div class="setrow-text"><h5>Open the modal fullscreen</h5></div>
+              <label class="switch"><input type="checkbox" id="modal-fullscreen" class="switch-input" /><span class="switch-track" aria-hidden="true"><i></i></span></label>
+            </div>
+          </div>
           <p class="hint" style="margin: 0 0 8px;">
             Drag the card to move it; drag its top-left corner to resize, or its left
             or top edge to resize one direction only. Edges snap to the screen edge
