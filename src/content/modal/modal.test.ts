@@ -284,9 +284,11 @@ describe('FillerModal — the report says what it means', () => {
     expect(legend.querySelectorAll('.cf-dot').length).toBe(3);
   });
 
-  it('says that nothing has been sent yet', () => {
-    const body = render(data([match()])).querySelector('.cf-legend-send')!;
-    expect(body.textContent).toMatch(/nothing has been sent/i);
+  // Said once, in the footer, beside the button that would change it — rather
+  // than under the report, which is where the user is not looking when they ask.
+  it('says that nothing has been sent yet, next to the button that sends', () => {
+    const footer = render(data([match()])).querySelector('.cf-footer')!;
+    expect(footer.querySelector('.cf-flow')!.textContent).toMatch(/nothing has been sent/i);
   });
 
   // The two-step body has no report at all, so a report key there would be a lie.
@@ -368,6 +370,10 @@ describe('FillerModal — the footer offers Apply and Skip', () => {
  * Apply greys out when no Send button could be found. A greyed control that
  * cannot say why it is grey is how a user concludes the extension is broken —
  * which is exactly what happened to the button this one replaced.
+ *
+ * The reason now sits in the flow banner at the top of the body, stated at rest
+ * rather than only after a press: a card whose sole clue was a dead-looking
+ * button is what "the flow is hard to find" meant in practice.
  */
 describe('FillerModal — the greyed Apply button explains itself', () => {
   it('stays pressable when there is nothing to press, so the press can answer', () => {
@@ -377,17 +383,37 @@ describe('FillerModal — the greyed Apply button explains itself', () => {
     expect(button.hasAttribute('disabled')).toBe(false);
   });
 
+  it('states the reason without being asked', () => {
+    const banner = render(data([match()], { applyState: 'noButton' }))
+      .querySelector('.cf-flow.warn')!;
+    expect(banner).not.toBeNull();
+    expect(banner.textContent).toMatch(/send button/i);
+    // Only the long form is behind the disclosure.
+    expect(banner.querySelector('.cf-help')).toBeNull();
+    expect(banner.querySelector('.cf-help-btn')).not.toBeNull();
+  });
+
   it('opens a note saying what Apply does and how to point it at the button', () => {
     const shadow = render(data([match()], { applyState: 'noButton' }));
-    expect(shadow.querySelector('.cf-footer .cf-help')).toBeNull();
+    expect(shadow.querySelector('.cf-flow .cf-help')).toBeNull();
 
     footerBtn(shadow, 'Apply').click();
-    const note = shadow.querySelector('.cf-footer .cf-help')!;
+    const note = shadow.querySelector('.cf-flow .cf-help')!;
     expect(note).not.toBeNull();
     expect(note.textContent).toMatch(/set up this site|send button/i);
     // Pressing again puts it away.
     footerBtn(shadow, 'Apply').click();
-    expect(shadow.querySelector('.cf-footer .cf-help')).toBeNull();
+    expect(shadow.querySelector('.cf-flow .cf-help')).toBeNull();
+  });
+
+  // The banner's own `?` and the blocked Apply drive the same disclosure — two
+  // controls for one panel, which must not get out of step with each other.
+  it('opens the same note from the banner’s own help button', () => {
+    const shadow = render(data([match()], { applyState: 'noButton' }));
+    const ask = shadow.querySelector<HTMLButtonElement>('.cf-flow .cf-help-btn')!;
+    ask.click();
+    expect(shadow.querySelector('.cf-flow .cf-help')).not.toBeNull();
+    expect(shadow.querySelector('.cf-flow .cf-help-btn')!.getAttribute('aria-expanded')).toBe('true');
   });
 
   it('does not fire onApply while it is grey', () => {
@@ -405,7 +431,7 @@ describe('FillerModal — the greyed Apply button explains itself', () => {
 
     button.click();
     expect(onApply).toHaveBeenCalledOnce();
-    expect(shadow.querySelector('.cf-footer .cf-help')).toBeNull();
+    expect(shadow.querySelector('.cf-flow .cf-help')).toBeNull();
   });
 
   /**
@@ -419,9 +445,11 @@ describe('FillerModal — the greyed Apply button explains itself', () => {
     const apply = footerBtn(shadow, 'Apply');
     expect(apply.getAttribute('aria-disabled')).toBe('true');
     expect(apply.getAttribute('aria-label')).toMatch(/confirmation/i);
+    // Stated up front, in the banner, as well as in the note behind it.
+    expect(shadow.querySelector('.cf-flow.warn')!.textContent).toMatch(/confirmation element/i);
 
     apply.click();
-    const note = shadow.querySelector('.cf-footer .cf-help')!;
+    const note = shadow.querySelector('.cf-flow .cf-help')!;
     expect(note.textContent).toMatch(/confirmation element/i);
     // It must not send the user hunting for a button that was already found.
     expect(note.textContent).not.toMatch(/no such button could be found/i);
@@ -433,10 +461,51 @@ describe('FillerModal — the greyed Apply button explains itself', () => {
     modal = new FillerModal(callbacks());
     modal.render(data([match()], { applyState: 'noButton' }));
     modal.setApplyHelp(true);
-    expect(shadow().querySelector('.cf-footer .cf-help')).not.toBeNull();
+    expect(shadow().querySelector('.cf-flow .cf-help')).not.toBeNull();
 
     modal.render(data([match()], { applyState: 'ready' }));
-    expect(shadow().querySelector('.cf-footer .cf-help')).toBeNull();
+    expect(shadow().querySelector('.cf-flow .cf-help')).toBeNull();
+    expect(shadow().querySelector('.cf-flow.warn')).toBeNull();
+  });
+});
+
+/**
+ * The resting state — the one the modal used to say nothing about. A filled
+ * posting waiting on the user is by far the commonest thing on screen, and the
+ * card showed a job advert and a coral button with no statement connecting them.
+ */
+describe('FillerModal — it says where the posting is in the flow', () => {
+  it('reports the fill and that nothing has gone anywhere yet', () => {
+    const banner = render(data([
+      match({ field: 'email', filled: true }),
+      match({ field: 'phone', confidence: 'low', filled: false }),
+    ])).querySelector('.cf-flow.quiet')!;
+    expect(banner.textContent).toMatch(/nothing has been sent/i);
+    expect(banner.textContent).toContain('1 of 2');
+  });
+
+  it('says the same thing in both views', () => {
+    modal = new FillerModal(callbacks());
+    modal.render(data([match()], { jobTitle: 'A job' }));
+    expect(shadow().querySelector('.cf-flow')).not.toBeNull();
+    modal.setView('fields');
+    expect(shadow().querySelector('.cf-flow')).not.toBeNull();
+  });
+
+  // A page with a Send button but no fields the extension recognised. It is not
+  // "ready to review" — there is nothing to review — and it is not blocked either.
+  it('reports an unrecognised form as empty rather than as ready', () => {
+    const banner = render(data([], { applyState: 'ready' })).querySelector('.cf-flow')!;
+    expect(banner.className).toContain('quiet');
+    expect(banner.textContent).toMatch(/nothing to fill/i);
+  });
+
+  // A listing page has neither fields nor a Send button, and the question its
+  // greyed Apply provokes is still "why can't I apply?".
+  it('still explains a blocked Apply on a page with no fields', () => {
+    const banner = render(data([], { applyState: 'noButton' })).querySelector('.cf-flow')!;
+    expect(banner.className).toContain('warn');
+    expect(banner.textContent).toMatch(/send button/i);
   });
 });
 
@@ -458,13 +527,47 @@ describe('FillerModal — it says when the application went through', () => {
     expect(banner.textContent).toMatch(/sent/i);
     // Live region, because it appears without the user having moved focus.
     expect(banner.getAttribute('role')).toBe('status');
+    // Named as what the site said, not as what the extension did: the claim is
+    // only as good as the confirmation element that produced it.
+    expect(banner.textContent).toContain('Test site');
+  });
+
+  /**
+   * The confirmation lost to the posting on every axis that decides what gets
+   * read first — 13px against 24px, a strip against a headline. It was "really
+   * hard to find" for exactly that reason, so the hierarchy is now asserted.
+   */
+  it('outranks the job title rather than sitting under it', () => {
+    modal = new FillerModal(callbacks());
+    modal.render(sent());
+    const root = shadow();
+    const banner = root.querySelector('.cf-applied')!;
+    const title = root.querySelector('.cf-title')!;
+    // The banner comes first in the body…
+    expect(banner.compareDocumentPosition(title) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    // …and the title steps down to make room for it.
+    expect(title.className).toContain('cf-title-sub');
+    // Nothing left to do here, said in words.
+    expect(root.textContent).toMatch(/safe to close this tab/i);
+  });
+
+  // The body scrolls; on a long posting the banner scrolls away with it, and the
+  // header is the one strip of the card that is always on screen.
+  it('marks the header too, which never scrolls away', () => {
+    modal = new FillerModal(callbacks());
+    modal.render(sent());
+    const chip = shadow().querySelector('.cf-header .cf-sent-chip')!;
+    expect(chip).not.toBeNull();
+    expect(chip.textContent).toMatch(/sent/i);
   });
 
   it('shows it on the report too, where the legend would otherwise deny it', () => {
     const shadow = render(sent());
     expect(shadow.querySelector('.cf-applied')).not.toBeNull();
+    // The report is a record now, not a plan — and the footer's "nothing sent
+    // yet" line is gone, rather than contradicting the banner above it.
     expect(shadow.querySelector('.cf-legend-send')!.textContent).toMatch(/already sent/i);
-    expect(shadow.querySelector('.cf-legend-send')!.textContent).not.toMatch(/nothing has been sent/i);
+    expect(shadow.textContent).not.toMatch(/nothing has been sent/i);
   });
 
   // Pressing Apply twice would send a second application to the same posting.
@@ -536,7 +639,7 @@ describe('FillerModal — the Fields tab advertises what it is hiding', () => {
     }));
     const root = shadow();
     expect(root.querySelector('.cf-views')).toBeNull();
-    expect(root.querySelector('.cf-notice')!.textContent).toContain('ats.acme.test');
+    expect(root.querySelector('.cf-flow.accent')!.textContent).toContain('ats.acme.test');
   });
 });
 

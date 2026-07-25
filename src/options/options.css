@@ -45,6 +45,15 @@ h3 {
   margin: var(--space-7) 0 var(--space-3);
 }
 
+/* A heading that carries a `?` is a row, not a line of text — otherwise the
+   button sits on the text baseline and reads as punctuation after the word. */
+h2:has(> .cf-help-btn),
+h3:has(> .cf-help-btn) {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
 .hint {
   color: var(--muted);
   font-size: var(--text-md);
@@ -335,6 +344,11 @@ label.check input {
   align-items: center;
   gap: var(--space-2);
 }
+/* The row's `?`, pushed to the end of the title line so it lands in the same
+   place on every row instead of trailing whatever the title happens to say. */
+.setrow-text > .cf-help-btn {
+  margin-left: auto;
+}
 .setrow-text p,
 .setrow-caption {
   flex: 1 0 100%;
@@ -466,8 +480,9 @@ label.fld.inline input {
  * paper here, where in the modal they are insets cut into a paper card. Same
  * component, opposite side of the same alternation — the tone is a property of what
  * a thing sits on, so it is stated by the surface rather than baked into the
- * primitive. (Only these two: `.chip` and `.cf-help-btn` always sit inside a paper
- * object on this page, so their `--surface` fill is already the nested case.)
+ * primitive. (Only these two: `.chip` always sits inside a paper object on this
+ * page, so its `--surface` fill is already the nested case, and `.cf-help-btn`
+ * has no fill of its own at all.)
  */
 .cf-stat {
   background: var(--bg);
@@ -479,8 +494,20 @@ label.fld.inline input {
 .cf-help {
   background: var(--bg);
 }
+
+/* Applied is the number the whole queue exists to move — the one thing on this
+   row a user is actually working towards. As one of six identical paper tiles it
+   read as just another category, so it takes the tint as well as the colour. */
+.cf-stat.applied {
+  background: var(--ok-weak);
+  border-color: transparent;
+}
 .cf-stat.applied .cf-stat-n {
   color: var(--ok);
+}
+.cf-stat.applied .cf-stat-k {
+  color: var(--ok);
+  opacity: 0.85;
 }
 .cf-stat.redirected .cf-stat-n {
   color: var(--accent);
@@ -1142,6 +1169,37 @@ label.fld.inline input {
 .startstep-go {
   flex: none;
   color: var(--accent);
+}
+
+/**
+ * Where a “Go →” landed. The focus ring it leaves behind is on one control at
+ * the far end of a scroll — easy to miss, and it says nothing about which
+ * section arrived. A section is the recessed body of its tab and has no border
+ * of its own, so the mark is a ring rather than a change of fill. Removed on a
+ * timer by `revealSection`, and the transition is what fades it out.
+ */
+/* An animation rather than a transition on the class: the target is sometimes a
+   section and sometimes a paper object inside one (the session panel), and a
+   transition would have to be declared on every one of them to survive the class
+   being removed — this fades out on its own. */
+.flash {
+  animation: flash-ring 1200ms ease-out;
+}
+
+@keyframes flash-ring {
+  from {
+    box-shadow: 0 0 0 2px var(--accent);
+  }
+  to {
+    box-shadow: 0 0 0 2px transparent;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .flash {
+    animation: none;
+    box-shadow: 0 0 0 2px var(--accent);
+  }
 }
 
 /* ---------------- Reference + explainer ---------------- */

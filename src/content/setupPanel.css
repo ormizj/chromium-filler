@@ -104,9 +104,17 @@
   display: none;
 }
 
+/* The same drawn chevron as a section's, rather than the `▾` glyph — two
+   disclosures on one panel must not open with two different marks. */
 .cf-legend > summary::after {
-  content: '▾';
+  content: '';
+  flex: none;
   margin-left: auto;
+  width: 16px;
+  height: 16px;
+  background: currentcolor;
+  -webkit-mask: var(--icon-chevron) center / contain no-repeat;
+  mask: var(--icon-chevron) center / contain no-repeat;
   transition: transform 120ms ease;
 }
 .cf-legend[open] > summary::after {
@@ -177,11 +185,25 @@
   display: none;
 }
 
-/* Chevron, rotated when open. */
+/* The title takes the slack, so everything after it lands in the same column on
+   every section — with or without a count chip. This replaces a pair of
+   `:has()` rules that moved the auto margin between the chip and the `?`
+   depending on which came first; the order is fixed, so the layout can be too. */
+.cf-group > summary > span:first-child {
+  flex: 1;
+  min-width: 0;
+}
+
+/* Chevron, rotated when open — drawn, not typeset. As `▾` at the summary's own
+   13px it was a speck sitting beside the help icon. */
 .cf-group > summary::after {
-  content: '▾';
-  margin-left: auto;
-  color: var(--muted);
+  content: '';
+  flex: none;
+  width: 16px;
+  height: 16px;
+  background: var(--muted);
+  -webkit-mask: var(--icon-chevron) center / contain no-repeat;
+  mask: var(--icon-chevron) center / contain no-repeat;
   transition: transform 120ms ease;
 }
 .cf-group[open] > summary::after {
@@ -190,27 +212,6 @@
 
 .cf-group-body {
   padding: var(--space-4);
-}
-
-/* Count of rows still needing attention, shown on a collapsed group. */
-.cf-group-count {
-  margin-left: auto;
-}
-.cf-group > summary:has(.cf-group-count)::after {
-  margin-left: var(--space-3);
-}
-
-/* The `?` sits between the count and the chevron. Whichever of the two comes
-   first takes the auto margin, so the chevron always stays on the right edge
-   and the gap never collapses onto the heading. */
-.cf-group > summary .cf-help-btn {
-  margin-left: var(--space-2);
-}
-.cf-group > summary:not(:has(.cf-group-count)) .cf-help-btn {
-  margin-left: auto;
-}
-.cf-group > summary:has(.cf-help-btn)::after {
-  margin-left: var(--space-3);
 }
 
 .cf-section-row {

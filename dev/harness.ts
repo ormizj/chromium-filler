@@ -113,8 +113,12 @@ const BASE_MODAL: ModalData = {
   jobRequirements: [
     { kind: 'list', items: ['8+ years', 'Kubernetes', 'Go or Rust', 'On-call experience'] },
   ],
-  // What `shared/jobMeta.ts` reads off a posting with JSON-LD. A board that
-  // publishes none renders no chip row at all — see `state=empty`.
+  // Invented fixture values, like everything else on this fake posting — the
+  // extension never derives these. `shared/jobMeta.ts` reads all three off the
+  // page's own `JobPosting` JSON-LD or a configured selector, and renders nothing
+  // where the posting states nothing (see `state=empty`, whose chip row is
+  // absent). `Remote (Berlin, DE)` is the one composed value, and both halves are
+  // still stated facts: `jobLocationType: TELECOMMUTE` plus the `jobLocation`.
   meta: { company: 'Acme', location: 'Remote (Berlin, DE)', employmentType: 'Full-time' },
   matches: REPORT,
   applyState: 'ready',

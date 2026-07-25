@@ -27,8 +27,9 @@ import type { JobMeta } from '../../shared/jobMeta';
 import { FIELD_LABELS } from '../../shared/fieldKeys';
 import { STATUS_LABELS, matchStatus } from '../../shared/fieldStatus';
 import { ACTION_LABELS, STATUS_TEXT } from '../../shared/labels';
+import { flowBanner, type ApplyState } from '../../shared/flowState';
 import { CONCEPT_HELP } from '../../shared/help';
-import { helpPanel } from '../../ui/help';
+import { helpButton, helpPanel } from '../../ui/help';
 import { Sheet, type SheetCallbacks, type SheetData } from '../sheet';
 import modalCss from './modal.css?inline';
 
@@ -62,11 +63,11 @@ export interface RedirectNotice {
 export type ModalView = 'job' | 'fields';
 
 /**
- * Whether Apply can run here. The two failures are kept apart because they need
- * different answers from the user: find the button, or teach the site what its
- * confirmation looks like. One shared "unavailable" told them neither.
+ * Whether Apply can run here — now decided alongside every other step of the
+ * flow, in `shared/flowState.ts`. Re-exported so `content/main.ts` and the dev
+ * harness keep importing it from the modal, where it has always lived.
  */
-export type ApplyState = 'ready' | 'noButton' | 'noConfirmation';
+export type { ApplyState };
 
 export interface ModalData extends SheetData {
   siteName: string;
@@ -199,6 +200,13 @@ export class FillerModal extends Sheet<ModalData> {
     full.onclick = () => this.setFullscreen(!data.fullscreen);
 
     header.append(site);
+    // The outcome, on the one strip of the card that is always visible — the body
+    // scrolls, and on a long posting the confirmation banner scrolls away with it.
+    if (data.applied) {
+      const chip = el('span', 'chip ok cf-sent-chip');
+      chip.textContent = 'Sent';
+      header.append(chip);
+    }
     // A two-step posting has no report to switch to: there is no form on this
     // page, so an empty Fields view would be a dead end.
     if (!data.redirect) header.append(this.viewToggle(data));
@@ -245,6 +253,14 @@ export class FillerModal extends Sheet<ModalData> {
    */
   private footer(data: ModalData): HTMLElement {
     const footer = el('div', 'cf-footer');
+    // The resting state — "filled, nothing has been sent yet" — belongs against
+    // the button it is about, not above the job title. The Job view leads with
+    // the posting on purpose, and a fill-status line at the top of it inverted
+    // that; down here the sentence and the control that acts on it are one
+    // object, which is what "where do I actually apply?" was asking for.
+    const banner = this.flowBanner(data);
+    if (banner.classList.contains('quiet')) footer.append(banner);
+
     const actions = el('div', 'cf-footer-actions');
     // A posting you do not want is worth skipping whether or not you can apply
     // to it here, so Skip is on both branches. The label names the consequence:
@@ -307,16 +323,69 @@ export class FillerModal extends Sheet<ModalData> {
       ]),
     );
 
-    // Above the buttons, not beside them: the answer belongs where the question
-    // was asked, rather than behind a second control the user would have to find
-    // first — and appearing beside them would shift the row under their thumb.
-    if (this.applyHelp && data.applyState !== 'ready') {
-      footer.append(helpPanel(
-        data.applyState === 'noConfirmation' ? CONCEPT_HELP.applyUnverified : CONCEPT_HELP.apply,
-      ));
-    }
     footer.append(actions);
     return footer;
+  }
+
+  /* ---------------- The flow banner ---------------- */
+
+  /**
+   * What happened, and what to do about it — the first thing in either view.
+   *
+   * This replaces three unrelated renderings that never appeared together and,
+   * between them, still left the card silent in the commonest case: an `applied`
+   * banner, a `redirect` notice further down the body, and an explanation of the
+   * greyed-out Apply that only existed *after* the user pressed it. A posting
+   * that was simply filled and waiting said nothing at all.
+   *
+   * `shared/flowState.ts` decides which state this is and words it; this only
+   * draws it. The `applied` case additionally takes the `.cf-applied` class and
+   * `role="status"`, both of which the E2E suite reads back.
+   */
+  private flowBanner(data: ModalData): HTMLElement {
+    const flow = flowBanner({
+      applyState: data.applyState,
+      applied: data.applied,
+      redirect: data.redirect,
+      filled: data.matches.filter((m) => m.filled).length,
+      total: data.matches.length,
+      siteName: data.siteName,
+    });
+
+    const box = el('div', `cf-flow ${flow.tone}${flow.key === 'applied' ? ' cf-applied' : ''}`);
+    // A live region only where something genuinely arrived without the user
+    // having moved focus. On the resting states it would announce the same
+    // sentence after every Confirm.
+    if (flow.key === 'applied') box.setAttribute('role', 'status');
+
+    const head = el('div', 'cf-flow-head');
+    // Status is never colour alone — the quiet states carry no dot because they
+    // report no status, only where you are.
+    if (flow.tone === 'ok' || flow.tone === 'warn') {
+      const dot = el('span', `cf-dot ${flow.tone}`);
+      dot.setAttribute('role', 'img');
+      dot.setAttribute('aria-label', flow.tone === 'ok' ? 'applied' : 'unavailable');
+      head.append(dot);
+    }
+
+    const text = el('div', 'cf-flow-text');
+    const title = el('b', 'cf-flow-title');
+    title.textContent = flow.title;
+    const detail = el('span', 'cf-flow-detail');
+    detail.textContent = flow.detail;
+    text.append(title, detail);
+    head.append(text);
+
+    // The long form stays behind a disclosure: the blocked states have a
+    // paragraph's worth of explanation each, and rendering it inline filled the
+    // card with prose before the user could reach the posting.
+    if (flow.help) {
+      head.append(helpButton(flow.title, this.applyHelp, (open) => this.setApplyHelp(open)));
+    }
+    box.append(head);
+    if (flow.help && this.applyHelp) box.append(helpPanel(CONCEPT_HELP[flow.help]));
+
+    return box;
   }
 
   /* ---------------- The two views ---------------- */
@@ -328,10 +397,16 @@ export class FillerModal extends Sheet<ModalData> {
     // Top of the body, above the title: the site's own confirmation is often
     // below the fold or hidden behind this very card, so "did that go through?"
     // was a question the user answered by scrolling around the page they sent.
-    if (data.applied) body.append(this.appliedBanner());
+    // The resting state is the exception and rides with the footer instead —
+    // see `placeBanner`.
+    const banner = this.flowBanner(data);
+    if (!banner.classList.contains('quiet')) body.append(banner);
 
     if (data.jobTitle) {
-      const t = el('h2', 'cf-title');
+      // Once the application is in, the posting is no longer the headline — it is
+      // the receipt's subject line. `.cf-title` at 24px next to a 13px "sent"
+      // banner said the opposite, which is why the confirmation was hard to find.
+      const t = el('h2', `cf-title${data.applied ? ' cf-title-sub' : ''}`);
       t.textContent = data.jobTitle;
       body.append(t);
     }
@@ -351,16 +426,21 @@ export class FillerModal extends Sheet<ModalData> {
       body.append(row);
     }
 
+    // The one thing left to tell someone whose application is in: that there is
+    // nothing left to do here. Without it the card just stops, and a user who had
+    // been told to review before applying kept looking for the next step.
+    if (data.applied) {
+      const done = el('p', 'cf-empty');
+      done.textContent = 'Recorded as applied — safe to close this tab.';
+      body.append(done);
+    }
+
     if (data.redirect) {
-      // Two-step posting: say where the application actually lives, directly
-      // under the title — a long description must never bury it.
-      const notice = el('p', 'cf-notice');
-      notice.textContent = data.redirect.host
-        ? `${data.redirect.followed ? 'Opening' : 'Applies on'} ${data.redirect.host} — external application`
-        : 'External application — this posting applies on the employer’s site';
+      // The banner above already says where the application lives; this is the
+      // detector's own evidence for having said so, kept small and last.
       const why = el('small', 'cf-why');
       why.textContent = data.redirect.reason;
-      body.append(notice, why);
+      body.append(why);
     }
 
     const description = data.jobDescription ?? [];
@@ -403,27 +483,14 @@ export class FillerModal extends Sheet<ModalData> {
     return wrap;
   }
 
-  /**
-   * The one unambiguous good-news state. Worded as what the *site* said, not as
-   * what the extension did: the claim is only as good as the confirmation
-   * element it saw, and saying so is what keeps it honest.
-   */
-  private appliedBanner(): HTMLElement {
-    const banner = el('p', 'cf-applied');
-    const dot = el('span', 'cf-dot ok');
-    dot.setAttribute('role', 'img');
-    dot.setAttribute('aria-label', 'applied');
-    const text = el('span');
-    text.textContent = 'Application sent — the site confirmed it.';
-    banner.append(dot, text);
-    banner.setAttribute('role', 'status');
-    return banner;
-  }
-
   /** The fill report: what went in, what needs a look, what was never found. */
   private fieldsBody(data: ModalData): HTMLElement {
     const body = el('div', 'cf-body');
-    if (data.applied) body.append(this.appliedBanner());
+    // The same banner as the Job view. Switching tabs must not change what the
+    // card claims has happened — the report's own legend would otherwise be the
+    // only thing on screen talking about whether anything was sent.
+    const banner = this.flowBanner(data);
+    if (!banner.classList.contains('quiet')) body.append(banner);
 
     const counts = statCounts(data.matches);
     const summary = el('p', 'cf-summary');
@@ -445,11 +512,17 @@ export class FillerModal extends Sheet<ModalData> {
       label.textContent = STATUS_TEXT[status].word;
       legend.append(dot, label);
     }
-    const sent = el('small', 'cf-legend-send');
-    sent.textContent = data.applied
-      ? 'Already sent — this report is what went in.'
-      : 'Nothing has been sent. Press Apply when you are ready, or Skip.';
-    body.append(legend, sent);
+    body.append(legend);
+
+    // Only once it has been sent. "Nothing has been sent yet" now rides in the
+    // footer next to Apply, and repeating it here — forty pixels above that same
+    // sentence — was the report saying the same thing twice. What survives is the
+    // part the footer cannot say: that this report is a record, not a plan.
+    if (data.applied) {
+      const sent = el('small', 'cf-legend-send');
+      sent.textContent = 'Already sent — this report is what went in.';
+      body.append(sent);
+    }
 
     return body;
   }

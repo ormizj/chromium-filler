@@ -37,14 +37,19 @@ footer overflow menu.
 `&state=…` picks which **flow** the surface is showing — modal: `long`, `redirect`,
 `redirect-followed`, `landed`, `empty`, `failed-fill`, `apply-unset`,
 `apply-unverified`, `applied`, `flush`, `fullscreen`; setup: `external`, `help`,
-`cv-steps`, `submit-unset`, `success-unset`. A two-step posting
+`cv-steps`, `submit-unset`, `success-unset`; options: `fresh`, which seeds an
+empty store so the getting-started checklist is reachable at all (the normal seed
+ticks four of its five steps off). A two-step posting
 renders a different modal body entirely (notice + "Fill this page instead", no
 report), so it needs its own state rather than being inferred from the default
-data. Add a state here whenever a flow gains a distinct rendering. `state=long` is
-a full-length posting — the reading typography is the Job view's whole job, and a
-three-line description proves nothing about it. `setup&state=help` is the
-first-run panel with the legend open, which is otherwise reachable exactly once
-per profile: dismissing it persists.
+data. Add a state here whenever a flow gains a distinct rendering — **and link it
+from `dev/index.html`**, or it is a state nobody looks at: `applied`,
+`apply-unset` and `apply-unverified` existed in the harness for months with no
+link to them, which is most of why the confirmed state went unexamined.
+`state=long` is a full-length posting — the reading typography is the Job view's
+whole job, and a three-line description proves nothing about it.
+`setup&state=help` is the first-run panel with the legend open, which is
+otherwise reachable exactly once per profile: dismissing it persists.
 
 `&view=job|fields` picks which of the modal's two views is open, and `&note=apply`
 opens the explanation behind the greyed-out Apply button (pair it with
@@ -77,10 +82,45 @@ the submit path deliberately.
 
 **Apply also requires `successSelector`.** Nothing is sent to a site whose outcome
 cannot be read back, so `applyState` is `noButton` | `noConfirmation` | `ready`
-and the modal shows a *different* note for each — the two failures need different
-actions from the user. Once the confirmation appears the modal says so (banner,
-green `Applied ✓`, and the pill), because the site's own message is routinely
-below the fold or behind the card.
+and the modal says a *different* thing for each — the two failures need different
+actions from the user.
+
+### The flow banner
+`src/shared/flowState.ts` (pure) is the one place that decides **where a posting
+is in the flow**, and `labels.FLOW_TEXT` is where each state is worded.
+`flowBanner()` returns `{ key, tone, title, detail, help? }` for one of seven
+states: `applied` · `external` / `externalOpened` · `noButton` /
+`noConfirmation` · `empty` · `ready`.
+
+It exists because the modal used to say none of this. Three unrelated renderings
+— an applied banner, a redirect notice, and an explanation of the greyed-out
+Apply that only appeared *after* the user pressed it — between them still left
+the commonest case silent: a posting filled and waiting showed a job advert and a
+coral button with nothing connecting them.
+
+Three rules the branch order encodes, each with a test:
+- **`applied` outranks everything**, including a two-step posting and a blocked
+  Apply — neither can still be the answer once something went through.
+- **Blocked outranks `empty`.** A listing page has no fields *and* no Send
+  button, and its greyed Apply still provokes "why can't I apply?"; answering
+  "nothing to fill here" leaves a dead control unexplained. So `empty` is the
+  narrower case: a page Apply *could* run on, whose fields went unrecognised.
+- **The tone decides where it renders.** `ok`/`warn`/`accent` lead the body in
+  both views; the `quiet` resting state rides in the **footer**, above Apply —
+  the Job view leads with the posting on purpose, and a fill-status line above
+  the title inverted that. Only the long form stays behind the `?`.
+
+Once the confirmation appears the whole card becomes the receipt: the `ok` banner
+leads at `--text-lg`, `.cf-title` drops to `.cf-title-sub`, the header carries a
+`Sent` chip (the body scrolls; the header does not), and the footer's green
+`Applied ✓` retires Apply. The site's own message is routinely below the fold or
+behind the card, so this is the only place the outcome is legible.
+
+A **blocked primary de-fills rather than fading**
+(`button.cf-btn.primary[aria-disabled]` → `--surface`): the coral gradient at 45%
+opacity is a muddy brown block that reads as broken, not unavailable, and the
+state it marks is entirely ordinary. Same shape of override as `.cf-applied-btn`
+— `--btn-primary` stays the one primary fill and these two states opt out of it.
 
 The modal has **two views behind a header toggle**, and Job is the default: once
 the form is filled the user's question is "do I want this job?", not "which of
@@ -97,7 +137,10 @@ pure, unit-tested logic):
   to the external application **or** extract job title/description
   (`extract.ts`, which walks containers into blocks via `shared/jobText.ts`, and
   reads the company/location/type chips from the posting's JSON-LD via
-  `shared/jobMeta.ts`) →
+  `shared/jobMeta.ts` — **only** from JSON-LD or a configured selector, never
+  inferred: a chip the posting did not state is not rendered, and there is
+  deliberately no `og:site_name` fallback for the company, because that names the
+  *board* and put "LinkedIn" where the employer should be) →
   detect fields (`fieldDetect.ts`) → fill high-confidence only, incl. CV via
   DataTransfer (`fill.ts`) → show modal (`modal/`).
   `picker.ts` = click/tap-to-pick override.
@@ -166,7 +209,15 @@ it in a control. Secondary actions are labelled in **one or two words** ("Site
 setup", "Queue", "Options"), not sentences — as prose they wrapped inside a 360px
 popup and left the row ragged.
 
-`src/shared/labels.ts` is the wording counterpart to help.ts: `STATUS_TEXT`
+One vocabulary, enforced by where the words live. Our action is **Apply** on
+every surface; the *site's* control Apply presses is **the Send button**. Those
+are two different objects and the distinction is load-bearing — the E2E matches
+on both phrases. Before this, one flow had four names (`Apply` in the modal,
+"Send" in its help, "after I submit" in Options, `n filled` for applied postings
+in the popup's session chips).
+
+`src/shared/labels.ts` is the wording counterpart to help.ts: `FLOW_TEXT`
+(the seven flow states above, keyed `Record<FlowKey, …>`), `STATUS_TEXT`
 (tile / word / aria for each `MatchConfidence`) and `ACTION_LABELS` (Apply, Skip,
 Confirm, Pick, …), typed `Record<>` so a new status or action fails
 `npm run typecheck` until it is named. Every surface renders its status words and
@@ -242,6 +293,24 @@ both shadow roots and the light-DOM pages; `.cf-help*` lives in primitives.css.
 Disclosure, never `title=` tooltips — a hover tooltip does not exist on a phone.
 `settings.helpSeen` records that the legend was dismissed, and also retires the
 options getting-started checklist.
+
+The `?` is a **masked icon** (`--icon-help`), not a `?` typeset inside a bordered
+pill. The pill was filled with `--surface`, which is *darker* than the card in
+dark mode and a shade lighter in light — a low-contrast hole rather than a
+control on every surface — and on a coarse pointer the painted disc itself
+inflated to 44px. Drawing the circle as part of the icon separates the glyph
+(a constant 18px) from the target (transparent, and free to be a full `--tap`),
+which is the whole fix. `helpButton` therefore sets **no text content**: its only
+name is the `aria-label`.
+
+Placement matters as much as the mark. It never goes *inside* a heading —
+`attachRowHelp` anchors it on the `.setrow` after the title and **before** the
+caption, so six rows do not put six buttons at six different x-positions and no
+control runs through the middle of a text block. The setup panel's section header
+is a fixed order (title `flex: 1` · count chip · `?` · chevron), replacing a pair
+of `:has()` rules that shuffled an auto margin between the chip and the button.
+The chevron is drawn from `--icon-chevron` for the same reason the `?` is: as the
+text glyph `▾` at the summary's 13px it was a speck beside it.
 
 ### Data model & storage
 `src/shared/types.ts` is the source of truth: `Profile`, `SiteConfig`,

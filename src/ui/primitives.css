@@ -161,6 +161,26 @@ button.cf-btn[aria-disabled='true']:not(.primary):hover {
   border-color: var(--border);
 }
 
+/**
+ * A blocked primary steps *out* of the primary treatment rather than fading in
+ * it. The coral gradient at 45% opacity is a muddy brown block: it reads as a
+ * button that has gone wrong, not as one that is unavailable — and the state it
+ * marks is entirely ordinary (a site whose Send button has not been picked yet).
+ *
+ * The same reasoning as `.cf-applied-btn` in modal.css, and the same shape of
+ * override: `--btn-primary` remains the one primary fill, and this is a state
+ * that opts out of wearing it. Full opacity, because the label still has to be
+ * read — the button is pressable, and pressing it is how the user finds out why.
+ */
+.btn.btn-primary[aria-disabled='true'],
+button.cf-btn.primary[aria-disabled='true'] {
+  background: var(--surface);
+  color: var(--muted);
+  border-color: var(--border-strong);
+  box-shadow: none;
+  opacity: 1;
+}
+
 /* Every control is a full 44px target (`.btn`/`button.cf-btn` set it above; this
    extends the floor to the other native controls on touch). The reference sizes
    its buttons at one comfortable height everywhere, so desktop no longer drops to
@@ -556,7 +576,8 @@ button.cf-btn[aria-disabled='true']:not(.primary):hover {
   gap: var(--space-3);
   flex: 1 0 100%;
 }
-.cf-footer > .cf-help {
+.cf-footer > .cf-help,
+.cf-footer > .cf-flow {
   flex: 1 0 100%;
   margin: 0;
 }
@@ -779,31 +800,59 @@ button.cf-btn[aria-disabled='true']:not(.primary):hover {
  * Both the shadow surfaces and the light-DOM pages render these, which is why
  * they live here; see src/ui/help.ts for the builders.
  */
+/**
+ * An icon, not a bordered bubble with a `?` in it. The old treatment filled a
+ * 24px pill with `--surface` — darker than the card in dark mode, a hair lighter
+ * than it in light — so on every surface it read as a low-contrast hole rather
+ * than something to press, and each one inflated to a 44px disc on touch.
+ *
+ * Drawing it as a mask (`--icon-help`) separates the glyph from the target: the
+ * circle is part of the icon at a constant 18px, and the button around it is
+ * transparent and free to be a full 44px tap target. `--i` is a local so the
+ * masking rule is the same one `.cf-dot` and `.cf-fullscreen` use.
+ */
 .cf-help-btn {
   flex: none;
-  width: 24px;
-  height: 24px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
   padding: 0;
-  border: 1px solid var(--border);
+  border: none;
   border-radius: var(--radius-pill);
-  background: var(--surface);
-  color: var(--muted);
-  font: 600 var(--text-md) / 1 var(--font);
+  background: transparent;
   cursor: pointer;
+  --i: var(--icon-help);
 }
 
-.cf-help-btn:hover {
-  border-color: var(--accent);
-  color: var(--accent);
+.cf-help-btn::before {
+  content: '';
+  display: block;
+  width: 18px;
+  height: 18px;
+  background: var(--muted);
+  -webkit-mask: var(--i) center / contain no-repeat;
+  mask: var(--i) center / contain no-repeat;
 }
 
-/* Pressed = its panel is open, so the button reads as a state, not just an action. */
+.cf-help-btn:hover::before {
+  background: var(--accent);
+}
+
+/* Pressed = its panel is open, so the button reads as a state, not just an
+   action. With no resting fill this is the only thing marking it, so the disc
+   comes back here — and only here. */
 .cf-help-btn[aria-expanded='true'] {
   background: var(--accent-weak);
-  border-color: transparent;
-  color: var(--accent);
 }
 
+.cf-help-btn[aria-expanded='true']::before {
+  background: var(--accent);
+}
+
+/* The target grows on touch; the glyph inside it does not. That difference is
+   the entire fix — the old rule scaled the painted pill instead. */
 @media (pointer: coarse) {
   .cf-help-btn {
     width: var(--tap);

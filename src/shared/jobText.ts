@@ -56,6 +56,23 @@ function normalize(text: string): string {
   return text.replace(/\s+/g, ' ').trim();
 }
 
+/**
+ * Whether an element could be part of a posting at all — the same exclusion the
+ * walk applies to children, exposed so the *container* can be checked before it
+ * is walked.
+ *
+ * It has to be: the fallbacks in content/extract.ts match on substrings of `id`
+ * and `class`, and a board's "Show full description" **button** matches
+ * `[id*="description"]` better than the description does, because it comes first
+ * in the document. `extractBlocks` would then be handed a `<button>` as its root,
+ * where `SKIP_TAGS` never applied — the walk only ever tested children — and emit
+ * its label as the whole posting. That is what shipped, on the slow-boards
+ * fixture, and it is why this predicate is public.
+ */
+export function isContentElement(el: Element): boolean {
+  return !isSkipped(el);
+}
+
 function isSkipped(el: Element): boolean {
   if (SKIP_TAGS.has(el.tagName.toLowerCase())) return true;
   if (el.hasAttribute('hidden') || el.getAttribute('aria-hidden') === 'true') return true;
@@ -177,6 +194,10 @@ function foldBullets(blocks: JobBlock[]): JobBlock[] {
 
 /** The posting inside `root`, as blocks, in document order. */
 export function extractBlocks(root: HTMLElement): JobBlock[] {
+  // The root gets the same test as every child. Without this a container that is
+  // itself chrome — a button, a form, a nav — walked straight through, because
+  // `walk` only ever tested what it descended into.
+  if (isSkipped(root)) return [];
   const raw: JobBlock[] = [];
   walk(root, raw);
   return foldBullets(dedupe(raw)).slice(0, MAX_BLOCKS);

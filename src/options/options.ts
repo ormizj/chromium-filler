@@ -81,6 +81,37 @@ function selectTab(name: TabName, pushHash = true): void {
   }
 }
 
+const flashing = new WeakMap<Element, number>();
+
+/**
+ * Mark where a jump landed. Pressing the same Go twice has to re-play the ring,
+ * and re-adding a class the element already carries restarts nothing — hence the
+ * remove / reflow / add.
+ */
+function flashSection(el: HTMLElement): void {
+  clearTimeout(flashing.get(el));
+  el.classList.remove('flash');
+  void el.offsetWidth;
+  el.classList.add('flash');
+  flashing.set(el, window.setTimeout(() => el.classList.remove('flash'), 1200));
+}
+
+/**
+ * Take the user to a section, not just to its tab. A bare `scrollIntoView` parks
+ * the heading behind the sticky topbar, and focusing the control would scroll it
+ * back under there — hence the measured offset and `preventScroll`. The bar is
+ * measured per call because the tab strip is taller once it wraps.
+ */
+function revealSection(id: string, focus?: string): void {
+  const el = $(id);
+  const bar = document.querySelector<HTMLElement>('.topbar');
+  const reduce = matchMedia('(prefers-reduced-motion: reduce)').matches;
+  const top = el.getBoundingClientRect().top + window.scrollY - (bar?.offsetHeight ?? 0) - 12;
+  window.scrollTo({ top: Math.max(0, top), behavior: reduce ? 'auto' : 'smooth' });
+  if (focus) document.querySelector<HTMLElement>(focus)?.focus({ preventScroll: true });
+  flashSection(el);
+}
+
 /** `#sites&create=<url>` — and the legacy bare `#create=<url>` the popup still sends. */
 function parseHash(): { tab?: TabName; create?: string } {
   const raw = location.hash.replace(/^#/, '');
@@ -349,6 +380,11 @@ async function initSettings(): Promise<void> {
   const attachRowHelp = (control: HTMLElement, entry: HelpEntry): void => {
     const row = control.closest('.setrow') as HTMLElement;
     const text = row.querySelector('.setrow-text') as HTMLElement;
+    // The `?` is attached BEFORE the caption, so it rides at the end of the title
+    // line and the caption still wraps whole beneath both. Anchoring it inside the
+    // `h5` — which is what this did — put it at a different x on every row (the
+    // title's own width) and drove a control through the middle of a text block.
+    attachHelp(text, entry, row);
     if (entry.short) {
       // A span, not a <p>: half of these text blocks are the control's own <label>,
       // which takes phrasing content only.
@@ -357,7 +393,6 @@ async function initSettings(): Promise<void> {
       caption.textContent = entry.short;
       text.append(caption);
     }
-    attachHelp(text.querySelector('h5, .setrow-title') as HTMLElement, entry, row);
   };
   attachRowHelp(autoRun, SETTINGS_HELP.autoRunOnLoad);
   attachRowHelp(closeOnSubmit, SETTINGS_HELP.closeTabOnSubmit);
@@ -745,7 +780,7 @@ function appendTemplate(ta: HTMLTextAreaElement, url?: string): void {
   try { arr = JSON.parse(ta.value); if (!Array.isArray(arr)) arr = []; } catch { arr = []; }
   arr.push(configTemplate(url));
   ta.value = JSON.stringify(arr, null, 2);
-  $('configs-section').scrollIntoView({ behavior: 'smooth' });
+  revealSection('configs-section', '#configs-json');
 }
 
 /* ---------------- URL import ---------------- */
@@ -1253,21 +1288,43 @@ async function renderGettingStarted(): Promise<void> {
     getProfile(), getCv(), getJobUrls(), getSiteConfigs(),
   ]);
 
-  const steps: Array<{ label: string; done: boolean; tab?: TabName }> = [
+  // `at` is the section the step is actually about and `focus` the control it
+  // wants pressed or typed into: the tab alone is not an answer, and for the two
+  // queue steps it is not even a change — the checklist is already on that tab.
+  // `focus` is a selector rather than an id because the profile inputs are built
+  // from the field list and only carry `data-field`.
+  const steps: Array<{
+    label: string; done: boolean; tab?: TabName; at?: string; focus?: string;
+  }> = [
     {
       label: 'Add your details',
       done: Object.values(profile.values).some((v) => v?.trim()),
       tab: 'profile',
+      at: 'profile-section',
+      focus: '#profile-fields [data-field]',
     },
-    { label: 'Upload your CV', done: !!cv, tab: 'profile' },
-    { label: 'Paste some job links', done: urls.length > 0, tab: 'queue' },
+    { label: 'Upload your CV', done: !!cv, tab: 'profile', at: 'cv-section', focus: '#cv-input' },
+    {
+      label: 'Paste some job links',
+      done: urls.length > 0,
+      tab: 'queue',
+      at: 'import-section',
+      focus: '#urls-paste',
+    },
     {
       // The seeded example config matches only the local test fixture, so it is
-      // not evidence that the user has set up a site of their own.
+      // not evidence that the user has set up a site of their own. No Go: this
+      // one happens on a job page, and there is nothing here to send them to.
       label: 'Open a posting and press “Set up this site”',
       done: configs.some((c) => c.id !== 'example-fixture'),
     },
-    { label: 'Start a session', done: urls.some((u) => u.status !== 'new'), tab: 'queue' },
+    {
+      label: 'Start a session',
+      done: urls.some((u) => u.status !== 'new'),
+      tab: 'queue',
+      at: 'session-panel',
+      focus: '#session-toggle',
+    },
   ];
 
   // Nothing left to guide: stop taking up the top of the page.
@@ -1294,7 +1351,12 @@ async function renderGettingStarted(): Promise<void> {
       const go = document.createElement('button');
       go.className = 'btn-ghost startstep-go';
       go.textContent = 'Go →';
-      go.addEventListener('click', () => selectTab(step.tab!));
+      go.addEventListener('click', () => {
+        selectTab(step.tab!);
+        // selectTab unhides the panel synchronously, so the section can be
+        // measured immediately.
+        if (step.at) revealSection(step.at, step.focus);
+      });
       li.append(go);
     }
     return li;

@@ -98,9 +98,28 @@ describe('readJobMeta — the fallbacks, in order', () => {
     expect(readJobMeta(doc(html), { company: '.co' }).company).toBe('Northwind Labs');
   });
 
-  it('falls back to og:site_name for the company, and og:locale for nothing else', () => {
-    const html = '<meta property="og:site_name" content="Acme Careers" />';
-    expect(readJobMeta(doc(html), {})).toEqual({ company: 'Acme Careers' });
+  /**
+   * `og:site_name` is the name of the *website*, which on a job board is the
+   * board — "LinkedIn", "Indeed", "Greenhouse". Rendering that in a chip the user
+   * reads as the hiring company is not a weak guess, it is a wrong answer, and it
+   * is the one thing this module's own doc comment promises not to do. One chip
+   * fewer beats a confident lie on the card the posting is judged from.
+   */
+  it('never reports the website’s name as the hiring company', () => {
+    const html = '<meta property="og:site_name" content="LinkedIn" />';
+    expect(readJobMeta(doc(html), {})).toEqual({});
+  });
+
+  it('still takes the company from the posting’s own structured data', () => {
+    const html = `${ld(posting())}<meta property="og:site_name" content="LinkedIn" />`;
+    expect(readJobMeta(doc(html), {}).company).toBe('Acme');
+  });
+
+  // A board that publishes no JSON-LD is exactly where a per-site selector earns
+  // its keep — that is the supported way to name the employer, not a site-wide guess.
+  it('lets a configured selector name the company where nothing else can', () => {
+    const html = '<meta property="og:site_name" content="LinkedIn" /><span class="co">Northwind Labs</span>';
+    expect(readJobMeta(doc(html), { company: '.co' }).company).toBe('Northwind Labs');
   });
 
   it('ignores a selector that matches nothing rather than reporting empty text', () => {

@@ -82,6 +82,12 @@
           <a href="./frame.html?page=modal&amp;state=redirect-followed">handing off</a>
           <a href="./frame.html?page=modal&amp;state=landed">landed (via)</a>
           <a href="./frame.html?page=modal&amp;state=empty">nothing found</a>
+          <!-- The three flow-banner states. Each is a distinct rendering of the
+               card and none of them was reachable from here, which is most of why
+               the confirmed state went unlooked-at for so long. -->
+          <a href="./frame.html?page=modal&amp;state=applied">sent &amp; confirmed</a>
+          <a href="./frame.html?page=modal&amp;state=apply-unset">apply blocked (no button)</a>
+          <a href="./frame.html?page=modal&amp;state=apply-unverified&amp;note=apply">apply blocked (note open)</a>
           <a href="./frame.html?page=modal&amp;state=fullscreen">fullscreen</a>
           <!-- Open this one in a wide tab: it is a desktop-only rendering. -->
           <a href="./frame.html?page=modal&amp;state=flush">flush to the edge</a>
@@ -106,6 +112,12 @@
       </div>
       <div class="panel options">
         <h2>Options · desktop</h2>
+        <!-- Deliberately a link and not a second iframe: `state=fresh` seeds the
+             one localStorage the whole harness shares, so two options frames on
+             this page would race to seed it. -->
+        <div class="states">
+          <a href="./frame.html?page=options&amp;state=fresh">first run (getting-started checklist)</a>
+        </div>
         <iframe src="./frame.html?page=options" title="Options harness"></iframe>
       </div>
       <!-- The other half of the dev environment: real pages, real content script,

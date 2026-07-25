@@ -10,7 +10,7 @@
  */
 
 import type { SiteConfig } from '../shared/types';
-import { blocksToText, extractBlocks, type JobBlock } from '../shared/jobText';
+import { blocksToText, extractBlocks, isContentElement, type JobBlock } from '../shared/jobText';
 import { readJobMeta, type JobMeta } from '../shared/jobMeta';
 
 export type ContainerKey = 'jobTitle' | 'jobDescription' | 'jobRequirements';
@@ -31,11 +31,24 @@ const FALLBACKS: Record<ContainerKey, string[]> = {
   jobRequirements: [],
 };
 
+/**
+ * The first element a selector matches that could actually *be* a posting.
+ *
+ * `querySelectorAll`, not `querySelector`, and that is the whole point: these
+ * fallbacks match on substrings of `id`/`class`, so a board's "Show full
+ * description" button matches `[id*="description" i]` — and matches it *first*,
+ * being earlier in the document than the description it expands. Taking the first
+ * match outright put a button's label on screen as the entire posting. Walking
+ * the matches and skipping the chrome finds the real container one step later.
+ */
 function elFor(selector: string | undefined): HTMLElement | null {
   if (!selector) return null;
   try {
-    const el = document.querySelector(selector) as HTMLElement | null;
-    return el?.textContent?.trim() ? el : null;
+    for (const node of document.querySelectorAll(selector)) {
+      const el = node as HTMLElement;
+      if (isContentElement(el) && el.textContent?.trim()) return el;
+    }
+    return null;
   } catch {
     return null;
   }

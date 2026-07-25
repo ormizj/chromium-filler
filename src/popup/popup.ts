@@ -99,7 +99,7 @@ function renderSession(): void {
   if (!active || !p) return;
   // The prominent progress card: a big done/total number, a caption, and the
   // fill bar — the reference's popup lead. The per-status breakdown moves to the
-  // chips below, where filled / skipped / waiting read at a glance.
+  // chips below, where applied / skipped / waiting read at a glance.
   sessionCount.textContent = `${p.done}`;
   sessionTotal.textContent = ` / ${p.total}`;
   sessionDetail.textContent = 'postings done this session';
@@ -109,7 +109,12 @@ function renderSession(): void {
   sessionSkip.disabled = !tabUrl;
 }
 
-/** filled / skipped / waiting, as the three tinted chips the reference popup shows. */
+/**
+ * applied / skipped / waiting, as the three tinted chips the reference popup
+ * shows. The first of these read "n filled" until now, which is a different fact
+ * in this extension's vocabulary — "filled" is a field that took a value, and
+ * using it here hid the one number a session is actually run for.
+ */
 function renderSessionChips(applied: number, skipped: number, queued: number): void {
   const chip = (cls: string, text: string): HTMLSpanElement => {
     const s = document.createElement('span');
@@ -118,7 +123,7 @@ function renderSessionChips(applied: number, skipped: number, queued: number): v
     return s;
   };
   sessionChips.replaceChildren(
-    chip('chip ok', `${applied} filled`),
+    chip('chip ok', `${applied} applied`),
     chip('chip warn', `${skipped} skipped`),
     chip('chip', `${queued} waiting`),
   );

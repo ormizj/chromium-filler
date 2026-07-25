@@ -93,6 +93,12 @@ button.cf-view .cf-dot {
   margin: 0 0 var(--space-4);
 }
 
+/* Once the application is in, the posting is the receipt's subject line, not the
+   headline — at full size it out-shouted the confirmation sitting above it. */
+.cf-title.cf-title-sub {
+  font-size: var(--text-lg);
+}
+
 /**
  * The three meta facts under the title. Shared `.chip.accent` for the tint, at the
  * reference's rounded-rectangle radius rather than the pill: `.jobmeta b` is a tag
@@ -161,33 +167,137 @@ button.cf-view .cf-dot {
   margin-bottom: 0;
 }
 
-/* A two-step posting's headline fact: where the application actually lives. */
-.cf-notice {
+/* ---------------- The flow banner ---------------- */
+
+/**
+ * Where this posting is in the one flow the extension has, at the top of both
+ * views. It replaces three separate renderings — an applied banner, a redirect
+ * notice, and an explanation of the greyed Apply that only appeared once the
+ * user had pressed it — none of which covered the commonest case: a posting
+ * filled and waiting, about which the card said nothing at all.
+ *
+ * One box, four tones. The tone is chosen in `shared/flowState.ts`; all this
+ * knows is that `quiet` reports a position and the other three report a status,
+ * so only they are tinted.
+ */
+.cf-flow {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  border-radius: var(--radius-md);
+  margin: 0 0 var(--space-5);
+}
+
+.cf-flow-head {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-3);
+}
+
+.cf-flow-text {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.cf-flow-title {
   font-size: var(--text-md);
   font-weight: 600;
-  color: var(--accent);
-  background: var(--accent-weak);
-  border-radius: var(--radius-md);
-  padding: var(--space-3) var(--space-4);
-  margin: 0 0 var(--space-2);
+  line-height: 1.35;
+}
+
+.cf-flow-detail {
+  font-size: var(--text-sm);
+  line-height: 1.5;
+  color: var(--muted);
+}
+
+/* The dot sits on the title's line, not on the box's centre — the detail can run
+   to three lines on a narrow sheet and the mark would drift down with it. */
+.cf-flow-head > .cf-dot {
+  margin-top: 3px;
 }
 
 /**
- * The application went through. Deliberately louder than `.cf-notice`: it is the
- * answer to the only question that matters after pressing Apply, and the site's
- * own confirmation is routinely below the fold or behind this card.
+ * A resting state: no tint, no box, and it lives in the footer rather than the
+ * body — see `FillerModal.footer`. It is the sentence that explains the button
+ * directly beneath it ("nothing has been sent yet"), and as a tinted band above
+ * the job title it both buried the posting and competed with the one thing on
+ * this card that is genuinely coloured.
  */
-.cf-applied {
-  display: flex;
-  align-items: center;
+.cf-flow.quiet {
+  padding: 0;
   gap: var(--space-2);
-  font-size: var(--text-md);
-  font-weight: 600;
-  color: var(--ok);
+}
+.cf-flow.quiet .cf-flow-title {
+  color: var(--fg);
+  font-weight: 500;
+}
+.cf-flow.quiet .cf-flow-detail {
+  color: var(--muted-2);
+}
+
+.cf-flow.accent,
+.cf-flow.warn,
+.cf-flow.ok {
+  padding: var(--space-4);
+}
+
+.cf-flow.accent {
+  background: var(--accent-weak);
+}
+.cf-flow.accent .cf-flow-title {
+  color: var(--accent);
+}
+.cf-flow.accent .cf-flow-detail {
+  color: var(--accent);
+  opacity: 0.85;
+}
+
+.cf-flow.warn {
+  background: var(--warn-weak);
+}
+.cf-flow.warn .cf-flow-title {
+  color: var(--warn);
+}
+
+/**
+ * The application went through — the loudest thing the card ever says. It is the
+ * answer to the only question that matters after pressing Apply, and the site's
+ * own confirmation is routinely below the fold or behind this very card. As a
+ * 13px line above a 24px job title it lost that contest every time, which is the
+ * reason this state is now a block rather than a strip.
+ */
+.cf-flow.ok {
   background: var(--ok-weak);
-  border-radius: var(--radius-md);
-  padding: var(--space-3) var(--space-4);
-  margin: 0 0 var(--space-4);
+  padding: var(--space-5);
+}
+.cf-flow.ok .cf-flow-title {
+  font-size: var(--text-lg);
+  color: var(--ok);
+}
+.cf-flow.ok .cf-flow-detail {
+  color: var(--ok);
+  opacity: 0.85;
+}
+/* Scaled to the headline it now sits beside. */
+.cf-flow.ok > .cf-flow-head > .cf-dot {
+  width: 20px;
+  height: 20px;
+  margin-top: 2px;
+}
+
+/* The outcome on the header strip, which never scrolls away. */
+.cf-sent-chip {
+  flex: none;
+}
+
+/* Disclosed explanation, inside the banner it belongs to rather than floating in
+   the footer — the question is asked here now, at rest, so the answer is here. */
+.cf-flow > .cf-help {
+  margin: 0;
 }
 
 /* The footer's Apply once it has nothing left to do. Green rather than greyed:
@@ -206,7 +316,13 @@ button.cf-btn.cf-applied-btn[aria-disabled='true'] {
 .cf-empty {
   font-size: var(--text-md);
   color: var(--muted);
-  margin: 0;
+  margin: 0 0 var(--space-5);
+}
+
+/* When it is the last thing in the body there is nothing for that margin to
+   separate it from, and it just leaves the card looking unfinished. */
+.cf-body > .cf-empty:last-child {
+  margin-bottom: 0;
 }
 
 /* The three-stat summary sits below the posting in the Job view. The tile itself

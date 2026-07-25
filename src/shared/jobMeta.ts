@@ -6,12 +6,19 @@
  * the one thing job boards genuinely agree on — Greenhouse, Lever, Workday, Ashby
  * and most in-house boards all emit one, because Google Jobs requires it — so it is
  * both the most reliable source and the cheapest. A per-site selector beats it when
- * a board gets it wrong, and `og:site_name` is the last resort for the company.
+ * a board gets it wrong, and that is the only other source there is.
  *
- * Nothing here guesses from prose. A wrong company name on the card the user
- * decides from is worse than one chip fewer, so a value that cannot be read is left
- * undefined and the chip is simply not rendered — the same fail-closed posture as
- * `submitDetect`. This is why the heuristic ladder is short and stops early.
+ * Nothing here guesses — not from prose, and not from the page's own identity.
+ * A wrong company name on the card the user decides from is worse than one chip
+ * fewer, so a value that cannot be read is left undefined and the chip is simply
+ * not rendered — the same fail-closed posture as `submitDetect`. This is why the
+ * ladder is two rungs long and has no bottom.
+ *
+ * Every chip is therefore something the posting itself stated. `Remote (Berlin,
+ * DE)` is the one composed value, and both halves are still stated facts:
+ * `jobLocationType: TELECOMMUTE` and the `jobLocation` address. It is joined
+ * rather than replaced because "Remote" alone hides a timezone requirement that
+ * is often the reason to skip the posting.
  *
  * Pure apart from the `Document` it is handed, so it is unit-testable off a string
  * of HTML rather than only against a live page.
@@ -158,18 +165,23 @@ function locationOf(posting: Json): string | undefined {
 }
 
 /**
- * Config selectors first, then the page's JSON-LD, then `og:site_name` for the
- * company. Each field resolves independently: a board that gets only the location
- * wrong needs one selector, not three.
+ * Config selectors first, then the page's JSON-LD. Each field resolves
+ * independently: a board that gets only the location wrong needs one selector,
+ * not three.
+ *
+ * There is deliberately **no `og:site_name` fallback for the company**. That tag
+ * names the *website*, which on a job board is the board — "LinkedIn", "Indeed",
+ * "Greenhouse" — and putting it in a chip the user reads as the employer is not a
+ * weak guess but a confident wrong answer, on the one card they judge the posting
+ * from. It is precisely what the note at the top of this file rules out, and it
+ * survived here because the fallback was written before that note was. A board
+ * with no JSON-LD gets a `extract.company` selector; short of that, no chip.
  */
 export function readJobMeta(doc: Document, selectors: JobMetaSelectors): JobMeta {
   const posting = jsonLdPosting(doc);
-  const site = clean(doc.querySelector('meta[property="og:site_name"]')?.getAttribute('content'));
 
   const meta: JobMeta = {
-    company: fromSelector(doc, selectors.company)
-      ?? (posting && companyOf(posting))
-      ?? site,
+    company: fromSelector(doc, selectors.company) ?? (posting && companyOf(posting)),
     location: fromSelector(doc, selectors.location) ?? (posting && locationOf(posting)),
     employmentType: fromSelector(doc, selectors.employmentType)
       ?? (posting && employmentOf(posting)),

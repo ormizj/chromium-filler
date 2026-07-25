@@ -158,7 +158,10 @@ describe('queue session', () => {
     expect(document.getElementById('session-count')!.textContent).toBe('7');
     expect(document.getElementById('session-total')!.textContent).toBe(' / 60');
     const chips = document.getElementById('session-chips')!.textContent;
-    expect(chips).toContain('6 filled');
+    // "applied", not "filled": in this extension "filled" is a field that took a
+    // value, and calling a sent application that hid the session's real score.
+    expect(chips).toContain('6 applied');
+    expect(chips).not.toContain('filled');
     expect(chips).toContain('1 skipped');
     expect(chips).toContain('48 waiting');
   });

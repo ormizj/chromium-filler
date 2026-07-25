@@ -211,6 +211,41 @@ test('SlowBoards: fills the late-injected form + attaches CV', async () => {
   await page.close();
 });
 
+/**
+ * The description fallbacks match on substrings of `id`/`class`, and slow-boards'
+ * "Show full description" **button** carries `id="expand-description"` — so it
+ * matches `[id*="description" i]` earlier in the document than the description
+ * it expands. The modal showed a posting whose entire body was the words "Show
+ * full description".
+ *
+ * This is the shape every auto-created config has (a handoff destination gets one
+ * with no `extract` selectors at all), so it is not an exotic case — it is what a
+ * site looks like before anyone has set it up.
+ */
+test('SlowBoards: an unconfigured description falls back to the posting, not to the button that opens it', async () => {
+  const strip = (drop: boolean) => onExtensionPage((opts) => opts.evaluate(async (dropIt) => {
+    const { siteConfigs } = await chrome.storage.local.get('siteConfigs');
+    for (const c of siteConfigs) {
+      if (c.id !== 'slow-boards') continue;
+      if (dropIt) delete c.extract.jobDescription;
+      else c.extract.jobDescription = '#job-description';
+    }
+    await chrome.storage.local.set({ siteConfigs });
+  }, drop));
+
+  await strip(true);
+  const page = await context.newPage();
+  await page.goto(urlFor('slow-boards'));
+  await expect(page.locator('.cf-card')).toBeVisible({ timeout: 20_000 });
+
+  const body = page.locator('.cf-body');
+  await expect(body).toContainText(/SlowBoards is hiring/i);
+  await expect(body).not.toContainText(/Show full description/i);
+
+  await page.close();
+  await strip(false);
+});
+
 test('ModalLever: opens modal (prep), fills accessible-name fields, attaches injected CV', async () => {
   const page = await context.newPage();
   await page.goto(urlFor('modal-lever'));
@@ -314,8 +349,10 @@ test('QuickBoard: Apply refuses to send when the site has no confirmation config
   await expect(page.locator('.cf-card')).toBeVisible({ timeout: 20_000 });
 
   await expect(apply).toHaveAttribute('aria-disabled', 'true');
+  // Stated up front now, in the flow banner, rather than only after a press.
+  await expect(page.locator('.cf-flow.warn')).toContainText(/confirmation element/i);
   await apply.click({ force: true });
-  await expect(page.locator('.cf-footer .cf-help')).toContainText(/confirmation element/i);
+  await expect(page.locator('.cf-flow .cf-help')).toContainText(/confirmation element/i);
 
   await onExtensionPage((opts) => opts.evaluate(async () => {
     const { siteConfigs } = await chrome.storage.local.get('siteConfigs');
@@ -337,14 +374,17 @@ test('ListingBoard: the greyed Apply explains itself instead of doing nothing', 
 
   const apply = page.locator('.cf-footer button.cf-btn', { hasText: 'Apply' });
   await expect(apply).toHaveAttribute('aria-disabled', 'true');
-  await expect(page.locator('.cf-footer .cf-help')).toHaveCount(0);
+  // The reason is on screen without being asked for; only the long form is behind
+  // the disclosure, so that is what must be absent until the button is pressed.
+  await expect(page.locator('.cf-flow.warn')).toContainText(/Send button/i);
+  await expect(page.locator('.cf-flow .cf-help')).toHaveCount(0);
 
   // `force` because Playwright's actionability check honours `aria-disabled`
   // and refuses the click. That attribute is the truth about the *action* — it
   // cannot run here — while a real press still lands and is answered, which is
   // the whole behaviour under test.
   await apply.click({ force: true });
-  const note = page.locator('.cf-footer .cf-help');
+  const note = page.locator('.cf-flow .cf-help');
   await expect(note).toContainText(/Send button/i);
   // The confirmation IS configured here, so it must not send the user off to
   // fix that instead — the two grey reasons need two different answers.
@@ -795,6 +835,63 @@ test('Session: holds the batch size and opens the next posting as one closes', a
       (type) => chrome.runtime.sendMessage({ type }), MSG.SESSION_STOP as string,
     ));
     await Promise.all(jobTabs().map((p) => p.close()));
+  }
+});
+
+/* ---------------- Getting-started checklist ---------------- */
+
+test('Options: a checklist “Go →” lands on the section it names, not just its tab', async () => {
+  // Switching tab is not an answer on its own: the CV upload is the second
+  // section of the Profile tab, and both queue steps point at the tab the
+  // checklist is already on — those two used to be visible no-ops. The sticky
+  // topbar is the other half of it, so the assertion is not "in the viewport"
+  // but "below the bar", which is the part a bare scrollIntoView gets wrong.
+  const KEYS = ['profile', 'cv', 'jobUrls', 'settings'];
+  const saved = await onExtensionPage((p) => p.evaluate(
+    (keys) => chrome.storage.local.get(keys), KEYS,
+  ));
+
+  const page = await context.newPage();
+  try {
+    // A first-run store: every step undone, so every Go button renders.
+    await onExtensionPage((p) => p.evaluate(async (keys) => {
+      await chrome.storage.local.remove(keys);
+      await chrome.storage.local.set({ settings: { helpSeen: false } });
+    }, KEYS));
+
+    await page.setViewportSize({ width: 1100, height: 720 });
+    await page.goto(`chrome-extension://${extId}/src/options/options.html`);
+    await expect(page.locator('#start-steps .startstep')).toHaveCount(5);
+
+    /** Distance from the bottom of the sticky topbar to the top of `id`. */
+    const gapUnderBar = (id: string) => page.evaluate((target) => {
+      const bar = document.querySelector('.topbar')!.getBoundingClientRect();
+      return document.getElementById(target)!.getBoundingClientRect().top - bar.bottom;
+    }, id);
+
+    const go = (step: number) => page.locator(`#start-steps li:nth-child(${step}) .startstep-go`);
+
+    // Step 2 — a different tab, and the second section on it.
+    await go(2).click();
+    await expect(page.locator('#tab-profile')).toHaveAttribute('aria-selected', 'true');
+    await expect(page.locator('#cv-section')).toBeInViewport();
+    expect(await gapUnderBar('cv-section'), 'not behind the topbar').toBeGreaterThanOrEqual(0);
+    await expect(page.locator('#cv-input')).toBeFocused();
+
+    // Step 3 — same tab. The scroll is the entire effect, so assert it moved.
+    await page.locator('#tab-queue').click();
+    await page.evaluate(() => window.scrollTo(0, 0));
+    await go(3).click();
+    await expect(page.locator('#urls-paste')).toBeFocused();
+    await expect(page.locator('#tab-queue')).toHaveAttribute('aria-selected', 'true');
+    await expect(page.locator('#import-section')).toBeInViewport();
+    expect(await page.evaluate(() => window.scrollY), 'the page moved').toBeGreaterThan(0);
+  } finally {
+    await page.close();
+    await onExtensionPage((p) => p.evaluate(async ({ keys, prev }) => {
+      await chrome.storage.local.remove(keys);
+      await chrome.storage.local.set(prev);
+    }, { keys: KEYS, prev: saved }));
   }
 });
 

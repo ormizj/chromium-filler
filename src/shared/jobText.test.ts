@@ -161,3 +161,34 @@ describe('blocksToText', () => {
     expect(blocksToText([])).toBe('');
   });
 });
+
+/**
+ * The walk only ever tested the elements it descended into, so a container that
+ * was itself chrome passed straight through — `extractBlocks(button)` returned
+ * the button's label as the posting. `content/extract.ts` can hand this a button:
+ * its `[id*="description" i]` fallback matches a "Show full description" control
+ * before it matches the description.
+ */
+describe('extractBlocks — the root is chrome too', () => {
+  const el = (html: string): HTMLElement => {
+    const host = document.createElement('div');
+    host.innerHTML = html;
+    return host.firstElementChild as HTMLElement;
+  };
+
+  it('returns nothing for a control handed in as the container', () => {
+    expect(extractBlocks(el('<button id="expand-description">Show full description</button>')))
+      .toEqual([]);
+  });
+
+  it('returns nothing for a form, a nav or a footer', () => {
+    for (const tag of ['form', 'nav', 'footer', 'aside']) {
+      expect(extractBlocks(el(`<${tag}><p>Not the posting.</p></${tag}>`)), tag).toEqual([]);
+    }
+  });
+
+  it('still reads an ordinary container', () => {
+    expect(extractBlocks(el('<div><p>The posting.</p></div>')))
+      .toEqual([{ kind: 'para', text: 'The posting.' }]);
+  });
+});

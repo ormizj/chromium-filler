@@ -81,6 +81,22 @@
   --icon-expand: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2.4' stroke-linecap='round' stroke-linejoin='round'><path d='M9 3H3v6'/><path d='M15 3h6v6'/><path d='M9 21H3v-6'/><path d='M15 21h6v-6'/></svg>");
   --icon-collapse: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2.4' stroke-linecap='round' stroke-linejoin='round'><path d='M3 9h6V3'/><path d='M21 9h-6V3'/><path d='M3 15h6v6'/><path d='M21 15h-6v6'/></svg>");
 
+  /* The inline-help disclosure, masked like the icons above rather than typeset
+     as a `?` inside a bordered circle. The old button was a 24px pill filled with
+     `--surface`, which is a shade DARKER than the card in dark mode and a shade
+     lighter than it in light — either way a low-contrast hole rather than a
+     control, and on a coarse pointer the whole pill inflated to 44px around a
+     13px glyph. As a mask the drawn circle is part of the icon, so the button
+     itself can be a transparent 44px target at any size. Same 2.4 stroke as the
+     fullscreen toggle: this is an 18px icon, not a 14px status dot. */
+  --icon-help: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2.4' stroke-linecap='round' stroke-linejoin='round'><circle cx='12' cy='12' r='9'/><path d='M9.4 9.3a2.7 2.7 0 1 1 3.4 2.7c-.7.2-1 .7-1 1.4v.5'/><path d='M11.9 17.1h.02'/></svg>");
+
+  /* The collapsible-section chevron, drawn rather than typeset. As the text glyph
+     `▾` it inherited the summary's 13px and read as a speck beside the help icon
+     — two small marks at the end of every section header, neither of which
+     looked like a control. */
+  --icon-chevron: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2.4' stroke-linecap='round' stroke-linejoin='round'><path d='M6 9.5l6 6 6-6'/></svg>");
+
   /* Geometry. `--tap` is the minimum comfortable touch target; primitives.css
      applies it to every control under `@media (pointer: coarse)`. */
   --tap: 44px;

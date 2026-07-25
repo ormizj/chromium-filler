@@ -34,12 +34,24 @@ function writeAll(obj: Record<string, unknown>): void {
   localStorage.setItem(LS_KEY, JSON.stringify(obj));
 }
 
+/**
+ * `?state=fresh` — the store a brand-new profile has. The seed below ticks four
+ * of the getting-started checklist's five steps off, so first-run UI is
+ * otherwise unreachable in the harness.
+ */
+const FRESH = new URLSearchParams(location.search).get('state') === 'fresh';
+
 /** Seed realistic data on first run so the UI isn't empty. */
 function seedIfEmpty(): void {
   const all = readAll();
-  if (all.__seeded) return;
+  const mode = FRESH ? 'fresh' : 'full';
+  // Keyed on the mode, not on a bare flag: the two share one localStorage, so
+  // `?state=fresh` would otherwise inherit whatever the last page seeded — and
+  // the page after it would inherit the empty store.
+  if (all.__seeded === mode) return;
+  if (FRESH) { writeAll({ __seeded: mode }); return; }
   writeAll({
-    __seeded: true,
+    __seeded: mode,
     profile: {
       values: {
         firstName: 'Ada',

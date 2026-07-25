@@ -152,7 +152,7 @@ export const CONFIG_HELP: Record<keyof SiteConfig, HelpEntry> = {
       + 'applied and triggers auto-close; it has to become *visible*, not merely '
       + 'exist, because sites ship hidden success nodes.',
     when: 'Anywhere you want "applied" to be trustworthy. Omit it only for sites that '
-      + 'navigate away on submit, where no confirmation can render in time.',
+      + 'navigate away the moment they are sent, where no confirmation can render in time.',
     example: '.application-success',
   },
 };
@@ -232,12 +232,15 @@ export const SETTINGS_HELP: Record<keyof Settings, HelpEntry> = {
       + 'faster, but you have to check the result.',
   },
   closeTabOnSubmit: {
-    title: 'Auto-close the tab after I submit',
+    // "Apply" everywhere the *extension's* action is meant. The site's own
+    // control stays "the Send button" — they are two different things, and this
+    // row used to be the only place that called ours "submit".
+    title: 'Auto-close the tab after I apply',
     short: 'Free the slot once an application is confirmed sent',
     body: 'Closes the posting once the application is confirmed sent, which also frees '
       + 'a slot for the next posting in a queue session.',
-    when: '"Sent" is detected by that site\'s successSelector. Without one, a plain '
-      + 'form submit is the fallback, and that only fits sites that navigate away.',
+    when: '"Sent" means that site\'s confirmation element actually appeared. A site '
+      + 'with none configured never reports a send, so this never fires there.',
   },
   closeTabOnSkip: {
     title: 'Auto-close the tab after I skip',
@@ -264,7 +267,7 @@ export const SETTINGS_HELP: Record<keyof Settings, HelpEntry> = {
   },
   sessionBatchSize: {
     title: 'Tabs at once',
-    body: 'How many job tabs a queue session keeps open. Finishing one — submit, skip '
+    body: 'How many job tabs a queue session keeps open. Finishing one — apply, skip '
       + 'or close — opens the next, so 60 imported links never become 60 tabs.',
     when: 'Drop it to 1–2 on a phone, where five job pages will not fit in memory.',
   },
@@ -465,7 +468,7 @@ export const CONCEPT_HELP: Record<ConceptKey, HelpEntry> = {
       + 'page — usually because the form is behind a step that has not opened yet, or '
       + 'because the button is unusually named. Point it at the right one with “Set up '
       + 'this site” → Send button, and it goes live.',
-    when: 'Apply is grey on a page that clearly has a submit button.',
+    when: 'Apply is grey on a page that clearly has a Send button of its own.',
   },
   /**
    * The other reason Apply is grey, and the one nobody would guess: the site has

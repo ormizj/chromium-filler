@@ -37,6 +37,53 @@ export const STATUS_TEXT: Record<MatchConfidence, StatusText> = {
 };
 
 /**
+ * Where the user is in the one flow the extension has: filled → reviewed →
+ * applied. `shared/flowState.ts` decides *which* of these a posting is in; this
+ * is what each one is called.
+ *
+ * It exists because the modal used to say none of it. The card showed a job
+ * posting and a greyed button, and the three questions it left — what happened,
+ * what can I press, did it go through — were answered in three different places,
+ * two of them behind a click. Now one banner answers all three, worded here.
+ *
+ * `detail` is the second line. Several are completed with a host or a count by
+ * `flowBanner`, which is why they read as fragments on their own.
+ */
+export type FlowKey =
+  | 'applied'
+  | 'external'
+  | 'externalOpened'
+  | 'noButton'
+  | 'noConfirmation'
+  | 'ready'
+  | 'empty';
+
+export interface FlowText {
+  title: string;
+  detail: string;
+}
+
+export const FLOW_TEXT: Record<FlowKey, FlowText> = {
+  // Worded as what the *site* said, not as what the extension did: the claim is
+  // only as good as the confirmation element that produced it.
+  applied: { title: 'Application sent', detail: 'confirmed it' },
+  external: { title: 'Applies on the employer’s own site', detail: 'Opening it fills the form there automatically.' },
+  externalOpened: { title: 'Opening the employer’s application', detail: 'The form there is filled on arrival.' },
+  // The two halves Apply needs. Each names the missing half and the one place to
+  // go and set it — a blocked button that explains itself is the whole point.
+  noButton: {
+    title: 'Apply is unavailable here',
+    detail: 'No Send button was found on this page. Open Site setup and pick it.',
+  },
+  noConfirmation: {
+    title: 'Apply is unavailable here',
+    detail: 'This site has no confirmation element set, so a result cannot be read back. Set it in Site setup.',
+  },
+  ready: { title: 'Filled — nothing has been sent yet', detail: 'ready to review' },
+  empty: { title: 'Nothing to fill on this page', detail: 'No application form was found here.' },
+};
+
+/**
  * The verbs on the extension's buttons. Kept together so "Apply", "Skip" and the
  * rest read the same on every surface — the modal footer, the setup footer, the
  * popup, the report rows.

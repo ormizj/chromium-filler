@@ -22,7 +22,9 @@ export function helpButton(label: string, open: boolean, onToggle: (open: boolea
   const b = document.createElement('button');
   b.type = 'button';
   b.className = 'cf-help-btn';
-  b.textContent = '?';
+  // No text content: the glyph is a masked icon in primitives.css, so the only
+  // name this button has is the `aria-label` below. A literal `?` here would sit
+  // inside the drawn circle as well as beside it.
   b.setAttribute('aria-expanded', String(open));
   b.setAttribute('aria-label', `What is “${label}”?`);
   b.onclick = (e) => {

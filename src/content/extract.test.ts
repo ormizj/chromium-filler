@@ -90,3 +90,49 @@ describe('extractJob', () => {
     expect(job.requirements).toEqual([]);
   });
 });
+
+/**
+ * The fallbacks match on substrings of `id` and `class`, and a board's
+ * "show the description" *button* matches `[id*="description"]` just as well as
+ * the description does — better, in fact, because it comes first in the document.
+ * That is exactly what `test/fixtures/sites/slow-boards.html` does, and the modal
+ * showed a posting whose entire body was the words "Show full description".
+ */
+describe('previewContainer — a control is never the posting', () => {
+  const SLOW_BOARDS = `
+    <h1 id="job-title">Staff Platform Engineer</h1>
+    <button id="expand-description">Show full description</button>
+    <div id="job-description" class="desc">SlowBoards is hiring a Staff Platform Engineer.</div>
+  `;
+
+  it('walks past a button that matched the id fallback, to the real container', () => {
+    document.body.innerHTML = SLOW_BOARDS;
+    const p = previewContainer(config(), 'jobDescription');
+    expect(p.text).toBe('SlowBoards is hiring a Staff Platform Engineer.');
+    expect(p.text).not.toMatch(/show full description/i);
+  });
+
+  it('does the same through extractJob, which is what the modal renders', () => {
+    document.body.innerHTML = SLOW_BOARDS;
+    const job = extractJob(config());
+    expect(job.title).toBe('Staff Platform Engineer');
+    expect(job.description.map((b) => ('text' in b ? b.text : '')).join(' '))
+      .not.toMatch(/show full description/i);
+  });
+
+  it('reports nothing rather than a control when the control is all there is', () => {
+    document.body.innerHTML = '<button id="expand-description">Show full description</button>';
+    const p = previewContainer(config(), 'jobDescription');
+    expect(p.source).toBe('none');
+    expect(p.blocks).toEqual([]);
+  });
+
+  // The same rule for an explicit selector: a saved override that resolves to a
+  // control is a mis-pick, and the setup panel's "no longer matches" dot is a far
+  // better answer than a button's label presented as the job.
+  it('treats an override that lands on a control as a miss', () => {
+    document.body.innerHTML = SLOW_BOARDS;
+    const p = previewContainer(config({ jobDescription: '#expand-description' }), 'jobDescription');
+    expect(p.source).toBe('override-miss');
+  });
+});
