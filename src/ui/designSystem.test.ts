@@ -89,6 +89,44 @@ describe('design system — colour lives only in the token layer', () => {
   });
 });
 
+/**
+ * The two shadow surfaces inline `tokens.css + primitives.css` and then their own
+ * file, at equal specificity — so an un-media-queried `.cf-card` rule in a surface
+ * file silently beats every `@media` block in primitives.css on source order.
+ *
+ * That is not hypothetical. `setupPanel.css` carried `top: 16px; width: 400px`,
+ * which outranked the `max-width: 640px` bottom-sheet rules: on a phone the setup
+ * panel was a 400px column hanging off the top of the screen, overlapping the
+ * review modal's sheet, and no DOM test could see it — jsdom does not evaluate the
+ * cascade or media queries, so the bug is only visible in a real browser or here,
+ * in the source. Both sheets share one slot now; the box belongs to primitives.css.
+ */
+describe('design system — the shared sheet owns its own box', () => {
+  const BOX = [
+    'position', 'top', 'right', 'bottom', 'left',
+    'width', 'height', 'max-width', 'max-height', 'min-width', 'min-height',
+  ];
+
+  it('no surface stylesheet redefines the card box', () => {
+    const offenders: string[] = [];
+    for (const [path, text] of CSS) {
+      if (path.endsWith('ui/primitives.css')) continue;
+      // Comments first — this very file talks about `.cf-card` in prose, and a
+      // greedy match ran from the sentence into the next real rule.
+      const css = text.replace(/\/\*[\s\S]*?\*\//g, '');
+      // Rules whose subject IS the card: the `.cf-card` compound has to be the
+      // last one before the brace, so `.cf-card > .cf-header { min-width: 0 }`
+      // (styling a child, not the box) does not count.
+      for (const m of css.matchAll(/\.cf-card[\w.:[\]='"-]*\s*\{([^}]*)\}/g)) {
+        for (const prop of BOX) {
+          if (new RegExp(`(^|[;{\\s])${prop}\\s*:`).test(m[1])) offenders.push(`${path}: ${prop}`);
+        }
+      }
+    }
+    expect(offenders, 'the sheet box lives in primitives.css — see content/sheet.ts').toEqual([]);
+  });
+});
+
 describe('design system — every token referenced is defined', () => {
   it('no var(--…) points at a name nothing declares', () => {
     const declared = new Set<string>();

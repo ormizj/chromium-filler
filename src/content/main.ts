@@ -430,6 +430,7 @@ class Controller {
         // in place and the modal is one tap away, instead of only reachable
         // through a Reset & Re-run that would wipe them.
         onClose: () => this.modal?.minimize(),
+        onFold: () => this.arbitrateSheets('modal'),
         onLayoutChange: (layout) => { this.draggedLayout = layout; },
         // The opposite of a drag, and the only setting a content script writes:
         // "give this posting the whole window" is a preference, decided while
@@ -467,6 +468,36 @@ class Controller {
       layout: this.draggedLayout ?? this.settings.modalLayout,
       fullscreen: this.settings.modalFullscreen,
     });
+    this.arbitrateSheets('modal');
+  }
+
+  /**
+   * There is one slot on this page, and this is what enforces it.
+   *
+   * The two sheets are one object with two renderings — same stored rectangle,
+   * same drag, same bottom-sheet breakpoint — so two of them expanded is two cards
+   * fighting over the same pixels, which under 640px is literally the same
+   * rectangle with nothing but DOM order deciding the winner. `who` is the sheet
+   * that just claimed the slot; everything else folds to its pill.
+   *
+   * Folding, never destroying: a destroyed review modal takes the fill report with
+   * it, and the only route back used to be a Reset & Re-run that wiped every field
+   * it had just filled.
+   *
+   * Then the pills. A collapsed sheet shows one only when *nothing* is expanded —
+   * both pills dock bottom-right, which is where an expanded card already is, and
+   * on mobile that is underneath the sheet itself. With the slot free they stack,
+   * and the rail index has to come from here because the two pills live in
+   * separate shadow roots and neither stylesheet can see the other's.
+   */
+  private arbitrateSheets(who?: 'modal' | 'setup'): void {
+    if (who === 'modal' && !this.modal?.isMinimized) this.setupPanel?.minimize();
+    if (who === 'setup' && !this.setupPanel?.isMinimized) this.modal?.minimize();
+
+    const sheets = [this.modal, this.setupPanel].filter((s) => !!s);
+    const expanded = sheets.some((s) => !s.isMinimized);
+    let slot = 0;
+    for (const sheet of sheets) sheet.setSlot(expanded ? null : slot++);
   }
 
   /**
@@ -508,14 +539,26 @@ class Controller {
     this.showModal();
   }
 
+  /**
+   * Pick a field's control from the review modal's report.
+   *
+   * The modal gets out of the way for the same reason the setup panel does in
+   * `pickInto`: the picker reads `document.elementFromPoint`, which happily lands
+   * on the sheet's own host, so a card left on screen is a card the user can pick
+   * *from*. It used to rely on the toolbar's higher z-index alone, which stops the
+   * toolbar being covered and does nothing about the card underneath it.
+   */
   private pick(field: FieldKey): void {
     this.cancelPicker?.();
     const label = field;
+    this.modal?.setHidden(true);
+    const restore = () => this.modal?.setHidden(false);
     this.cancelPicker = startPicker(async (el) => {
       const control = resolveControl(el, field === 'resume');
       if (this.config) await saveFieldOverride(this.config.id, field, generateSelector(control));
+      restore();
       await this.run();
-    }, String(label));
+    }, String(label), restore);
   }
 
   /* ---------------- On-page Setup mode ---------------- */
@@ -548,11 +591,28 @@ class Controller {
         onOpenOptions: () => chrome.runtime.sendMessage({ type: MSG.OPEN_OPTIONS }),
         onDismissHelp: () => void this.dismissHelp(),
         onClose: () => this.closeSetup(),
+        // The same three the review modal wires, because it is the same slot:
+        // a drag holds for this page, fullscreen is a preference, and a fold
+        // hands the slot to whatever is left.
+        onFold: () => this.arbitrateSheets('setup'),
+        onLayoutChange: (layout) => { this.draggedLayout = layout; },
+        onFullscreen: (on) => {
+          this.settings.modalFullscreen = on;
+          void patchSettings({ modalFullscreen: on });
+        },
       });
     }
+    // Asking for setup again while it is folded means "bring it back", not
+    // "re-scan the page behind a pill". `restore` is a no-op when it is already
+    // open, and `refreshSetup` claims the slot either way.
+    this.setupPanel.restore();
     await this.refreshSetup();
   }
 
+  /**
+   * Done — finished with this site, so the panel really goes. The header's `×`
+   * does not come here; it minimizes, and the panel stays alive behind its pill.
+   */
   private closeSetup(): void {
     this.cancelPicker?.();
     clearHighlights();
@@ -562,7 +622,10 @@ class Controller {
     // picking the Send button has to bring Apply to life now, not after a
     // re-run that would wipe every field already filled. Never creates
     // a modal: a page the user only came to configure has nothing to report.
+    // It also hands the slot back: `showModal` re-arbitrates, and with the panel
+    // gone the review card is what takes it.
     if (this.modal) this.showModal();
+    else this.arbitrateSheets();
   }
 
   /**
@@ -722,7 +785,13 @@ class Controller {
       submit: submitRow,
       success: successRow,
       helpSeen: (await getSettings()).helpSeen,
+      // The same two the review modal renders from, off the same fields: one slot
+      // means a panel that opens where the card the user configured opens, at the
+      // size they configured it at. A drag on either sheet moves both.
+      layout: this.draggedLayout ?? this.settings.modalLayout,
+      fullscreen: this.settings.modalFullscreen,
     });
+    this.arbitrateSheets('setup');
   }
 
   /**

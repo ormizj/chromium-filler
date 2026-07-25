@@ -253,18 +253,22 @@ every fillable field (`resume` = the CV file).
 `waitFor`, `prep`, `extract`, `fieldOverrides` (beat the heuristics), `cvUpload`,
 `submitCv`, `autoDetect`, `successSelector`.
 
-`settings.modalLayout` (`shared/modalLayout.ts`) is where the review modal sits and
-how big it is. **The drag-and-resize simulator in Options → Settings is the only
-thing that writes it.** Dragging the modal on a job page is a page-lifetime
-override held in `Controller.draggedLayout` and never persisted: moving the card
-aside to read the field under it is a one-off gesture, and while it wrote storage
-it silently redefined where the modal opened on every posting afterwards. The
-override is what `showModal` renders from, or the card would snap back on the next
+`settings.modalLayout` (`shared/modalLayout.ts`) is where an on-page sheet sits and
+how big it is — **both** of them, the review modal and the setup panel, because
+there is exactly one slot (see "One slot, two sheets" below). **The drag-and-resize
+simulator in Options → Settings is the only thing that writes it.** Dragging or
+resizing a sheet on a job page is a page-lifetime override held in
+`Controller.draggedLayout` and never persisted: moving the card aside to read the
+field under it is a one-off gesture, and while it wrote storage it silently
+redefined where the modal opened on every posting afterwards. The override is what
+`showModal` and `refreshSetup` render from, or the card would snap back on the next
 re-render. It is **desktop only** — at or below
-`NARROW_WIDTH` (640px, shared with primitives.css) the modal is a full-width
-bottom sheet and `modal.ts` *clears* the inline styles, because an inline width
+`NARROW_WIDTH` (640px, shared with primitives.css) a sheet is a full-width
+bottom sheet and `sheet.ts` *clears* the inline styles, because an inline width
 would beat the media query. Every read goes through `clampLayout`, so a layout
-chosen on a big monitor cannot strand the card off the edge of a laptop.
+chosen on a big monitor cannot strand the card off the edge of a laptop. The key's
+name is historical — it predates the setup panel joining it, and renaming a stored
+key would need a migration to buy nothing.
 
 `settings.modalFullscreen` **overrides that layout without writing it** — the
 configured card is what "exit fullscreen" gives back, so implementing this by
@@ -273,12 +277,46 @@ saving a full-viewport rectangle would destroy the thing it is overriding.
 on all four edges and therefore already squares the corners and drops the borders
 through the existing `data-limit-*` rules — desktop fullscreen needs no CSS of its
 own. Narrow does: inline styles are cleared there, so `.cf-card.cf-full` lifts the
-85vh cap in modal.css instead. The header's `.cf-fullscreen` toggle is the **only
-setting a content script writes** (via `patchSettings`, which re-reads first — the
-controller's `settings` snapshot is as old as the page). It is deliberately not a
-`draggedLayout`-style page-lifetime override: a drag is a nudge, this is a
+85vh cap in primitives.css instead. The header's `.cf-fullscreen` toggle is the
+**only setting a content script writes** (via `patchSettings`, which re-reads first
+— the controller's `settings` snapshot is as old as the page). It is deliberately
+not a `draggedLayout`-style page-lifetime override: a drag is a nudge, this is a
 preference, and it holds until it is pressed again. Dragging is disabled while it
 is on, or the card would move out from under the flag.
+
+### One slot, two sheets
+`src/content/sheet.ts` (`abstract class Sheet<D extends SheetData>`) is the shell
+behind **both** shadow surfaces: `FillerModal` and `SetupPanel` subclass it and
+supply only `buildCard`/`buildPill`/`repaint`. Mount, `applyLayout`, drag, the
+three resize grips, fullscreen, collapse-to-pill and `destroy` all live there once.
+
+Before it they were two unrelated products sharing a stylesheet: the panel
+hardcoded `top: 16px; width: 400px`, its drag floored at 0 without capping (so it
+could be pushed off the right edge and left there), nothing re-clamped it on
+resize, and — because `setupPanel.css` is inlined *after* `primitives.css` at equal
+specificity — its own `.cf-card` block **beat the 640px bottom-sheet rules**, so on
+a phone it was a 400px column hanging off the top, overlapping the modal's sheet
+with only DOM order arbitrating. That last one is invisible to jsdom, which
+evaluates neither the cascade nor media queries; `designSystem.test.ts` now fails
+the build if any surface stylesheet sets a box property on `.cf-card`, and an E2E
+spec measures the panel at 390px.
+
+Two rules the controller enforces, both in `Controller.arbitrateSheets`:
+
+- **At most one card is expanded.** Opening one folds the other to its pill —
+  never destroys it, because a destroyed review modal takes the fill report with
+  it. Sheets report folds through `SheetCallbacks.onFold`, which is how Escape and
+  a pill tap reach the controller.
+- **While a card is expanded, no pill shows.** Both pills dock bottom-right, which
+  is where an expanded card already is, and on mobile underneath the sheet itself.
+  With the slot free they stack: `setSlot(n)` is a rail index, `setSlot(null)` is
+  "stay out of sight". The rail crosses two shadow roots, so CSS cannot do it —
+  hence the controller-supplied `--pill-slot`.
+
+The setup panel's two exits now mean different things, matching the modal: header
+`×` **minimizes**, footer **Done** destroys (`closeSetup`). `nudgeLayout` moved from
+`options.ts` into `shared/modalLayout.ts` so the sheets and the simulator — a scale
+drawing of the same rectangle — cannot disagree about which way a handle goes.
 
 The simulator's frame is the user's **screen**, not the options window:
 `modelledViewport` takes `screen.avail*` and subtracts the browser chrome

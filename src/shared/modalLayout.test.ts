@@ -7,7 +7,8 @@
 import { describe, it, expect } from 'vitest';
 import {
   clampLayout, describeLimits, DEFAULT_MODAL_LAYOUT, fullscreenLayout, layoutLimits, MIN_H, MIN_W,
-  measureScreen, modelledViewport, NOMINAL_CHROME, REFERENCE_VIEWPORT, sampleScreen, snapLayout,
+  measureScreen, modelledViewport, nudgeLayout, NOMINAL_CHROME, REFERENCE_VIEWPORT, sampleScreen,
+  snapLayout,
   type ScreenMetrics,
 } from './modalLayout';
 
@@ -285,6 +286,47 @@ describe('describeLimits', () => {
       { label: 'At minimum width', tone: 'warn' },
       { label: 'At minimum height', tone: 'warn' },
     ]);
+  });
+});
+
+/**
+ * The card is anchored bottom-right, so every gesture is a change to
+ * right/bottom/width/height and the signs invert with it. Getting one of these
+ * backwards makes a resize grip grow the card when it is dragged inward, which is
+ * the kind of thing that reads as "the handle is broken".
+ */
+describe('nudgeLayout', () => {
+  const l = { right: 100, bottom: 80, width: 460, height: 720 };
+
+  it('moves the anchored corner against the pointer', () => {
+    // Dragging right (+dx) reduces the distance to the right edge.
+    expect(nudgeLayout(l, 'move', 30, 20)).toEqual({ ...l, right: 70, bottom: 60 });
+  });
+
+  it('grows the width when the left edge is dragged left', () => {
+    expect(nudgeLayout(l, 'resize-x', -40, 0)).toEqual({ ...l, width: 500 });
+  });
+
+  it('grows the height when the top edge is dragged up', () => {
+    expect(nudgeLayout(l, 'resize-y', 0, -40)).toEqual({ ...l, height: 760 });
+  });
+
+  it('resizes both axes from the corner', () => {
+    expect(nudgeLayout(l, 'resize', -40, -50)).toEqual({ ...l, width: 500, height: 770 });
+  });
+
+  it('leaves the axis an axis-locked drag is not touching alone', () => {
+    // The whole point of the edge handles: a width change with no stray pixel of
+    // height, and vice versa.
+    expect(nudgeLayout(l, 'resize-x', -40, 999)).toEqual({ ...l, width: 500 });
+    expect(nudgeLayout(l, 'resize-y', 999, -40)).toEqual({ ...l, height: 760 });
+  });
+
+  it('never moves the card while resizing it', () => {
+    for (const mode of ['resize', 'resize-x', 'resize-y'] as const) {
+      const out = nudgeLayout(l, mode, -40, -40);
+      expect([out.right, out.bottom]).toEqual([l.right, l.bottom]);
+    }
   });
 });
 

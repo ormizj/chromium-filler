@@ -13,8 +13,8 @@ import {
   CONCEPT_HELP, DOT_LEGEND, SETUP_GROUP_HELP, SETUP_GROUP_TITLES, type SetupGroupKey,
 } from '../shared/help';
 import { ACTION_LABELS } from '../shared/labels';
-import { BASE_CSS } from '../ui/shadowCss';
 import { helpButton, helpPanel, richText } from '../ui/help';
+import { Sheet, type SheetCallbacks, type SheetData } from './sheet';
 import setupCss from './setupPanel.css?inline';
 
 export type ContainerKey = 'jobTitle' | 'jobDescription' | 'jobRequirements';
@@ -50,7 +50,7 @@ export interface PrepRow {
   resolves?: boolean;
 }
 
-export interface SetupData {
+export interface SetupData extends SheetData {
   name: string;
   urlPattern: string;
   prep: PrepRow[];
@@ -88,7 +88,7 @@ export interface SetupData {
   helpSeen: boolean;
 }
 
-export interface SetupCallbacks {
+export interface SetupCallbacks extends SheetCallbacks {
   onAddPrep(action: PrepAction, list: PrepListKey): void;
   onPickPrepTarget(index: number, list: PrepListKey): void;
   onMovePrep(index: number, dir: -1 | 1, list: PrepListKey): void;
@@ -111,6 +111,12 @@ export interface SetupCallbacks {
   onOpenOptions(): void;
   /** The legend was dismissed — persist it so the next posting stays quiet. */
   onDismissHelp(): void;
+  /**
+   * Done: finished configuring, tear the panel down. The header's `×` does NOT
+   * come here — it minimizes to the pill, like the review modal's does. The two
+   * exits mean different things and only one of them is destructive: "I have
+   * finished with this site" versus "get out of my way for a second".
+   */
   onClose(): void;
 }
 
@@ -121,9 +127,7 @@ const PREP_LABEL: Record<PrepAction, string> = {
   delay: 'Delay',
 };
 
-export class SetupPanel {
-  private host: HTMLElement;
-  private shadow: ShadowRoot;
+export class SetupPanel extends Sheet<SetupData> {
   private cb: SetupCallbacks;
   /** Groups the user opened by hand; re-renders must not fold them back up. */
   private openGroups = new Set<string>();
@@ -131,43 +135,68 @@ export class SetupPanel {
   private openHelp = new Set<SetupGroupKey>();
   /** The legend, once dismissed, stays folded for the rest of this page too. */
   private legendDismissed = false;
-  /** Last data rendered, so opening a `?` can re-render without the Controller. */
-  private last?: SetupData;
 
   constructor(cb: SetupCallbacks) {
+    super('setup', 'chromium-filler-setup-host', setupCss, cb);
     this.cb = cb;
-    this.host = document.createElement('div');
-    this.host.id = 'chromium-filler-setup-host';
-    this.host.style.setProperty('all', 'initial');
-    this.shadow = this.host.attachShadow({ mode: 'open' });
-    const style = document.createElement('style');
-    style.textContent = `${BASE_CSS}\n${setupCss}`;
-    this.shadow.appendChild(style);
-    document.documentElement.appendChild(this.host);
-  }
-
-  /** Hide/show the whole panel (used to get it out of the picker's way). */
-  setHidden(hidden: boolean): void {
-    this.host.style.display = hidden ? 'none' : '';
   }
 
   render(data: SetupData): void {
-    this.last = data;
-    const existing = this.shadow.querySelector('.cf-card');
-    if (existing) existing.remove();
+    this.data = data;
+    this.paint();
+  }
 
+  /** Re-render from the last data — what `Sheet` calls after a fold or a resize. */
+  protected repaint(): void {
+    if (this.data) this.render(this.data);
+  }
+
+  /**
+   * The collapsed panel. Neutral dot: a folded setup panel is not reporting an
+   * outcome the way the review modal's pill is — there is nothing here that
+   * succeeded or failed, only work still open.
+   */
+  protected buildPill(): HTMLElement {
+    const pill = el('button', 'cf-pill');
+    pill.setAttribute('aria-label', 'Reopen site setup');
+    const dot = el('span', 'cf-dot none');
+    const label = el('span');
+    label.textContent = ACTION_LABELS.siteSetup;
+    pill.append(dot, label);
+    pill.onclick = () => this.restore();
+    return pill;
+  }
+
+  protected buildCard(): HTMLElement {
+    const data = this.data!;
     const card = el('div', 'cf-card');
+    card.setAttribute('role', 'dialog');
+    card.setAttribute('aria-label', `Set up ${data.name}`);
 
     // Header (drag handle)
     const header = el('div', 'cf-header');
     header.append(el('div', 'cf-grip'));
     const title = el('span', 'cf-heading');
     title.textContent = 'Set up this site';
+
+    // Icon-only toggle, same control the review modal's header carries — the two
+    // sheets share one slot, so they had better offer the same ways to resize it.
+    const full = document.createElement('button');
+    full.className = 'cf-fullscreen';
+    full.setAttribute('aria-pressed', String(!!data.fullscreen));
+    full.setAttribute('aria-label', data.fullscreen
+      ? ACTION_LABELS.exitFullscreen
+      : ACTION_LABELS.fullscreen);
+    full.onclick = () => this.setFullscreen(!data.fullscreen);
+
     const close = el('button', 'cf-close');
     close.textContent = '×';
-    close.setAttribute('aria-label', 'Close');
-    close.onclick = () => this.cb.onClose();
-    header.append(title, close);
+    // Minimize, not close: Done in the footer is the destructive exit. Losing a
+    // half-configured panel to the button that looks like "get out of the way"
+    // is the same mistake the review modal's close button used to make.
+    close.setAttribute('aria-label', 'Minimize');
+    close.onclick = () => this.minimize();
+    header.append(title, full, close);
     this.makeDraggable(card, header);
 
     const body = el('div', 'cf-body');
@@ -279,7 +308,7 @@ export class SetupPanel {
     );
 
     card.append(header, body, footer);
-    this.shadow.append(card);
+    return card;
   }
 
   /**
@@ -384,7 +413,7 @@ export class SetupPanel {
 
   /** Re-render from the last data — the panel is a pure function of it. */
   private refresh(): void {
-    if (this.last) this.render(this.last);
+    this.repaint();
   }
 
   /** A step list plus its "+ step" bar; both prep lists render identically. */
@@ -460,38 +489,6 @@ export class SetupPanel {
     return row;
   }
 
-  private makeDraggable(card: HTMLElement, handle: HTMLElement): void {
-    let startX = 0;
-    let startY = 0;
-    let originRight = 16;
-    let originTop = 16;
-    const onDown = (e: PointerEvent) => {
-      if ((e.target as HTMLElement).closest('.cf-close')) return;
-      startX = e.clientX;
-      startY = e.clientY;
-      const r = card.getBoundingClientRect();
-      originRight = window.innerWidth - r.right;
-      originTop = r.top;
-      handle.setPointerCapture(e.pointerId);
-      handle.addEventListener('pointermove', onMove);
-      handle.addEventListener('pointerup', onUp, { once: true });
-    };
-    const onMove = (e: PointerEvent) => {
-      card.style.right = `${Math.max(0, originRight - (e.clientX - startX))}px`;
-      card.style.top = `${Math.max(0, originTop + (e.clientY - startY))}px`;
-      card.style.left = 'auto';
-      card.style.bottom = 'auto';
-    };
-    const onUp = (e: PointerEvent) => {
-      handle.releasePointerCapture(e.pointerId);
-      handle.removeEventListener('pointermove', onMove);
-    };
-    handle.addEventListener('pointerdown', onDown);
-  }
-
-  destroy(): void {
-    this.host.remove();
-  }
 }
 
 function el(tag: string, className = ''): HTMLElement {

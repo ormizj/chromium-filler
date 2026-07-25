@@ -17,7 +17,7 @@ import type {
 import type { SessionState } from '../shared/messages';
 import {
   activeLimits, ALL_LIMITS, clampLayout, DEFAULT_MODAL_LAYOUT, describeLimits, layoutLimits,
-  modelledViewport, sampleScreen, snapLayout,
+  modelledViewport, nudgeLayout, sampleScreen, snapLayout,
   type DragMode, type ModelledViewport, type ScreenMetrics, type ScreenSample,
 } from '../shared/modalLayout';
 // The real review modal, rendered over this page for the full-size preview —
@@ -505,22 +505,6 @@ async function initModalLayout(initial: ModalLayout): Promise<void> {
   };
 
   /**
-   * Apply a delta in real viewport pixels. Because the card is anchored
-   * bottom-right, every mode is expressed as a change to
-   * `right`/`bottom`/`width`/`height` rather than to a top-left origin — and the
-   * signs invert with it: dragging left grows the width, because it is the *left*
-   * edge that moves.
-   */
-  const nudge = (from: ModalLayout, mode: DragMode, dx: number, dy: number): ModalLayout => {
-    switch (mode) {
-      case 'move': return { ...from, right: from.right - dx, bottom: from.bottom - dy };
-      case 'resize-x': return { ...from, width: from.width - dx };
-      case 'resize-y': return { ...from, height: from.height - dy };
-      default: return { ...from, width: from.width - dx, height: from.height - dy };
-    }
-  };
-
-  /**
    * Commit a layout the user actually asked for. This is the only place a clamp is
    * allowed to stick: a drag is a decision, a repaint is not.
    */
@@ -547,7 +531,7 @@ async function initModalLayout(initial: ModalLayout): Promise<void> {
         const vp = viewport();
         const dx = (ev.clientX - start.x) / scale;
         const dy = (ev.clientY - start.y) / scale;
-        commit(snapLayout(nudge(start, mode, dx, dy), vp.width, vp.height, mode));
+        commit(snapLayout(nudgeLayout(start, mode, dx, dy), vp.width, vp.height, mode));
       };
       const onUp = (ev: PointerEvent) => {
         el.releasePointerCapture(ev.pointerId);
@@ -578,7 +562,7 @@ async function initModalLayout(initial: ModalLayout): Promise<void> {
       e.preventDefault();   // the panel would otherwise scroll under the card
       e.stopPropagation();  // a handle's arrows must not also move the card
       const step = e.shiftKey ? 10 : 1;
-      commit(nudge(layout, mode, d[0] * step, d[1] * step));
+      commit(nudgeLayout(layout, mode, d[0] * step, d[1] * step));
       save();
     });
   };

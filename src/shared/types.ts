@@ -217,19 +217,26 @@ export interface Settings {
    */
   sessionBatchSize: number;
   /**
-   * Where the review modal sits, and how big it is, on desktop. The simulator in
-   * Options → Settings is the only thing that writes it: dragging the modal on a
-   * job page moves it for that page alone, because a nudge to see the field
-   * underneath is not a preference.
-   * Ignored under 640px, where the modal is a full-width bottom sheet.
+   * Where an on-page sheet sits, and how big it is, on desktop.
+   *
+   * Both of them: the review modal and the setup panel are one object with two
+   * renderings, and at most one is expanded at a time (`content/sheet.ts`), so
+   * there is one slot on the page and one rectangle describing it. The name is
+   * historical — this predates the setup panel joining it, and renaming a stored
+   * key buys nothing a sentence here does not.
+   *
+   * The simulator in Options → Settings is the only thing that writes it: dragging
+   * or resizing a sheet on a job page moves it for that page alone, because a
+   * nudge to see the field underneath is not a preference.
+   * Ignored under 640px, where both sheets are a full-width bottom sheet.
    * See `shared/modalLayout.ts` — every read is clamped to the viewport.
    */
   modalLayout: ModalLayout;
   /**
-   * Open the review modal filling the whole viewport instead of at
-   * `modalLayout`. Toggled from the modal's own header button — the one setting
-   * the content script writes, because it is answering "I want to read this
-   * posting", which is a thing you decide while looking at a posting.
+   * Open an on-page sheet filling the whole viewport instead of at `modalLayout`.
+   * Toggled from a sheet's own header button — the one setting the content script
+   * writes, because it is answering "I want to read this posting", which is a
+   * thing you decide while looking at a posting.
    *
    * It *overrides* `modalLayout` rather than replacing it, so turning it off
    * returns the card to the rectangle the simulator configured. Not the

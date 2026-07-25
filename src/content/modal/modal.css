@@ -8,84 +8,12 @@
   all: initial;
 }
 
-/* The review modal docks bottom-right; primitives.css turns it into a
-   full-width bottom sheet under 640px. On desktop the size and position are the
-   user's (Options → Settings), applied as inline styles by modal.ts — so the
-   only rule here is the ceiling that keeps an unset or stale layout on screen. */
-.cf-card {
-  bottom: var(--space-6);
-  max-height: min(88vh, 820px);
-}
-
-@media (max-width: 640px) {
-  .cf-card {
-    max-height: 85vh;
-  }
-
-  /* Collapsed to a peek: header plus the summary line, so the page stays usable
-     while the report is one tap away. */
-  .cf-card.peek {
-    max-height: 40vh;
-  }
-
-  /* Fullscreen. Desktop needs no rule for it — the card is sized by inline
-     styles there, and `fullscreenLayout` already reads as flush on all four
-     edges, which squares the corners via `[data-limit-…]`. Here modal.ts
-     deliberately writes no inline geometry (it would beat this media query), so
-     the sheet is already full-width and anchored to the bottom: lifting the 85vh
-     cap and squaring the two top corners is the entire difference. */
-  .cf-card.cf-full {
-    /* `bottom: 0` is not redundant with the sheet rule in primitives.css: this
-       file is inlined *after* it, so the `.cf-card { bottom: var(--space-6) }`
-       above wins on source order at equal specificity. Harmless while the sheet
-       is 85vh, but at full height it pushed the card's top — and the grip with
-       it — 16px off the top of the screen. */
-    bottom: 0;
-    max-height: 100%;
-    border-radius: 0;
-  }
-
-  /* No drag, so no drag handle: `makeDraggable` bails while fullscreen, and a
-     grip that invites a pull it will not answer is worse than none. */
-  .cf-card.cf-full > .cf-header > .cf-grip {
-    display: none;
-  }
-}
-
-/* The header stops being a drag handle while fullscreen — see `makeDraggable`.
-   `cursor: grab` on something that will not move is a promise the card breaks. */
-.cf-card.cf-full > .cf-header,
-.cf-card.cf-full > .cf-header:active {
-  cursor: default;
-}
-
-/* Fullscreen on a wide screen: cap the measure and centre it.
-   Filling a 1440px window edge to edge makes a line of prose ~180 characters
-   long, which is *harder* to read than the 460px card the button replaced — it
-   would defeat the one thing fullscreen is for. The report suffers the same way:
-   a dot and its Pick button a metre apart stop reading as one row. The footer
-   takes the same column, so the buttons stay under the text they act on instead
-   of stretching to the window. The header keeps the full width: it is the
-   sheet's chrome, and its controls belong in the screen's corners.
-   Narrow is exempt — 390px is already the measure. */
-@media (min-width: 641px) {
-  .cf-card.cf-full > .cf-body,
-  .cf-card.cf-full > .cf-session {
-    width: min(100%, 720px);
-    margin-inline: auto;
-  }
-
-  /* The footer *bar* keeps the full width — its top hairline is the edge of the
-     sheet's furniture, and stopping it at 720px left a rule floating in the
-     middle of the screen. Only its contents move into the column.
-     `max-width`, not `width`: `.cf-footer-actions` is a flex item with
-     `flex-basis: 100%`, which a `width` would lose to. */
-  .cf-card.cf-full > .cf-footer > .cf-footer-actions,
-  .cf-card.cf-full > .cf-footer > .cf-help {
-    max-width: 720px;
-    margin-inline: auto;
-  }
-}
+/* Nothing about the card's box lives here any more. Both sheets share one slot
+   on the page — anchor, bottom-sheet breakpoint, peek, fullscreen and the resize
+   handles are all in primitives.css, and `content/sheet.ts` writes the user's
+   rectangle over them inline. A `.cf-card` rule in this file would be inlined
+   after primitives.css at equal specificity and silently beat the media queries
+   there, which is the bug that made the setup panel not a bottom sheet. */
 
 /* Sentence case, like every other label inside a surface — see `.cf-section`. */
 .cf-site {

@@ -970,3 +970,91 @@ test('Modal: fullscreen fills the window and stays on for the next posting', asy
     await next.close();
   }
 });
+
+/* ---------------- One slot, two sheets ---------------- */
+
+/**
+ * Open the on-page setup panel on `page`, the way the popup does — `MSG.SETUP`
+ * addressed at that tab. There is no other entry point, and driving the real
+ * popup would need a extension-page → tab hop for one message.
+ */
+async function openSetupPanel(page: Page): Promise<void> {
+  const url = page.url();
+  await onExtensionPage((ext) => ext.evaluate(async ([type, target]) => {
+    const [tab] = await chrome.tabs.query({ url: target });
+    await chrome.tabs.sendMessage(tab.id!, { type });
+  }, [MSG.SETUP, url] as [string, string]));
+}
+
+test('Sheets: only one is expanded at a time, and both open in the same place', async () => {
+  // The two used to be unrelated products sharing a stylesheet: the modal at the
+  // user's rectangle bottom-right, the panel hardcoded top-right at 400px. Under
+  // 640px they were the same rectangle with nothing but DOM order deciding which
+  // one you could see.
+  const chosen = { right: 40, bottom: 40, width: 420, height: 520 };
+  await patchSettings({ modalLayout: chosen, modalFullscreen: false });
+
+  const page = await context.newPage();
+  try {
+    await page.setViewportSize({ width: 1280, height: 900 });
+    await page.goto(urlFor('quick-plain'));
+
+    const review = page.locator('.cf-card[data-sheet="review"]');
+    const setup = page.locator('.cf-card[data-sheet="setup"]');
+    await expect(review).toBeVisible({ timeout: 20_000 });
+    const reviewBox = (await review.boundingBox())!;
+
+    await openSetupPanel(page);
+    await expect(setup).toBeVisible({ timeout: 20_000 });
+
+    // The slot is exclusive: the review card folds away rather than sitting
+    // underneath, and no pill shows while a card is expanded — both pills dock
+    // where the expanded card already is.
+    await expect(review).toHaveCount(0);
+    await expect(page.locator('.cf-pill')).toHaveCount(0);
+
+    const setupBox = (await setup.boundingBox())!;
+    expect(setupBox, 'both sheets render the one configured rectangle').toEqual(reviewBox);
+
+    // Minimizing frees the slot, so both sheets show a pill — stacked, not on top
+    // of each other. Two pills on one pixel is the failure this rail prevents.
+    await page.locator('.cf-card[data-sheet="setup"] .cf-close').click();
+    await expect(page.locator('.cf-pill')).toHaveCount(2);
+    const pills = await page.locator('.cf-pill').all();
+    const boxes = await Promise.all(pills.map(async (p) => (await p.boundingBox())!));
+    expect(Math.abs(boxes[0].y - boxes[1].y), 'the pills stack').toBeGreaterThan(20);
+
+    // The report is intact behind its pill — never destroyed, so no fill is lost.
+    await page.locator('.cf-pill[data-sheet="review"]').click();
+    await expect(review).toBeVisible();
+    await expect(page.locator('.cf-pill')).toHaveCount(0);
+    expect((await review.boundingBox())!).toEqual(reviewBox);
+  } finally {
+    await page.close();
+  }
+});
+
+test('Sheets: the setup panel is a bottom sheet on a phone, like the modal', async () => {
+  // The regression that hid in the cascade: `setupPanel.css` is inlined after
+  // `primitives.css` at equal specificity, so its own `.cf-card { top; width }`
+  // beat the narrow media query and the panel came out a 400px column hanging
+  // off the top of a 390px screen. No DOM assertion could see it — jsdom does not
+  // evaluate media queries — so it has to be measured in a real browser.
+  const page = await context.newPage();
+  try {
+    await page.setViewportSize({ width: 390, height: 780 });
+    await page.goto(urlFor('quick-plain'));
+    await expect(page.locator('.cf-card[data-sheet="review"]')).toBeVisible({ timeout: 20_000 });
+
+    await openSetupPanel(page);
+    const setup = page.locator('.cf-card[data-sheet="setup"]');
+    await expect(setup).toBeVisible({ timeout: 20_000 });
+
+    const box = (await setup.boundingBox())!;
+    expect(box.width, 'full width').toBeCloseTo(390, 0);
+    expect(box.x, 'flush left').toBeCloseTo(0, 0);
+    expect(box.y + box.height, 'anchored to the bottom, not hanging from the top').toBeCloseTo(780, 0);
+  } finally {
+    await page.close();
+  }
+});

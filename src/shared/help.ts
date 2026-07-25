@@ -269,19 +269,21 @@ export const SETTINGS_HELP: Record<keyof Settings, HelpEntry> = {
     when: 'Drop it to 1–2 on a phone, where five job pages will not fit in memory.',
   },
   modalLayout: {
-    title: 'Review modal size & position',
-    body: 'Where the review modal sits on screen and how big it is, set by dragging the '
-      + 'card in the simulator below. Dragging the modal on a job page moves it for that '
-      + 'page only and leaves this default alone. Desktop only: under 640px the modal is '
-      + 'always a full-width bottom sheet.',
+    title: 'Panel size & position',
+    body: 'Where the review modal and the site setup panel sit on screen and how big they '
+      + 'are, set by dragging the card in the simulator below. Both use it: only one of '
+      + 'them is ever open at a time, so they share one place on the page. Dragging or '
+      + 'resizing a panel on a job page moves it for that page only and leaves this '
+      + 'default alone. Desktop only: under 640px both are always a full-width bottom '
+      + 'sheet.',
   },
   modalFullscreen: {
-    title: 'Fullscreen review modal',
+    title: 'Fullscreen panels',
     short: 'Overrides the size and position above until you turn it off.',
-    body: 'Opens the review modal filling the whole browser window instead of as a card in '
-      + 'the corner — worth it for reading a long description rather than skimming the '
-      + 'field report. The modal\'s own header button toggles this same switch, so you can '
-      + 'turn it on from a posting; it then stays on for every posting until you turn it '
+    body: 'Opens the review modal — and the setup panel — filling the whole browser window '
+      + 'instead of as a card in the corner: worth it for reading a long description rather '
+      + 'than skimming the field report. Each panel\'s own header button toggles this same '
+      + 'switch, so you can turn it on from a posting; it then stays on until you turn it '
       + 'off. Your configured size and position are kept for when you do.',
     when: 'You need this when the job description is the reason you opened the modal.',
   },

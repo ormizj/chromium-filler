@@ -308,6 +308,27 @@ export function describeLimits(x: LayoutLimits): { label: string; tone: 'accent'
  */
 export type DragMode = 'move' | 'resize' | 'resize-x' | 'resize-y';
 
+/**
+ * Apply a gesture's delta, in real viewport pixels.
+ *
+ * Because the card is anchored bottom-right, every mode is expressed as a change to
+ * `right`/`bottom`/`width`/`height` rather than to a top-left origin — and the signs
+ * invert with it: dragging *left* grows the width, because it is the card's left
+ * edge that the grip is holding. Same for the top edge and the height.
+ *
+ * Shared by the two things that move a card: the sheets themselves
+ * (`content/sheet.ts`) and the Options simulator, which is a scale drawing of the
+ * same rectangle. They had better not disagree about which way a handle goes.
+ */
+export function nudgeLayout(from: ModalLayout, mode: DragMode, dx: number, dy: number): ModalLayout {
+  switch (mode) {
+    case 'move': return { ...from, right: from.right - dx, bottom: from.bottom - dy };
+    case 'resize-x': return { ...from, width: from.width - dx };
+    case 'resize-y': return { ...from, height: from.height - dy };
+    default: return { ...from, width: from.width - dx, height: from.height - dy };
+  }
+}
+
 /** How close, in real px, a drag has to get before it is taken as intentional. */
 const SNAP_PX = 10;
 

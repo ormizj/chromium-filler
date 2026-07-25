@@ -19,7 +19,7 @@
  * "Reset & Re-run") wiped every field it had just filled.
  */
 
-import type { FieldMatch, MatchConfidence, ModalLayout } from '../../shared/types';
+import type { FieldMatch, MatchConfidence } from '../../shared/types';
 import type { SessionState } from '../../shared/messages';
 import { progressDots } from '../../shared/queue';
 import type { JobBlock } from '../../shared/jobText';
@@ -27,14 +27,12 @@ import type { JobMeta } from '../../shared/jobMeta';
 import { FIELD_LABELS } from '../../shared/fieldKeys';
 import { STATUS_LABELS, matchStatus } from '../../shared/fieldStatus';
 import { ACTION_LABELS, STATUS_TEXT } from '../../shared/labels';
-import { clampLayout, fullscreenLayout, layoutLimits, NARROW_WIDTH } from '../../shared/modalLayout';
 import { CONCEPT_HELP } from '../../shared/help';
 import { helpPanel } from '../../ui/help';
-import { BASE_CSS } from '../../ui/shadowCss';
-import { clearLimitAttrs, setLimitAttrs } from '../../ui/limits';
+import { Sheet, type SheetCallbacks, type SheetData } from '../sheet';
 import modalCss from './modal.css?inline';
 
-export interface ModalCallbacks {
+export interface ModalCallbacks extends SheetCallbacks {
   onRerun(): void;
   onReset(): void;
   /** Run the CV-confirmation steps, then press the site's own Send button. */
@@ -48,21 +46,6 @@ export interface ModalCallbacks {
   /** Mark this posting skipped, and move a session on to the next one. */
   onSkip(): void;
   onClose(): void;
-  /** The card was dragged to a new spot; persist it so it stays there. */
-  onLayoutChange?(layout: ModalLayout): void;
-  /**
-   * The card is *being* dragged — fired per pointermove, so a second view of the
-   * same layout can follow it live (the Options simulator draws one). Deliberately
-   * separate from `onLayoutChange`: that one persists, and a storage write per
-   * pointermove is what this split exists to avoid.
-   */
-  onLayoutPreview?(layout: ModalLayout): void;
-  /**
-   * The fullscreen toggle was pressed. Unlike a drag, this one *is* a preference:
-   * the controller persists it, and hands it straight back through `ModalData` on
-   * the next render, which is what keeps it on for the postings after this one.
-   */
-  onFullscreen?(on: boolean): void;
 }
 
 /** Set when the posting hands off to an external application instead of a form. */
@@ -85,7 +68,7 @@ export type ModalView = 'job' | 'fields';
  */
 export type ApplyState = 'ready' | 'noButton' | 'noConfirmation';
 
-export interface ModalData {
+export interface ModalData extends SheetData {
   siteName: string;
   jobTitle?: string;
   /** The posting, as blocks — see shared/jobText.ts. */
@@ -103,21 +86,9 @@ export interface ModalData {
   via?: string;
   /** Queue progress, when a session is running. Drives the strip and Skip action. */
   session?: SessionState;
-  /** Desktop size/position. Ignored on narrow screens (bottom sheet). */
-  layout?: ModalLayout;
-  /**
-   * Fill the whole viewport, ignoring `layout` without discarding it.
-   *
-   * Data rather than instance state, unlike `view`/`peek`/`applyHelp`: those are
-   * this reader's state on this page, while this one is a stored setting that has
-   * to survive the tab. `showModal` rebuilds `ModalData` from controller state on
-   * every re-render, so anything that must outlive one has to arrive from there.
-   */
-  fullscreen?: boolean;
+  // `layout` and `fullscreen` come from SheetData — the geometry is the setup
+  // panel's too, and both sheets share one slot on the page.
 }
-
-/** Below this width the card is a bottom sheet, and free-dragging makes no sense. */
-const NARROW = NARROW_WIDTH;
 
 /**
  * The `.chip` tint each outcome wears in the report. The dot classes are the
@@ -126,19 +97,12 @@ const NARROW = NARROW_WIDTH;
  */
 const TAG_TONE: Record<MatchConfidence, string> = { high: 'ok', low: 'warn', none: 'err' };
 
-export class FillerModal {
-  private host: HTMLElement;
-  private shadow: ShadowRoot;
+export class FillerModal extends Sheet<ModalData> {
   private cb: ModalCallbacks;
-  private data?: ModalData;
-  /** Collapsed to the pill. Kept across renders so a re-run doesn't pop it open. */
-  private collapsed = false;
-  /** Mobile sheet showing only its header + summary. */
-  private peek = false;
   /**
-   * Kept across renders for the same reason `collapsed` is: confirming a field
-   * re-renders, and being thrown back to the Job view every time would make the
-   * report unusable exactly when it is being used.
+   * Kept across renders for the same reason the collapsed flag is: confirming a
+   * field re-renders, and being thrown back to the Job view every time would make
+   * the report unusable exactly when it is being used.
    */
   private view: ModalView = 'job';
   /**
@@ -147,23 +111,10 @@ export class FillerModal {
    * reading state, and a re-render must not close what they just opened.
    */
   private applyHelp = false;
-  private onViewportResize = () => this.applyLayout();
 
   constructor(cb: ModalCallbacks) {
+    super('review', 'chromium-filler-modal-host', modalCss, cb);
     this.cb = cb;
-    this.host = document.createElement('div');
-    this.host.id = 'chromium-filler-modal-host';
-    this.host.style.setProperty('all', 'initial');
-    this.shadow = this.host.attachShadow({ mode: 'open' });
-    const style = document.createElement('style');
-    style.textContent = `${BASE_CSS}\n${modalCss}`;
-    this.shadow.appendChild(style);
-    document.documentElement.appendChild(this.host);
-
-    this.shadow.addEventListener('keydown', (e) => {
-      if ((e as KeyboardEvent).key === 'Escape') this.minimize();
-    });
-    window.addEventListener('resize', this.onViewportResize);
   }
 
   render(data: ModalData): void {
@@ -171,19 +122,17 @@ export class FillerModal {
     // A note about a button that is no longer grey is just wrong text on screen:
     // picking the Send button mid-session flips this without a further click.
     if (data.applyState === 'ready') this.applyHelp = false;
-    this.shadow.querySelector('.cf-card')?.remove();
-    this.shadow.querySelector('.cf-pill')?.remove();
+    this.paint();
+  }
 
-    if (this.collapsed) {
-      this.shadow.append(this.pill(data));
-      return;
-    }
+  /** Re-render from the last data — what `Sheet` calls after a fold or a resize. */
+  protected repaint(): void {
+    if (this.data) this.render(this.data);
+  }
 
+  protected buildCard(): HTMLElement {
+    const data = this.data!;
     const card = el('div', 'cf-card');
-    if (this.peek) card.classList.add('peek');
-    // Desktop fullscreen is pure inline geometry (`applyLayout`); the class is
-    // what the narrow bottom sheet is styled off, where inline styles are barred.
-    if (data.fullscreen) card.classList.add('cf-full');
     card.setAttribute('role', 'dialog');
     card.setAttribute('aria-label', `${data.siteName} — ${data.jobTitle ?? 'fill report'}`);
 
@@ -198,37 +147,11 @@ export class FillerModal {
     // moves it on, which is the decision the number is read for.
     if (data.session?.active) card.append(this.sessionStrip(data.session));
     card.append(this.footer(data));
-
-    this.shadow.append(card);
-    this.applyLayout();
+    return card;
   }
 
-  /** Collapse to the pill, keeping every fill and the report intact. */
-  minimize(): void {
-    if (this.collapsed) return;
-    this.collapsed = true;
-    if (this.data) this.render(this.data);
-  }
-
-  restore(): void {
-    if (!this.collapsed) return;
-    this.collapsed = false;
-    if (this.data) this.render(this.data);
-  }
-
-  /** True while collapsed, so the controller can re-open rather than re-run. */
-  get isMinimized(): boolean {
-    return this.collapsed;
-  }
-
-  /**
-   * Re-place the card without rebuilding it. `render` replaces the whole `.cf-card`
-   * element, which is fine for new data but fatal while the card is being dragged —
-   * the handle holding the pointer capture would be thrown away mid-gesture. A
-   * second view driving this one (the Options simulator) uses this instead.
-   */
-  place(layout: ModalLayout): void {
-    this.setLayout(layout);
+  protected buildPill(): HTMLElement {
+    return this.pill(this.data!);
   }
 
   /** Which view is showing — the dev harness boots straight into one. */
@@ -247,24 +170,6 @@ export class FillerModal {
     if (this.applyHelp === open) return;
     this.applyHelp = open;
     if (this.data) this.render(this.data);
-  }
-
-  /**
-   * Fill the viewport, or go back to the configured card.
-   *
-   * Writes the flag onto `this.data` *and* reports it, because the two have
-   * different jobs: the local write is what this render sees, and the callback is
-   * what makes it true of the next posting. `this.data.layout` is deliberately
-   * left alone — it is what "exit" has to give back.
-   */
-  setFullscreen(on: boolean): void {
-    if (!this.data || !!this.data.fullscreen === on) return;
-    this.data.fullscreen = on;
-    // A 40vh peek and a full-height sheet are contradictory answers to "how much
-    // room does this posting get"; the newer one wins.
-    if (on) this.peek = false;
-    this.render(this.data);
-    this.cb.onFullscreen?.(on);
   }
 
   /* ---------------- Chrome ---------------- */
@@ -654,163 +559,6 @@ export class FillerModal {
     actions.append(btn(ACTION_LABELS.pick, () => this.cb.onPick(m.field)));
     row.append(actions);
     return row;
-  }
-
-  /* ---------------- Geometry ---------------- */
-
-  /** Properties `applyLayout` owns on desktop and must hand back on mobile. */
-  private static readonly LAYOUT_PROPS = [
-    'width', 'height', 'right', 'bottom', 'left', 'top', 'max-width', 'max-height',
-  ];
-
-  /**
-   * Size and place the card from the user's stored layout — or, when fullscreen
-   * is on, from the viewport — but only on desktop. Under 640px the card is a
-   * full-width bottom sheet, and an inline width would beat the media query that
-   * makes it one, so the properties are cleared there rather than merely left
-   * unset (fullscreen is a class there instead — see `.cf-card.cf-full`).
-   *
-   * The card is a FIXED size — the exact rectangle chosen in the Options
-   * simulator, which is itself a fixed card drawn to scale. So `this.data.layout`
-   * is the intended size and is never touched here; what goes on the card is that
-   * clamped to the current viewport, recomputed fresh every call and NOT written
-   * back. This runs on every `window.resize`: writing the clamped value back
-   * would turn a temporary shrink (drag the tab narrow) into a permanent one
-   * (widen it again and the modal would stay small). A fixed card instead fits
-   * itself to a too-small viewport and springs back when there is room again.
-   * Only a drag changes the intended size, through `setLayout`.
-   *
-   * `max-width`/`max-height` have to be overridden, not just left alone: the
-   * stylesheet caps the card at `calc(100vw - 32px)` and `min(88vh, 820px)` as a
-   * fallback for when there is no stored layout, and a `max-*` beats an inline
-   * `width`. Left in place they silently overrode whatever was chosen in the
-   * Options simulator — a card sized to fill the screen came out 820px tall, so
-   * the simulator was promising sizes the modal would never render.
-   *
-   * It also publishes which edges the card ended up flush against, because a
-   * corner where two straight screen edges meet must not be rounded, and an edge
-   * lying along the viewport edge must not draw its own border beside it. That is
-   * CSS (`.cf-card[data-limit-…]` in primitives.css) keyed off `layoutLimits` —
-   * the same reading the Options simulator paints its own card with.
-   */
-  private applyLayout(): void {
-    const card = this.shadow.querySelector('.cf-card') as HTMLElement | null;
-    if (!card) return;
-
-    if (window.innerWidth <= NARROW || !this.data?.layout) {
-      for (const prop of FillerModal.LAYOUT_PROPS) card.style.removeProperty(prop);
-      // The bottom sheet is flush on three edges and keeps its top corners
-      // rounded anyway; a stale attribute here would outrank that rule.
-      clearLimitAttrs(card);
-      return;
-    }
-
-    // Fullscreen overrides the stored rectangle without touching it, and is
-    // recomputed from the live viewport every call — so the card tracks a window
-    // being resized, and the configured layout is still there to go back to.
-    const intent = this.data.fullscreen
-      ? fullscreenLayout(window.innerWidth, window.innerHeight)
-      : this.data.layout;
-
-    // The clamp is the only thing keeping the card on screen — the CSS caps that
-    // used to do it are being turned off below.
-    const l = clampLayout(intent, window.innerWidth, window.innerHeight);
-    setLimitAttrs(card, layoutLimits(l, window.innerWidth, window.innerHeight));
-    card.style.width = `${l.width}px`;
-    card.style.height = `${l.height}px`;
-    card.style.maxWidth = 'none';
-    card.style.maxHeight = 'none';
-    card.style.right = `${l.right}px`;
-    card.style.bottom = `${l.bottom}px`;
-    card.style.left = 'auto';
-    card.style.top = 'auto';
-  }
-
-  /**
-   * Change the *intended* size — a deliberate act (a drag), unlike the
-   * viewport-driven reflow in `applyLayout`. Stored pre-clamped so the persisted
-   * value can never itself be off-screen.
-   */
-  private setLayout(layout: ModalLayout): void {
-    if (!this.data) return;
-    this.data.layout = clampLayout(layout, window.innerWidth, window.innerHeight);
-    this.applyLayout();
-  }
-
-  /**
-   * Desktop: drag the card anywhere, and remember where. Mobile: the card is a
-   * full-width bottom sheet, so a free drag would just fight the layout — a
-   * vertical drag snaps between the full sheet and a peek instead.
-   */
-  private makeDraggable(card: HTMLElement, handle: HTMLElement): void {
-    let startX = 0;
-    let startY = 0;
-    let originRight = 16;
-    let originBottom = 16;
-    let width = 0;
-    let height = 0;
-    let narrow = false;
-
-    const onDown = (e: PointerEvent) => {
-      if ((e.target as HTMLElement).closest('.cf-close, .cf-views, .cf-fullscreen')) return;
-      // Nothing to drag while fullscreen: moving the card would take it out from
-      // under the flag, leaving it looking restored while the setting still said
-      // fullscreen — and on narrow it would strand a 40vh peek claiming to be one.
-      if (this.data?.fullscreen) return;
-      narrow = window.innerWidth <= NARROW;
-      startX = e.clientX;
-      startY = e.clientY;
-      const r = card.getBoundingClientRect();
-      originRight = window.innerWidth - r.right;
-      originBottom = window.innerHeight - r.bottom;
-      width = r.width;
-      height = r.height;
-      handle.setPointerCapture(e.pointerId);
-      handle.addEventListener('pointermove', onMove);
-      handle.addEventListener('pointerup', onUp, { once: true });
-    };
-
-    // Route the live drag through the same clamp the stored layout uses, so the
-    // card cannot be dragged off any edge. The previous version floored `right`
-    // and `bottom` at 0 but capped neither, so dragging up pushed `bottom` past
-    // the viewport height and the card's TOP edge climbed off the top of the
-    // screen, taking the header and its drag handle with it.
-    const onMove = (e: PointerEvent) => {
-      if (narrow) return; // handled on release, as a snap
-      this.setLayout(clampLayout(
-        {
-          right: originRight - (e.clientX - startX),
-          bottom: originBottom - (e.clientY - startY),
-          width,
-          height,
-        },
-        window.innerWidth,
-        window.innerHeight,
-      ));
-      if (this.data?.layout) this.cb.onLayoutPreview?.(this.data.layout);
-    };
-
-    const onUp = (e: PointerEvent) => {
-      handle.releasePointerCapture(e.pointerId);
-      handle.removeEventListener('pointermove', onMove);
-      if (narrow) {
-        const dy = e.clientY - startY;
-        if (Math.abs(dy) < 24) return; // a tap, not a drag
-        this.peek = dy > 0;
-        card.classList.toggle('peek', this.peek);
-        return;
-      }
-      // Persist on release, not per pointermove: one write per drag. `applyLayout`
-      // has already clamped `this.data.layout` to the viewport during the move.
-      if (this.data?.layout) this.cb.onLayoutChange?.(this.data.layout);
-    };
-
-    handle.addEventListener('pointerdown', onDown);
-  }
-
-  destroy(): void {
-    window.removeEventListener('resize', this.onViewportResize);
-    this.host.remove();
   }
 }
 

@@ -244,9 +244,12 @@ const MODAL_STATES: Record<string, Partial<ModalData>> = {
   },
 };
 
-function bootModal(): void {
-  fakePosting();
-  const modal = new FillerModal({
+/**
+ * Everything the real controller does, as a log line. Shared with the `pills`
+ * state below, which needs a second modal purely to have a second pill.
+ */
+function modalCallbacks(self: () => FillerModal | undefined): ModalCallbacks {
+  return {
     onRerun: () => console.log('[harness] re-run'),
     onReset: () => console.log('[harness] reset'),
     onApply: () => console.log('[harness] apply'),
@@ -255,9 +258,17 @@ function bootModal(): void {
     onFollow: () => console.log('[harness] follow'),
     onFillAnyway: () => console.log('[harness] fill anyway'),
     onSkip: () => console.log('[harness] skip'),
-    onClose: () => modal.minimize(),
+    onClose: () => self()?.minimize(),
+    onFold: (c) => console.log('[harness] modal folded', c),
     onLayoutChange: (l) => console.log('[harness] layout', l),
-  });
+    onFullscreen: (on) => console.log('[harness] fullscreen', on),
+  };
+}
+
+function bootModal(): void {
+  fakePosting();
+  let modal: FillerModal;
+  modal = new FillerModal(modalCallbacks(() => modal));
 
   modal.render({
     ...BASE_MODAL,
@@ -303,6 +314,9 @@ function bootSetup(): void {
     onOpenOptions: () => console.log('[harness] open options'),
     onDismissHelp: () => console.log('[harness] legend dismissed'),
     onClose: () => console.log('[harness] close setup'),
+    onFold: (c) => console.log('[harness] setup folded', c),
+    onLayoutChange: (l) => console.log('[harness] setup layout', l),
+    onFullscreen: (on) => console.log('[harness] setup fullscreen', on),
   });
 
   const BASE_SETUP: SetupData = {
@@ -344,6 +358,10 @@ function bootSetup(): void {
     // The returning user, whose legend is folded away. `state=help` is the
     // first-run view.
     helpSeen: true,
+    // The panel shares the review modal's slot and rectangle, so it needs the
+    // same default here for the same reason `BASE_MODAL` does: without it the
+    // card falls back to the CSS, which is a size no real user would ever see.
+    layout: DEFAULT_MODAL_LAYOUT,
   };
 
   /**
@@ -393,6 +411,13 @@ function bootSetup(): void {
         hasSave: false,
       },
     },
+    /**
+     * The panel filling the window, and the panel pressed into the screen corner.
+     * Both are geometry the setup panel never had before it joined the review
+     * modal's slot, and both are otherwise reachable only by dragging a real one.
+     */
+    fullscreen: { fullscreen: true },
+    flush: { layout: { right: 0, bottom: 0, width: 460, height: 4000 } },
     external: {
       name: 'ExternalBoard',
       urlPattern: '*://*/sites/external-board.html*',
@@ -408,6 +433,19 @@ function bootSetup(): void {
   };
 
   panel.render({ ...BASE_SETUP, ...(SETUP_STATES[state] ?? {}) });
+
+  // Both sheets folded, so their pills stack in the rail. The one arrangement
+  // that cannot be reached by rendering a single surface — and the one that goes
+  // wrong quietly, by putting two pills on the same pixel.
+  if (params.get('pills') === '1') {
+    let modal: FillerModal;
+    modal = new FillerModal(modalCallbacks(() => modal));
+    modal.render({ ...BASE_MODAL, layout: DEFAULT_MODAL_LAYOUT });
+    modal.minimize();
+    modal.setSlot(0);
+    panel.minimize();
+    panel.setSlot(1);
+  }
 }
 
 const BOOT: Record<Page, () => void | Promise<void>> = {

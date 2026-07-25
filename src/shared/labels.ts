@@ -56,6 +56,7 @@ export type ActionKey =
   | 'openApplication'
   | 'openApplicationAgain'
   | 'fillAnyway'
+  | 'siteSetup'
   | 'fullscreen'
   | 'exitFullscreen';
 
@@ -74,6 +75,10 @@ export const ACTION_LABELS: Record<ActionKey, string> = {
   openApplication: 'Open application',
   openApplicationAgain: 'Open again',
   fillAnyway: 'Fill this page instead',
+  // Two words, like every other secondary action: it is the popup's link *and*
+  // the setup sheet's collapsed pill, and those two naming the same thing
+  // differently is exactly what this file exists to prevent.
+  siteSetup: 'Site setup',
   // Icon-only in the modal header, so these are read aloud rather than shown —
   // which is exactly why they belong here and not inline as a string literal.
   fullscreen: 'Fullscreen',
