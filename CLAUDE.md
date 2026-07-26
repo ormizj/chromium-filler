@@ -608,26 +608,39 @@ that really is unfinished goes unread with the rest.
   ordinary state of a quick-apply site; counting it labelled every site "2 to do".
 - `prep`: **never**. A `waitFor` whose target has not appeared yet is the normal
   state of a page whose form is behind a click — that is what the step is for.
+  Its *summary* still counts, and counts **all three** of its lists: reading only
+  `s.prep` told a site whose page actions are entirely `submitCv` or
+  `beforeFollow` that there was "nothing to run", on the step holding them.
 - `send`: a Send button found by its *label* is healthy, so only "none found"
   counts; a missing confirmation element **always** counts, because without it
   nothing here can ever be recorded as applied and Apply refuses to send.
 
-`send` is its own step and not the tail of `fields` on purpose. Those three rows
+`send` is its own step and not the tail of `fields` on purpose. Those two rows
 are what Apply depends on, and while they sat below sixteen field rows the
 confirmation element went unset on nearly every site — which is exactly what
-greys Apply out.
+greys Apply out. **Two rows and nothing else**: the CV-confirmation steps led
+this step for a while, which put a prep list above the very rows it exists to
+un-bury, under a lead paragraph that describes neither. They are a prep list, so
+they belong with the other two on `prep`.
 
 Two steps carry more than one list, and both groupings are the panel's doing
 rather than the model's:
 
-- **`prep` is "Page actions"** and holds *both* prep lists — "Run in order before
-  filling" and "Before leaving — run on the posting first". They are the same
-  thing (clicks and waits this site needs before the extension acts) and were a
-  step apart, the second buried under the redirect rows of a step about something
-  else. Only the first gets a `Run steps ▶`: running the second ends by
-  navigating away from the posting. The title is not "Before filling" any more
-  because that named one of the two, and not "Setup steps" because "Step 2 of 6:
-  Setup steps" stutters.
+- **`prep` is "Page actions"** and holds *all three* prep lists — "Run in order
+  before filling", "After attaching the CV" and "Before leaving — run on the
+  posting first". They are the same thing (clicks and waits this site needs
+  around what the extension does, same `PrepRow`, same `PrepListKey`, same
+  `runPrepSteps`) and they were three steps apart, each of the last two the odd
+  list out under rows it had nothing to do with — `beforeFollow` beneath the
+  redirect selectors of `kind`, `submitCv` above the two rows `send` exists to
+  un-bury. **Order is the order they can happen**: the unconditional list, then
+  the two mutually exclusive endings — send from this page (confirm the file,
+  then Apply presses Send) or hand off to the employer. Only the first gets a
+  `Run steps ▶`, and neither of the others can have one: the CV steps act on a
+  half-sent application, and running the before-leaving list ends by navigating
+  away from the posting. The title is not "Before filling" any more because that
+  named one of the three, and not "Setup steps" because "Step 2 of 6: Setup
+  steps" stutters.
 - **`kind` groups its redirect rows by the verdict each argues for**
   (`REDIRECT_GROUPS` in `setupPanel.ts`): Quick-apply marker under one head,
   External marker + External apply link under the other. Those last two are one

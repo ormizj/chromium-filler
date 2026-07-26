@@ -367,18 +367,29 @@ export class SetupPanel extends Sheet<SetupData> {
     }
 
     if (key === 'prep') {
+      // All three lists are the same thing — clicks and waits this site needs
+      // around what the extension does — and they render in the order they can
+      // happen: the unconditional list, then the two mutually exclusive endings.
+      // Each of the other two used to live on a step about something else, where
+      // it was the odd list out under rows it had nothing to do with.
       const head = el('div', 'cf-section-row');
       head.append(sectionHead('Run in order before filling'));
       // Only the first list has a Run button: `onRunPrep` replays the pre-fill
-      // steps against the page you are looking at, and "before leaving" ends by
-      // navigating away from it.
+      // steps against the page you are looking at. Neither of the others can be
+      // rehearsed that way — the CV steps act on a form the extension has not
+      // filled yet, and "before leaving" ends by navigating away from the page.
       head.append(btn('Run steps ▶', () => this.cb.onRunPrep()));
       body.append(head);
       this.appendPrepList(body, data.prep, 'prep');
 
-      // Both lists are the same thing — clicks and waits this site needs before
-      // the extension acts — and they were a step apart, with the second one
-      // buried under the redirect rows of a step about something else entirely.
+      // Ending one: the application is sent from this page, and on these sites
+      // the file is attached but not yet accepted. Apply runs these before it
+      // presses Send.
+      body.append(sectionHead('After attaching the CV — extra clicks this site needs'));
+      this.appendPrepList(body, data.submitCv, 'submitCv');
+
+      // Ending two: the application is somewhere else, and the board wants its
+      // own "Save job" pressed before the handoff.
       body.append(sectionHead('Before leaving — run on the posting first, e.g. “Save job”'));
       this.appendPrepList(body, data.beforeFollow, 'beforeFollow');
     }
@@ -405,12 +416,11 @@ export class SetupPanel extends Sheet<SetupData> {
     }
 
     if (key === 'send') {
-      // In the order they happen: confirm the file, press the button, read the
-      // answer. The two rows Apply depends on used to be the tail of a sixteen
-      // row field list, which is most of why the confirmation went unset.
-      body.append(sectionHead('After attaching the CV — extra clicks this site needs'));
-      this.appendPrepList(body, data.submitCv, 'submitCv');
-
+      // These two rows and nothing else. They are what Apply depends on, and
+      // while they sat at the tail of a sixteen-row field list the confirmation
+      // went unset on nearly every site — so anything else here is a step back
+      // towards burying them. The CV-confirmation steps are a prep list and live
+      // with the other two on `prep`.
       body.append(sectionHead('The button Apply presses'));
       body.append(this.row('send', data.submit,
         () => this.cb.onPickSubmit(),

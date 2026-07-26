@@ -92,7 +92,7 @@ describe('prep step', () => {
   // An empty list is the ordinary case — most forms are simply there on load —
   // so it reads as "not set", not as "done" and not as a fault.
   it('is untouched when there is nothing to run', () => {
-    const s = state(snapshot({ prep: [] }), 'prep');
+    const s = state(snapshot({ prep: [], submitCv: [], beforeFollow: [] }), 'prep');
     expect(s.tone).toBe('none');
     expect(s.summary).toMatch(/nothing/i);
   });
@@ -106,6 +106,37 @@ describe('prep step', () => {
     }), 'prep');
     expect(s.summary).toMatch(/2/);
   });
+
+  /**
+   * The step renders three lists, so the rail has to summarise three. Counting
+   * only the before-filling list told a site whose page actions are entirely
+   * "before leaving" or "after attaching the CV" that there was *nothing to
+   * run* — on the very step holding them.
+   */
+  it('counts every list the step renders', () => {
+    const s = state(snapshot({
+      prep: [{ action: 'click', selector: '#a', resolves: true }],
+      submitCv: [{ action: 'click', selector: '#cv-attach', resolves: true }],
+      beforeFollow: [{ action: 'click', selector: '#save-job', resolves: true }],
+    }), 'prep');
+    expect(s.summary).toMatch(/3/);
+    expect(s.tone).toBe('ok');
+    // Still never work: these lists are optional by nature, and an unresolved
+    // target in any of them is the normal state of a page that needs them.
+    expect(s.todo).toBe(0);
+  });
+
+  it.each(['submitCv', 'beforeFollow'] as const)(
+    'is not "nothing to run" when its only steps are %s',
+    (list) => {
+      const s = state(snapshot({
+        prep: [],
+        [list]: [{ action: 'click', selector: '#x', resolves: true }],
+      }), 'prep');
+      expect(s.tone).toBe('ok');
+      expect(s.summary).toMatch(/1/);
+    },
+  );
 });
 
 describe('application-type step', () => {

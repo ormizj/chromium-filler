@@ -380,12 +380,15 @@ export const SETUP_STEP_HELP: Record<SetupStepKey, GroupHelp> = {
   },
   prep: {
     title: 'Clicks and waits this site needs',
-    body: 'Two lists of things the extension does on the page itself, each run '
+    body: 'Three lists of things the extension does on the page itself, each run '
       + 'automatically, top to bottom, every time. The first runs before filling — for '
       + 'a form that is behind an "Apply" button, or a tab, or that arrives a second '
-      + 'late. The second runs before leaving for an employer\'s own application, so '
-      + 'the board records the apply before the handoff.',
-    when: 'Leave both empty if the form is simply there on load.',
+      + 'late. The other two are the two ways a posting ends: one runs after your CV is '
+      + 'attached and before Apply presses Send, for sites that only accept the file '
+      + 'once a dialog is confirmed; the other runs before leaving for an employer\'s '
+      + 'own application, so the board records the apply before the handoff.',
+    when: 'Leave all three empty if the form is simply there on load and takes your CV '
+      + 'the moment it is attached.',
     rows: [
       { label: 'Click', body: PREP_HELP.click.body },
       { label: 'Wait for', body: PREP_HELP.waitFor.body },
@@ -398,9 +401,11 @@ export const SETUP_STEP_HELP: Record<SetupStepKey, GroupHelp> = {
       {
         label: 'Run steps ▶',
         body: 'Runs the before-filling list now so you can watch it work, without '
-          + 'reloading the page. The before-leaving list has no button, because running '
-          + 'it ends by navigating away from the posting.',
+          + 'reloading the page. It is the only list with a button: the CV steps act on '
+          + 'a half-sent application, and running the before-leaving list ends by '
+          + 'navigating away from the posting.',
       },
+      { label: 'After attaching the CV', body: CONFIG_HELP.submitCv.body },
       { label: 'Before leaving', body: REDIRECT_HELP.beforeFollow.body },
     ],
   },
@@ -464,10 +469,15 @@ export const SETUP_STEP_HELP: Record<SetupStepKey, GroupHelp> = {
     ],
   },
   /**
-   * Its own step, not the tail of the field list. These three are what Apply
+   * Its own step, not the tail of the field list. These two rows are what Apply
    * depends on, and while they sat below sixteen field rows the confirmation
    * element went unset on almost every site — which is exactly what greys Apply
    * out and leaves the posting recorded as merely opened.
+   *
+   * Only those two. The CV-confirmation steps led this step for a while, which
+   * put a prep list above the rows the step exists to un-bury — and under a lead
+   * paragraph that describes the Send button and the confirmation and nothing
+   * else. They are a prep list like the other two, so they live on `prep`.
    */
   send: {
     title: 'How this site is sent, and how you know it worked',
@@ -477,10 +487,6 @@ export const SETUP_STEP_HELP: Record<SetupStepKey, GroupHelp> = {
     when: 'Always. This is the one step no site can skip, and the confirmation element '
       + 'is the one thing that cannot be guessed.',
     rows: [
-      {
-        label: 'After attaching the CV',
-        body: CONFIG_HELP.submitCv.body,
-      },
       {
         label: 'Send button',
         body: CONFIG_HELP.submitSelector.body,

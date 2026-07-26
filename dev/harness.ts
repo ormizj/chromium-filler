@@ -429,8 +429,8 @@ function bootSetup(): void {
     help: { helpSeen: false },
     /**
      * A site whose CV only counts once a dialog is confirmed — the one shape
-     * that puts steps in the Form fields section, which Apply then runs before
-     * it presses Send.
+     * that fills the middle of Page actions' three lists, which Apply then runs
+     * before it presses Send. Pair it with `&step=prep`.
      */
     'cv-steps': {
       name: 'DialogATS',

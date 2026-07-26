@@ -162,9 +162,14 @@ function site(s: SetupSnapshot): Part {
  * Prep steps are **never** work. A `waitFor` whose target has not appeared yet
  * is the normal state of a page whose form is behind a click — that is the whole
  * reason the step exists — so an unresolved target here means nothing is wrong.
+ *
+ * All three of the step's lists count towards the summary, because the step
+ * renders all three. Counting only the before-filling list told a site whose
+ * page actions are entirely "before leaving" or "after attaching the CV" that
+ * there was *nothing to run* — on the one step holding them.
  */
 function prep(s: SetupSnapshot): Part {
-  const n = s.prep.length;
+  const n = s.prep.length + s.submitCv.length + s.beforeFollow.length;
   if (!n) return { tone: 'none', todo: 0, summary: 'nothing to run' };
   return { tone: 'ok', todo: 0, summary: `${n} step${n === 1 ? '' : 's'}` };
 }

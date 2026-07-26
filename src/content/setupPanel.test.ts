@@ -372,26 +372,65 @@ describe('setup wizard help', () => {
 
 describe('setup wizard step contents', () => {
   const beforeFollow = [{ action: 'click', selector: '#save-job', resolves: true }] as const;
+  const submitCv = [{ action: 'click', selector: '#cv-attach', resolves: true }] as const;
 
   /**
-   * Both prep lists are the same thing — clicks and waits this site needs before
-   * the extension acts — and the "before leaving" one used to sit on the
-   * application-type step, under three redirect selectors it has nothing to do
-   * with. It was the last thing on a step about something else.
+   * All three prep lists are the same thing — clicks and waits this site needs
+   * around what the extension does — and each of the other two used to sit on a
+   * step about something else: "before leaving" under three redirect selectors,
+   * "after attaching the CV" above the two rows Apply depends on. Both were the
+   * odd list out on a step whose own lead paragraph did not describe them.
    */
-  it('renders both prep lists on the page-actions step', () => {
+  it('renders all three prep lists on the page-actions step', () => {
     const shadow = render(data({
       prep: [{ action: 'waitFor', selector: '#form', ms: 5000, resolves: true }],
+      submitCv: [...submitCv],
       beforeFollow: [...beforeFollow],
     }));
     panel!.setStep('prep');
     expect(shadow.textContent).toContain('before filling');
+    expect(shadow.textContent).toContain('After attaching the CV');
     expect(shadow.textContent).toContain('Before leaving');
+    expect(shadow.querySelector('[data-k="prep:submitCv:0"]')).not.toBeNull();
     expect(shadow.querySelector('[data-k="prep:beforeFollow:0"]')).not.toBeNull();
 
     panel!.setStep('kind');
     expect(shadow.textContent).not.toContain('Before leaving');
     expect(shadow.querySelector('[data-k="prep:beforeFollow:0"]')).toBeNull();
+  });
+
+  /**
+   * The unconditional list first, then the two mutually exclusive endings: send
+   * here (confirm the file, then Apply presses Send) or hand off to the
+   * employer's own application. Reading the step top to bottom has to be reading
+   * the site's page actions in the order they can happen.
+   */
+  it('orders the three lists before-filling → after-CV → before-leaving', () => {
+    const shadow = render(data({
+      prep: [{ action: 'waitFor', selector: '#form', ms: 5000, resolves: true }],
+      submitCv: [...submitCv],
+      beforeFollow: [...beforeFollow],
+    }));
+    panel!.setStep('prep');
+    const heads = [...shadow.querySelectorAll('.cf-section')].map((h) => h.textContent ?? '');
+    expect(heads.length).toBe(3);
+    expect(heads[0]).toMatch(/before filling/i);
+    expect(heads[1]).toMatch(/after attaching the cv/i);
+    expect(heads[2]).toMatch(/before leaving/i);
+  });
+
+  /**
+   * The `send` step exists because the two rows Apply depends on were buried at
+   * the tail of a sixteen-row field list, which is why the confirmation element
+   * went unset on nearly every site. A prep list above them re-buries them — and
+   * `SETUP_STEP_HELP.send.body`, which renders directly above it, describes only
+   * the Send button and the confirmation.
+   */
+  it('leaves the CV steps off the sending step', () => {
+    const shadow = render(data({ submitCv: [...submitCv] }));
+    panel!.setStep('send');
+    expect(shadow.textContent).not.toContain('After attaching the CV');
+    expect(shadow.querySelector('[data-k="prep:submitCv:0"]')).toBeNull();
   });
 
   /**
