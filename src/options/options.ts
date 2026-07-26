@@ -15,7 +15,8 @@
  */
 
 import type {
-  JobUrlEntry, JobUrlStatus, ModalLayout, Profile, RedirectTarget, SiteConfig, TextFieldKey,
+  DocKind, JobUrlEntry, JobUrlStatus, ModalLayout, Profile, RedirectTarget, SiteConfig,
+  TextFieldKey,
 } from '../shared/types';
 import type { SessionState, SyncState } from '../shared/messages';
 import {
@@ -27,7 +28,7 @@ import {
 // the same trick the dev harness uses. A mock of it would only ever be a lie
 // about the thing being configured.
 import { FillerModal, type ModalCallbacks, type ModalData } from '../content/modal/modal';
-import { TEXT_FIELDS, FIELD_LABELS } from '../shared/fieldKeys';
+import { FIELD_ORDER, FIELD_LABELS } from '../shared/fieldKeys';
 import { configTemplate } from '../shared/configTemplate';
 import { extractUrls } from '../shared/urlImport';
 import {
@@ -49,7 +50,7 @@ import { EXPORT_FIELD_LABELS, JOB_STATUS_LABELS } from '../shared/labels';
 import {
   buildSnapshot, mergeIntoLocal, parseSnapshot, snapshotFilename,
 } from '../shared/syncSnapshot';
-import { getCv, setCv, clearCv } from '../shared/cvStore';
+import { getCv, getDoc, setDoc, clearDoc } from '../shared/cvStore';
 import { readSyncClient } from '../shared/syncConfig';
 import {
   CONCEPT_HELP, CONFIG_HELP, PREP_HELP, REDIRECT_HELP, SETTINGS_HELP, describeConfig,
@@ -123,15 +124,23 @@ function revealSection(id: string, focus?: string): void {
   flashSection(el);
 }
 
-/** `#sites&create=<url>` — and the legacy bare `#create=<url>` the popup still sends. */
-function parseHash(): { tab?: TabName; create?: string } {
+/**
+ * `#sites&create=<url>`, `#queue&at=import-section&focus=%23urls-paste` — and the
+ * legacy bare `#create=<url>` the popup still sends.
+ *
+ * `at` is a section id and `focus` a selector inside it; together they are what
+ * lets a caller name a *place* rather than a tab. See `revealSection`.
+ */
+function parseHash(): { tab?: TabName; create?: string; at?: string; focus?: string } {
   const raw = location.hash.replace(/^#/, '');
   if (!raw) return {};
   const parts = raw.split('&');
   const tab = TABS.find((t) => t === parts[0]);
-  const createPart = parts.find((p) => p.startsWith('create='));
-  const create = createPart ? decodeURIComponent(createPart.slice('create='.length)) : undefined;
-  return { tab, create };
+  const param = (name: string) => {
+    const hit = parts.find((p) => p.startsWith(`${name}=`));
+    return hit ? decodeURIComponent(hit.slice(name.length + 1)) : undefined;
+  };
+  return { tab, create: param('create'), at: param('at'), focus: param('focus') };
 }
 
 function initTabs(): void {
@@ -151,69 +160,113 @@ function initTabs(): void {
 
 /* ---------------- Profile ---------------- */
 
+/**
+ * Write back only the fields a given form owns, leaving the rest of the profile
+ * alone. Two forms now edit `profile.values` — the grid here and the cover
+ * letter's own section — and the old "collect everything, replace `values`"
+ * would have had each of them delete the other's field on save.
+ */
+async function saveValues(inputs: Iterable<HTMLInputElement | HTMLTextAreaElement>): Promise<void> {
+  const current = await getProfile();
+  const values: Profile['values'] = { ...current.values };
+  for (const el of inputs) {
+    const key = el.dataset.field as TextFieldKey;
+    const v = el.value.trim();
+    if (v) values[key] = v;
+    else delete values[key];
+  }
+  await saveProfile({ ...current, values });
+}
+
+/** A form whose edits need an explicit Save, with the dirty bar that says so. */
+function bindSavebar(form: HTMLElement, savebar: HTMLElement, save: () => Promise<void>): void {
+  // The behavior settings save silently on change while these forms need an
+  // explicit Save; the difference has to be visible, or edits get lost on a
+  // tab switch. The bar appears the moment anything is dirty.
+  form.addEventListener('input', () => { savebar.hidden = false; });
+  window.addEventListener('beforeunload', (e) => {
+    if (!savebar.hidden) e.preventDefault();
+  });
+  savebar.querySelector('button')!.addEventListener('click', async () => {
+    await save();
+    savebar.hidden = true;
+  });
+}
+
 async function initProfile(): Promise<void> {
   const container = $('profile-fields');
   const savebar = $('profile-savebar');
   const profile = await getProfile();
 
-  for (const field of TEXT_FIELDS) {
+  // `FIELD_ORDER`, so the form you type into is in the same order as the report
+  // you read afterwards. The two documents are excluded — each has its own
+  // section below, because each is a file as well as (or instead of) a value.
+  for (const field of FIELD_ORDER) {
+    if (field === 'resume' || field === 'coverLetter') continue;
     const key = field as TextFieldKey;
     const label = document.createElement('label');
     label.className = 'fld';
     label.textContent = FIELD_LABELS[field];
-    const input = field === 'coverLetter'
-      ? document.createElement('textarea')
-      : document.createElement('input');
+    const input = document.createElement('input');
     input.dataset.field = key;
-    (input as HTMLInputElement).value = profile.values[key] ?? '';
-    if (input instanceof HTMLTextAreaElement) input.rows = 3;
+    input.value = profile.values[key] ?? '';
     label.appendChild(input);
     container.appendChild(label);
   }
 
-  // The behavior settings save silently on change while this form needs an
-  // explicit Save; the difference has to be visible, or edits get lost on a
-  // tab switch. The bar appears the moment anything is dirty.
-  container.addEventListener('input', () => { savebar.hidden = false; });
-
-  $('save-profile').addEventListener('click', async () => {
-    const values: Profile['values'] = {};
-    container.querySelectorAll<HTMLInputElement | HTMLTextAreaElement>('[data-field]').forEach((el) => {
-      const v = el.value.trim();
-      if (v) values[el.dataset.field as TextFieldKey] = v;
-    });
-    const current = await getProfile();
-    await saveProfile({ ...current, values });
-    savebar.hidden = true;
+  bindSavebar(container, savebar, async () => {
+    await saveValues(container.querySelectorAll<HTMLInputElement>('[data-field]'));
     setStatus($('profile-status'), 'Saved', 'ok');
-  });
-
-  window.addEventListener('beforeunload', (e) => {
-    if (!savebar.hidden) e.preventDefault();
   });
 }
 
-/* ---------------- CV ---------------- */
+/* ---------------- The two documents ---------------- */
 
-async function initCv(): Promise<void> {
-  const input = $<HTMLInputElement>('cv-input');
-  const current = $('cv-current');
+/**
+ * A stored document's row: the picker, what is held, and Remove. One function
+ * for both, so the CV and the cover-letter upload cannot drift apart.
+ */
+function initDoc(kind: DocKind, ids: { input: string; current: string; clear: string }): Promise<void> {
+  const input = $<HTMLInputElement>(ids.input);
+  const current = $(ids.current);
   const show = async () => {
-    const cv = await getCv();
-    current.textContent = cv ? `Current: ${cv.name} (${Math.round(cv.data.byteLength / 1024)} KB)` : 'No CV stored.';
+    const doc = await getDoc(kind);
+    current.textContent = doc
+      ? `Current: ${doc.name} (${Math.round(doc.data.byteLength / 1024)} KB)`
+      : 'None stored.';
   };
   input.addEventListener('change', async () => {
     const file = input.files?.[0];
     if (!file) return;
-    await setCv(file);
+    await setDoc(kind, file);
     await show();
   });
-  $('clear-cv').addEventListener('click', async () => {
-    await clearCv();
+  $(ids.clear).addEventListener('click', async () => {
+    await clearDoc(kind);
     input.value = '';
     await show();
   });
-  await show();
+  return show();
+}
+
+async function initCv(): Promise<void> {
+  await initDoc('resume', { input: 'cv-input', current: 'cv-current', clear: 'clear-cv' });
+}
+
+/** Text *and* file — see `CONCEPT_HELP.coverLetter` for why both are offered. */
+async function initCoverLetter(): Promise<void> {
+  const text = $<HTMLTextAreaElement>('cover-text');
+  text.dataset.field = 'coverLetter';
+  text.value = (await getProfile()).values.coverLetter ?? '';
+
+  const section = $('cover-section');
+  attachHelp(section.querySelector('h2')!, CONCEPT_HELP.coverLetter);
+  section.querySelector('.hint')!.textContent = CONCEPT_HELP.coverLetter.short ?? '';
+
+  bindSavebar(text, $('cover-savebar'), () => saveValues([text]));
+  await initDoc('coverLetter', {
+    input: 'cover-input', current: 'cover-current', clear: 'clear-cover',
+  });
 }
 
 /* ---------------- Inline help ---------------- */
@@ -718,6 +771,7 @@ const PREVIEW_CALLBACKS: ModalCallbacks = {
   onRerun: () => {}, onReset: () => {}, onApply: () => {},
   onConfirm: () => {}, onPick: () => {}, onFollow: () => {},
   onFillAnyway: () => {}, onSkip: () => {}, onClose: () => {},
+  onOpenSetup: () => {}, onOpenOptions: () => {}, onAddLinks: () => {},
 };
 
 function previewData(layout: ModalLayout): ModalData {
@@ -1268,6 +1322,12 @@ async function initUrls(): Promise<void> {
   // Collect captures whose posting has since been deleted. Once per page load
   // rather than per render, so a row removed with Undo still on screen keeps its
   // text until the user has actually let it go.
+  //
+  // This is a read-modify-write, and it is the last thing boot does before
+  // `data-ready` goes up — anything writing captures underneath a booting
+  // options page races it and loses. Nothing a user does has that shape; the
+  // E2E archive spec does, and waits for the flag rather than pretending
+  // otherwise.
   const known = (await getJobUrls()).map((e) => e.url);
   await mutateJobDetails((map) => pruneDetails(map, known));
 
@@ -1719,19 +1779,27 @@ async function main(): Promise<void> {
   initHelp();
   initGettingStarted();
   await Promise.all([
-    initProfile(), initCv(), initSettings(), initConfigs(), initSession(), initUrls(), initSync(),
+    initProfile(), initCv(), initCoverLetter(), initSettings(), initConfigs(),
+    initSession(), initUrls(), initSync(),
   ]);
   await renderGettingStarted();
 
   // Deep link: `#sites&create=<url>` (and the bare `#create=<url>` the popup and
   // setup panel still send) pre-adds a config template on the Sites tab.
-  const { tab, create } = parseHash();
+  const { tab, create, at, focus } = parseHash();
   if (create) {
     selectTab('sites', false);
     appendTemplate($<HTMLTextAreaElement>('configs-json'), create);
   } else {
     selectTab(tab ?? 'queue', false);
   }
+
+  // `&at=<section>` finishes the journey. A tab is not a destination: the URL
+  // importer is the third section of the Queue tab and the config JSON is below
+  // a reference and a chip row, so a link that only switched tab left the user
+  // to find the thing it was sent for. Same helper the checklist's "Go →" uses,
+  // and it has to run after the panels are built and shown.
+  if (at) revealSection(at, focus);
 
   // The session runs in the background; reflect its progress without a reload.
   // The checklist ticks off the same events, so it refreshes here too.
@@ -1741,6 +1809,13 @@ async function main(): Promise<void> {
       void renderGettingStarted();
     }
   });
+
+  // Boot is done — every read this page makes at startup has landed, and so has
+  // the capture prune, which is a read-modify-write of storage. `load` says
+  // nothing about that: it fires while `main` is still awaiting. Anything that
+  // writes storage underneath a booting options page has to wait for this or it
+  // races the prune, and the E2E archive spec is exactly that shape.
+  document.body.dataset.ready = '1';
 }
 
 main().catch((e) => console.error('[chromium-filler] options failed', e));

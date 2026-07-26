@@ -67,7 +67,13 @@ h1 {
  * config matches", which is true and sends the user nowhere useful.
  */
 .nudge {
-  display: block;
+  /* Flex, not `display: block`: it asks for `min-height: var(--tap)`, and a block
+     puts its one line at the top of that 44px box with the rest as dead space
+     below — which read as a badly-aligned banner rather than a control. */
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
   margin: 0 0 var(--space-5);
   padding: var(--space-3) var(--space-4);
   min-height: var(--tap);
@@ -85,10 +91,9 @@ h1 {
 }
 
 /* The popup's primary is the shared `.btn.btn-primary` (colour, hover and
-   disabled all come from primitives.css); only its full-width, taller shape is
-   the popup's own. */
+   disabled all come from primitives.css); only its taller shape is the popup's
+   own. Its width comes from `.actions` below. */
 #primary {
-  width: 100%;
   min-height: var(--tap);
   border-radius: var(--radius-btn);
   font-size: 15px;
@@ -164,20 +169,29 @@ h1 {
   width: 100%;
 }
 
-/* The navigational actions as secondary buttons, wrapping two-up like the
-   reference's Reset/Queue row. */
+/* The two action rows. `.actions` is what this page is *for* — fill this
+   posting, or go and see the run — so it takes the weight; `.links` is where you
+   go to change something. Both are fixed shares rather than content-sized: every
+   control here is permanent now, so the row's proportions are a fact about the
+   popup and not about the page it happens to be over.
+
+   No `flex-wrap`. Two items at a 3:1 or 1:1 share always fit a 360px popup, and
+   wrapping is how a row silently becomes a column. The labels are one or two
+   words for the same reason. */
+.actions,
 .links {
   margin-top: var(--space-5);
   display: flex;
-  flex-wrap: wrap;
   gap: var(--space-3);
 }
-.links a {
-  /* Natural width by default, so the fresh-install case — Site setup and Queue
-     both hidden, Options alone — is a button and not a second full-width CTA
-     under Fill, which is what it read as. Equal shares come back below as soon as
-     there are two of them to share between. */
-  flex: 0 1 auto;
+/* 3 : 1 against the `flex: 1 1 0` below — Fill takes three quarters of the row. */
+.actions > #primary {
+  flex: 3;
+  min-width: 0;
+}
+.links a,
+.actions > a {
+  flex: 1 1 0;
   white-space: nowrap;
   display: flex;
   align-items: center;
@@ -193,18 +207,8 @@ h1 {
   font-weight: 500;
   text-align: center;
 }
-.links a[hidden] {
-  display: none;
-}
-
-/* Two or more visible: equal shares, and never a label broken across two lines —
-   a wrapped verb makes one button taller than its neighbour and the row then
-   stretches both. `:has` is what counts them; the hidden ones are still children,
-   so `:only-child` cannot. */
-.links:has(a:not([hidden]) ~ a:not([hidden])) a {
-  flex: 1 1 0;
-}
-.links a:hover {
+.links a:hover,
+.actions > a:hover {
   background: var(--surface);
   border-color: var(--border-strong);
 }

@@ -46,6 +46,12 @@ export interface ModalCallbacks extends SheetCallbacks {
   onFillAnyway(): void;
   /** Mark this posting skipped, and move a session on to the next one. */
   onSkip(): void;
+  /** Open the on-page setup wizard for this site — the modal folds to its pill. */
+  onOpenSetup(): void;
+  /** Open the options page. */
+  onOpenOptions(): void;
+  /** Open the options page at the URL importer, ready to paste. */
+  onAddLinks(): void;
   onClose(): void;
 }
 
@@ -281,7 +287,10 @@ export class FillerModal extends Sheet<ModalData> {
       actions.append(
         btn(data.redirect.followed ? ACTION_LABELS.openApplicationAgain : ACTION_LABELS.openApplication, () => this.cb.onFollow(), true),
         skip,
-        this.overflow([btn(ACTION_LABELS.fillAnyway, () => this.cb.onFillAnyway())]),
+        this.overflow([
+          btn(ACTION_LABELS.fillAnyway, () => this.cb.onFillAnyway()),
+          ...this.commonMenuItems(),
+        ]),
       );
       footer.append(actions);
       return footer;
@@ -299,6 +308,7 @@ export class FillerModal extends Sheet<ModalData> {
         this.overflow([
           btn(ACTION_LABELS.rerun, () => this.cb.onRerun()),
           btn(ACTION_LABELS.reset, () => this.cb.onReset()),
+          ...this.commonMenuItems(),
         ]),
       );
       footer.append(actions);
@@ -326,6 +336,7 @@ export class FillerModal extends Sheet<ModalData> {
       this.overflow([
         btn(ACTION_LABELS.rerun, () => this.cb.onRerun()),
         btn(ACTION_LABELS.reset, () => this.cb.onReset()),
+        ...this.commonMenuItems(),
       ]),
     );
 
@@ -577,6 +588,24 @@ export class FillerModal extends Sheet<ModalData> {
     return strip;
   }
 
+  /**
+   * The three that are on every branch: where to configure this site, where to
+   * add more postings, and where everything else lives.
+   *
+   * They belong in the menu and not in the footer because they are about the
+   * *extension*, not about this posting — the same rule that put Re-run and
+   * Reset here. Before this the card was a dead end: a posting whose fields came
+   * out wrong could only be fixed by closing the modal, opening the popup and
+   * pressing Site setup from there.
+   */
+  private commonMenuItems(): HTMLButtonElement[] {
+    return [
+      btn(ACTION_LABELS.siteSetup, () => this.cb.onOpenSetup()),
+      btn(ACTION_LABELS.addLinks, () => this.cb.onAddLinks()),
+      btn(ACTION_LABELS.openOptions, () => this.cb.onOpenOptions()),
+    ];
+  }
+
   /** A "more" button whose menu holds the secondary footer actions. */
   private overflow(items: HTMLButtonElement[]): HTMLElement {
     const wrap = el('div', 'cf-more');
@@ -588,12 +617,24 @@ export class FillerModal extends Sheet<ModalData> {
     // Ghost inside the popover, as the reference's menu is: the menu already has a
     // border, and one around each item made it a stack of boxes. Applied here so
     // every caller's items match, rather than at each call site.
-    for (const item of items) item.classList.add('btn-ghost');
+    const setOpen = (open: boolean) => {
+      menu.hidden = !open;
+      toggle.setAttribute('aria-expanded', String(open));
+    };
+    for (const item of items) {
+      item.classList.add('btn-ghost');
+      // Choosing an item closes the menu. Re-run and Reset both rebuild the card
+      // and took it with them, so this never showed; the three ways out do not —
+      // two of them open another tab and leave this one exactly as it was, and a
+      // menu still hanging open over the report when the user comes back is the
+      // popover having outlived the choice it was opened to make.
+      const choose = item.onclick!;
+      item.onclick = (e) => { setOpen(false); choose.call(item, e); };
+    }
     menu.append(...items);
     toggle.onclick = (e) => {
       e.stopPropagation();
-      menu.hidden = !menu.hidden;
-      toggle.setAttribute('aria-expanded', String(!menu.hidden));
+      setOpen(menu.hidden);
     };
     wrap.append(toggle, menu);
     return wrap;

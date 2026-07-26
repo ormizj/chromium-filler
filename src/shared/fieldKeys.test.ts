@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { FIELD_KEYWORDS, normalizeAttr } from './fieldKeys';
+import { FIELD_KEYWORDS, FIELD_LABELS, FIELD_ORDER, normalizeAttr, orderFields } from './fieldKeys';
 import type { FieldKey } from './types';
 
 /** Every field whose keyword table matches this attribute value. */
@@ -79,6 +79,52 @@ describe('FIELD_KEYWORDS — the separated spellings still work', () => {
       expect(fieldsFor(attr)).toContain(field);
     });
   }
+});
+
+describe('FIELD_ORDER', () => {
+  it('leads with the CV, then the cover letter — the two that decide an application', () => {
+    expect(FIELD_ORDER.slice(0, 2)).toEqual(['resume', 'coverLetter']);
+  });
+
+  it('names every field exactly once, so nothing can fall off a list sorted by it', () => {
+    const keys = Object.keys(FIELD_LABELS) as FieldKey[];
+    expect([...FIELD_ORDER].sort()).toEqual([...keys].sort());
+  });
+});
+
+describe('orderFields', () => {
+  const key = (f: FieldKey) => f;
+
+  it('sorts by importance, not by the order the rows arrived in', () => {
+    expect(orderFields(['country', 'email', 'resume'], key, () => true))
+      .toEqual(['resume', 'email', 'country']);
+  });
+
+  it('puts every field the user filled in ahead of every one they did not', () => {
+    // The CV outranks the city everywhere — but a city that was actually
+    // entered is still worth more than a CV that was never uploaded.
+    const filled = new Set<FieldKey>(['city']);
+    expect(orderFields(['resume', 'city'], key, (f) => filled.has(f)))
+      .toEqual(['city', 'resume']);
+  });
+
+  it('keeps FIELD_ORDER within each group', () => {
+    const filled = new Set<FieldKey>(['email', 'city']);
+    expect(orderFields(['country', 'city', 'resume', 'email'], key, (f) => filled.has(f)))
+      .toEqual(['email', 'city', 'resume', 'country']);
+  });
+
+  it('does not mutate the array it was given', () => {
+    const rows: FieldKey[] = ['country', 'resume'];
+    orderFields(rows, key, () => true);
+    expect(rows).toEqual(['country', 'resume']);
+  });
+
+  it('sorts rows of any shape, not just bare keys', () => {
+    const rows = [{ field: 'zip' as FieldKey }, { field: 'resume' as FieldKey }];
+    expect(orderFields(rows, (r) => r.field, () => true).map((r) => r.field))
+      .toEqual(['resume', 'zip']);
+  });
 });
 
 describe('FIELD_KEYWORDS — no cross-talk between first and last name', () => {

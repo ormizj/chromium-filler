@@ -17,6 +17,7 @@ function callbacks(over: Partial<ModalCallbacks> = {}): ModalCallbacks {
   return {
     onRerun: noop, onReset: noop, onApply: noop, onConfirm: noop, onPick: noop,
     onFollow: noop, onFillAnyway: noop, onSkip: noop, onClose: noop,
+    onOpenSetup: noop, onOpenOptions: noop, onAddLinks: noop,
     ...over,
   };
 }
@@ -310,12 +311,57 @@ describe('FillerModal — the footer offers Apply and Skip', () => {
   const labels = (shadow: ShadowRoot) =>
     [...shadow.querySelectorAll('.cf-footer-actions > button.cf-btn')]
       .map((b) => b.textContent?.trim());
+  const menu = (shadow: ShadowRoot) =>
+    [...shadow.querySelectorAll('.cf-more-menu button')].map((b) => b.textContent?.trim());
+
+  // The three that are on every branch: the card must not be a dead end. Before
+  // them, a posting whose fields came out wrong could only be fixed by closing
+  // the modal and finding Site setup in the toolbar popup.
+  const WAYS_OUT = ['Site setup', 'Add links', 'Open options'];
 
   it('shows exactly Apply and Skip, with the rest behind the overflow', () => {
     const shadow = render(data([match()]));
     expect(labels(shadow)).toEqual(['Apply', 'Skip']);
-    expect([...shadow.querySelectorAll('.cf-more-menu button')].map((b) => b.textContent?.trim()))
-      .toEqual(['Re-run', 'Reset']);
+    expect(menu(shadow)).toEqual(['Re-run', 'Reset', ...WAYS_OUT]);
+  });
+
+  it('reaches the setup wizard, the importer and the options page from the menu', () => {
+    const onOpenSetup = vi.fn();
+    const onAddLinks = vi.fn();
+    const onOpenOptions = vi.fn();
+    const shadow = render(data([match()]), callbacks({ onOpenSetup, onAddLinks, onOpenOptions }));
+    const item = (label: string) => [...shadow.querySelectorAll<HTMLButtonElement>('.cf-more-menu button')]
+      .find((b) => b.textContent?.trim() === label)!;
+    item('Site setup').click();
+    item('Add links').click();
+    item('Open options').click();
+    expect(onOpenSetup).toHaveBeenCalledOnce();
+    expect(onAddLinks).toHaveBeenCalledOnce();
+    expect(onOpenOptions).toHaveBeenCalledOnce();
+  });
+
+  // Re-run and Reset rebuild the whole card, so the menu went with them and this
+  // never showed. Two of the three ways out open another tab and leave this one
+  // untouched — and a popover still hanging over the report when the user comes
+  // back has outlived the choice it was opened to make.
+  it('closes the menu when an item is chosen', () => {
+    const shadow = render(data([match()]));
+    const toggle = shadow.querySelector<HTMLButtonElement>('.cf-more > .cf-btn')!;
+    const menu = shadow.querySelector<HTMLElement>('.cf-more-menu')!;
+    toggle.click();
+    expect(menu.hidden).toBe(false);
+    expect(toggle.getAttribute('aria-expanded')).toBe('true');
+
+    [...menu.querySelectorAll('button')].find((b) => b.textContent === 'Open options')!.click();
+    expect(menu.hidden).toBe(true);
+    expect(toggle.getAttribute('aria-expanded')).toBe('false');
+  });
+
+  // A posting already sent still needs them — that is when "the CV went to the
+  // wrong field, let me fix this site" is most likely to be the next thought.
+  it('keeps them on an applied posting, where Apply itself has retired', () => {
+    const shadow = render(data([match()], { applied: true }));
+    expect(menu(shadow)).toEqual(['Re-run', 'Reset', ...WAYS_OUT]);
   });
 
   it('presses the site’s Send button through onApply', () => {
@@ -361,8 +407,7 @@ describe('FillerModal — the footer offers Apply and Skip', () => {
       redirect: { host: 'jobs.acme.com', reason: 'apply link is cross-origin', followed: false },
     }));
     expect(labels(shadow)).toEqual(['Open application', 'Skip']);
-    expect([...shadow.querySelectorAll('.cf-more-menu button')].map((b) => b.textContent?.trim()))
-      .toEqual(['Fill this page instead']);
+    expect(menu(shadow)).toEqual(['Fill this page instead', ...WAYS_OUT]);
   });
 });
 

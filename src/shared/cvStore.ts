@@ -1,17 +1,29 @@
 /**
- * Stores the user's CV so it is reachable from the CONTENT SCRIPT.
+ * Stores the user's application documents so they are reachable from the
+ * CONTENT SCRIPT.
  *
- * The CV lives in chrome.storage.local, base64-encoded (chrome.storage can't
+ * They live in chrome.storage.local, base64-encoded (chrome.storage can't
  * round-trip an ArrayBuffer). Why not IndexedDB: content scripts share the host
  * page's origin, so IndexedDB/`window` storage there is the *page's*, not the
  * extension's. chrome.storage.local is extension-scoped and readable from
  * content scripts, options, and background alike. `unlimitedStorage` covers
  * larger files.
+ *
+ * Two documents, one mechanism: the CV, and a cover letter for the sites that
+ * take one as an upload rather than as a textarea. They are *device* state, like
+ * the CV always was — never in the sync snapshot.
  */
 
-import type { CvFile } from './types';
+import type { CvFile, DocKind } from './types';
 
-const KEY = 'cv';
+/**
+ * Storage key per document. `resume` is `'cv'` and not `'resumeFile'` because
+ * renaming it would strand every CV already stored, to buy nothing.
+ */
+const DOC_KEYS: Record<DocKind, string> = {
+  resume: 'cv',
+  coverLetter: 'coverLetterFile',
+};
 
 function blobToArrayBuffer(blob: Blob): Promise<ArrayBuffer> {
   if (typeof blob.arrayBuffer === 'function') return blob.arrayBuffer();
@@ -54,20 +66,26 @@ interface StoredCv {
   dataBase64: string;
 }
 
-export async function setCv(file: File): Promise<CvFile> {
-  const cv = await fileToCvFile(file);
-  const stored: StoredCv = { name: cv.name, type: cv.type, dataBase64: arrayBufferToBase64(cv.data) };
-  await chrome.storage.local.set({ [KEY]: stored });
-  return cv;
+export async function setDoc(kind: DocKind, file: File): Promise<CvFile> {
+  const doc = await fileToCvFile(file);
+  const stored: StoredCv = { name: doc.name, type: doc.type, dataBase64: arrayBufferToBase64(doc.data) };
+  await chrome.storage.local.set({ [DOC_KEYS[kind]]: stored });
+  return doc;
 }
 
-export async function getCv(): Promise<CvFile | null> {
-  const raw = await chrome.storage.local.get(KEY);
-  const stored = raw[KEY] as StoredCv | undefined;
+export async function getDoc(kind: DocKind): Promise<CvFile | null> {
+  const key = DOC_KEYS[kind];
+  const raw = await chrome.storage.local.get(key);
+  const stored = raw[key] as StoredCv | undefined;
   if (!stored) return null;
   return { name: stored.name, type: stored.type, data: base64ToArrayBuffer(stored.dataBase64) };
 }
 
-export async function clearCv(): Promise<void> {
-  await chrome.storage.local.remove(KEY);
+export async function clearDoc(kind: DocKind): Promise<void> {
+  await chrome.storage.local.remove(DOC_KEYS[kind]);
 }
+
+/* The CV's own names, kept because it is the document most of the code means. */
+export const setCv = (file: File) => setDoc('resume', file);
+export const getCv = () => getDoc('resume');
+export const clearCv = () => clearDoc('resume');

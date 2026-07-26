@@ -79,14 +79,12 @@ function render(): void {
     primary.textContent = status.hasRun
       ? (status.modalMinimized ? 'Show report' : 'Reset & Re-run')
       : 'Fill';
-    reconfigure.hidden = false;
   } else {
     badge.textContent = 'no config';
     badge.className = 'chip warn';
     detail.textContent = 'No site config matches this URL. Set it up visually to enable filling here.';
     primary.disabled = false;
     primary.textContent = 'Set up this site';
-    reconfigure.hidden = true;
   }
 }
 
@@ -94,7 +92,6 @@ function renderSession(): void {
   const p = session?.progress;
   const active = !!session?.active;
   sessionBox.hidden = !active;
-  openQueue.hidden = active || !p || p.queued === 0;
 
   if (!active || !p) return;
   // The prominent progress card: a big done/total number, a caption, and the
@@ -195,9 +192,14 @@ reconfigure.addEventListener('click', async (e) => {
   await enterSetup();
 });
 
+// The queue *is* the links, so this lands on the box you paste them into rather
+// than on the tab that happens to contain it. Opening the options page on its
+// default tab was indistinguishable from pressing Options beside it.
 openQueue.addEventListener('click', (e) => {
   e.preventDefault();
-  chrome.runtime.sendMessage({ type: MSG.OPEN_OPTIONS });
+  chrome.runtime.sendMessage({
+    type: MSG.OPEN_OPTIONS, hash: 'queue', at: 'import-section', focus: '#urls-paste',
+  });
   window.close();
 });
 

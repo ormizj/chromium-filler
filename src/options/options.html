@@ -136,11 +136,41 @@
         <section id="cv-section">
           <h2>CV / Résumé</h2>
           <p class="hint">Stored on-device (chrome.storage.local). Attached to file inputs during fill.</p>
-          <div class="row">
+          <!-- One line: the picker, what is stored, and Remove on the right. As a
+               full-width input with the filename on a paragraph below it, the row
+               was three stacked things for one document. -->
+          <div class="row file-row">
             <input type="file" id="cv-input" />
+            <span id="cv-current" class="status" role="status" aria-live="polite"></span>
             <button id="clear-cv" class="btn-danger">Remove</button>
           </div>
-          <p id="cv-current" class="status" role="status" aria-live="polite"></p>
+        </section>
+
+        <!-- Its own section, not a cell in the profile grid: a site takes the
+             cover letter as prose or as an upload, and which one it wants is not
+             something the user can know in advance. Both are offered; whichever
+             fits the control found on the page is the one used. -->
+        <section id="cover-section">
+          <h2>Cover letter</h2>
+          <p class="hint"></p>
+          <label class="fld" for="cover-text">
+            <span>Text — for a site with a box to type into</span>
+            <textarea id="cover-text" rows="5"></textarea>
+          </label>
+          <div class="savebar" id="cover-savebar" hidden>
+            <span class="label">Unsaved changes</span>
+            <button id="save-cover" class="primary">Save cover letter</button>
+          </div>
+          <!-- Deliberately not a `<label for>`: it would wrap the Remove button
+               too, and a click on Remove would then also open the file picker. -->
+          <div class="fld">
+            <span id="cover-file-label">File — for a site that asks for an upload</span>
+            <div class="row file-row">
+              <input type="file" id="cover-input" aria-labelledby="cover-file-label" />
+              <span id="cover-current" class="status" role="status" aria-live="polite"></span>
+              <button id="clear-cover" class="btn-danger">Remove</button>
+            </div>
+          </div>
         </section>
       </div>
 
@@ -192,7 +222,7 @@
               <div class="setrow-text"><h5>Keep links in the browser</h5></div>
               <label class="switch"><input type="checkbox" id="keep-in-browser" class="switch-input" /><span class="switch-track" aria-hidden="true"><i></i></span></label>
             </div>
-            <div class="setrow stacked">
+            <div class="setrow stacked span">
               <label class="setrow-text" for="redirect-target">
                 <span class="setrow-title" id="redirect-target-label">When following an external application</span>
               </label>

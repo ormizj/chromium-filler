@@ -22,8 +22,8 @@ import {
 } from '../shared/storage';
 import { captureDetails, type JobDetails } from '../shared/jobDetails';
 import { BUILD_ID } from '../shared/buildId';
-import { getCv, cvFileToFile } from '../shared/cvStore';
-import { TEXT_FIELDS, FIELD_LABELS } from '../shared/fieldKeys';
+import { getDoc, cvFileToFile } from '../shared/cvStore';
+import { TEXT_FIELDS, FIELD_LABELS, orderFields } from '../shared/fieldKeys';
 import { matchStatus } from '../shared/fieldStatus';
 import {
   MSG, type FollowRedirectResponse, type Message, type SessionState, type StatusResponse,
@@ -60,6 +60,8 @@ class Controller {
   private config?: SiteConfig;
   private profile: Profile = { values: {}, custom: {} };
   private cvFile: File | null = null;
+  /** The cover letter as a file, for sites that ask for one instead of prose. */
+  private coverFile: File | null = null;
   private matches: FieldMatch[] = [];
   private elements = new Map<FieldKey, HTMLElement>();
   private modal?: FillerModal;
@@ -234,8 +236,9 @@ class Controller {
     this.profile = state.profile;
     this.config = findMatchingConfig(location.href, state.siteConfigs) ?? config;
 
-    const cv = await getCv();
+    const [cv, cover] = await Promise.all([getDoc('resume'), getDoc('coverLetter')]);
     this.cvFile = cv ? cvFileToFile(cv) : null;
+    this.coverFile = cover ? cvFileToFile(cover) : null;
     this.session = await this.fetchSession();
 
     if (config.waitFor) await waitForSelector(config.waitFor, config.waitTimeoutMs ?? 15000);
@@ -345,11 +348,20 @@ class Controller {
     else this.showModal();
   }
 
+  /**
+   * The fields there is something to fill *with*. Order does not matter here —
+   * `detectFields` uses it as a tie-break and the report is sorted afterwards —
+   * but membership does: a field with no value would report as unmatched on
+   * every posting, which is noise about the profile, not about the page.
+   */
   private wantedFields(): FieldKey[] {
     const text = Object.entries(this.profile.values)
       .filter(([, v]) => v != null && v !== '')
       .map(([k]) => k as FieldKey);
     if (this.cvFile) text.push('resume');
+    // A cover-letter *file* is reason enough on its own: the upload it fills is
+    // a different control from the textarea the text fills.
+    if (this.coverFile && !text.includes('coverLetter')) text.push('coverLetter');
     return text;
   }
 
@@ -393,13 +405,33 @@ class Controller {
       }
       return match;
     });
+    // Reading order, not detection order — see `orderFields`. Detection is left
+    // to run in its own order because it uses that order as a tie-break.
+    this.matches = orderFields(this.matches, (m) => m.field, (m) => this.hasValueFor(m.field));
   }
 
-  /** Fill a single field's element from profile/CV. Returns whether it filled. */
+  /** Whether the *profile* can supply this field — the split `orderFields` sorts on. */
+  private hasValueFor(field: FieldKey): boolean {
+    if (field === 'resume') return !!this.cvFile;
+    if (field === 'coverLetter') return !!this.coverFile || !!this.profile.values.coverLetter;
+    return !!this.profile.values[field];
+  }
+
+  /**
+   * Fill a single field's element from the profile. Returns whether it filled.
+   *
+   * The cover letter is the one field that can go either way: the page decides,
+   * by whether the control it offers is an upload or something to type into.
+   */
   private applyFill(field: FieldKey, el: HTMLElement): boolean {
+    const fileInput = el instanceof HTMLInputElement && el.type === 'file' ? el : null;
     if (field === 'resume') {
-      if (!this.cvFile || !(el instanceof HTMLInputElement)) return false;
-      return fillFileInput(el, this.cvFile);
+      if (!this.cvFile || !fileInput) return false;
+      return fillFileInput(fileInput, this.cvFile);
+    }
+    if (field === 'coverLetter' && fileInput) {
+      if (!this.coverFile) return false;
+      return fillFileInput(fileInput, this.coverFile);
     }
     const value = this.profile.values[field];
     if (value == null || value === '') return false;
@@ -432,6 +464,15 @@ class Controller {
         onFollow: () => { this.followed = false; void this.followRedirect(this.detection!); },
         onFillAnyway: () => this.fillHere(),
         onSkip: () => this.skipPosting(),
+        // The three ways out of a posting, from the overflow menu. Setup is a
+        // direct call and not a message: the panel lives in this same content
+        // script, and `openSetup` already folds the modal to its pill through
+        // `arbitrateSheets`.
+        onOpenSetup: () => void this.openSetup(),
+        onOpenOptions: () => chrome.runtime.sendMessage({ type: MSG.OPEN_OPTIONS }),
+        onAddLinks: () => chrome.runtime.sendMessage({
+          type: MSG.OPEN_OPTIONS, hash: 'queue', at: 'import-section', focus: '#urls-paste',
+        }),
         // Collapse to the pill rather than destroying the report: the fills stay
         // in place and the modal is one tap away, instead of only reachable
         // through a Reset & Re-run that would wipe them.
@@ -600,7 +641,12 @@ class Controller {
         onPickSuccess: () => this.pickSuccess(),
         onClearSuccess: () => void this.clearSuccess(),
         onRename: (name, pattern) => this.renameConfig(name, pattern),
-        onOpenOptions: () => chrome.runtime.sendMessage({ type: MSG.OPEN_OPTIONS }),
+        // "Advanced (JSON)" is about *this config*, so it lands on the JSON that
+        // holds it. Without `at`/`focus` it opened the options page on whatever
+        // tab is default — the queue — and left the user to find the editor.
+        onOpenOptions: () => chrome.runtime.sendMessage({
+          type: MSG.OPEN_OPTIONS, hash: 'sites', at: 'configs-section', focus: '#configs-json',
+        }),
         onDismissHelp: () => void this.dismissHelp(),
         onClose: () => this.closeSetup(),
         // The same three the review modal wires, because it is the same slot:
@@ -745,6 +791,12 @@ class Controller {
         hasSave,
       };
     });
+    // Same reading order as the review modal's report. This step lists every
+    // field the extension knows, so the split matters more here than there: what
+    // the user actually filled in comes first, and eleven rows for fields that
+    // have nothing to fill them with stop sitting above the one that needs a Pick.
+    const orderedFields = orderFields(
+      fields, (r) => r.key as FieldKey, (r) => this.hasValueFor(r.key as FieldKey));
 
     // The Send button, found the same way Apply will find it. Highlighted like
     // the field rows, so "which button is that?" is answered on the page rather
@@ -789,7 +841,7 @@ class Controller {
       urlPattern: config.urlPatterns[0] ?? '',
       prep,
       containers,
-      fields,
+      fields: orderedFields,
       verdict,
       redirect: redirectRows,
       beforeFollow,

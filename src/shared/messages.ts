@@ -120,9 +120,17 @@ export type Message =
   | { type: typeof MSG.PICK; field: FieldKey }
   | { type: typeof MSG.SETUP }
   | { type: typeof MSG.OPEN_URLS; urls: string[] }
-  // `hash` deep-links to a tab (`profile`, `sites`, `help`, …); the options page
-  // already routes on its own hash, so this only has to survive the open.
-  | { type: typeof MSG.OPEN_OPTIONS; createForUrl?: string; hash?: string }
+  // `hash` deep-links to a tab (`profile`, `sites`, `help`, …); `at` names a
+  // section on it and `focus` a control inside that, because a tab on its own is
+  // not where anything is. The options page already routes on its own hash, so
+  // all three only have to survive the open.
+  | {
+      type: typeof MSG.OPEN_OPTIONS;
+      createForUrl?: string;
+      hash?: string;
+      at?: string;
+      focus?: string;
+    }
   | { type: typeof MSG.SUBMITTED; url: string }
   | { type: typeof MSG.APPLYING; url: string }
   | { type: typeof MSG.FOLLOW_REDIRECT; sourceUrl: string; href?: string }

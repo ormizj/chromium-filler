@@ -130,14 +130,32 @@ describe('popup render', () => {
     expect(sent).toContainEqual(expect.objectContaining({ type: MSG.SETUP }));
   });
 
-  it('matched: exposes a Reconfigure link that enters setup in the tab', async () => {
+  it('exposes a Site setup link that enters setup in the tab', async () => {
     await mountPopup(matched());
     const link = document.getElementById('reconfigure') as HTMLAnchorElement;
-    expect(link.hidden).toBe(false);
     const sent = recordTabMessages(matched());
     link.click();
     await flush();
     expect(sent).toContainEqual(expect.objectContaining({ type: MSG.SETUP }));
+  });
+
+  /**
+   * The action rows are furniture, not a report on the page. Site setup used to
+   * be hidden on an unconfigured site and Queue whenever a session was running,
+   * so the popup was a different shape every time it opened — and the control
+   * you wanted was missing exactly when the page was in the state you wanted it
+   * for. Where a thing is is half of knowing it exists.
+   */
+  it('keeps every action visible whatever the page and the session are doing', async () => {
+    const visible = () => ['primary', 'open-queue', 'reconfigure', 'open-options']
+      .filter((id) => !(document.getElementById(id) as HTMLElement).hidden);
+
+    await mountPopup(matched());
+    expect(visible()).toHaveLength(4);
+
+    mockSession(session());
+    await mountPopup(matched({ siteMatched: false, siteName: undefined }));
+    expect(visible()).toHaveLength(4);
   });
 });
 
@@ -176,12 +194,17 @@ describe('queue session', () => {
     );
   });
 
-  it('offers the queue when postings are waiting but no session is running', async () => {
-    mockSession({ active: false, batchSize: 5, progress: {
-      total: 10, queued: 10, inFlight: 0, applied: 0, skipped: 0, done: 0, ratio: 0,
-    } });
+  // The queue *is* the links. Sending a bare OPEN_OPTIONS made this button
+  // indistinguishable from the Options one beside it — both landed on the
+  // default tab, and neither reached the box you paste into.
+  it('sends the queue button to the URL importer, not just to the options page', async () => {
+    const sent = mockSession(session());
     await mountPopup(matched());
-    expect((document.getElementById('open-queue') as HTMLAnchorElement).hidden).toBe(false);
+    (document.getElementById('open-queue') as HTMLAnchorElement).click();
+    await flush();
+    expect(sent).toContainEqual(expect.objectContaining({
+      type: MSG.OPEN_OPTIONS, hash: 'queue', at: 'import-section', focus: '#urls-paste',
+    }));
   });
 });
 

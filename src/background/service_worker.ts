@@ -106,14 +106,16 @@ chrome.runtime.onMessage.addListener((msg: Message, _sender, sendResponse) => {
     return true;
   }
   if (msg.type === MSG.OPEN_OPTIONS) {
-    // Either deep link is a hash on the options URL; `openOptionsPage` cannot
+    // Every deep link is a hash on the options URL; `openOptionsPage` cannot
     // carry one, so anything targeted has to go through `tabs.create`.
-    const fragment = msg.createForUrl
-      ? `#create=${encodeURIComponent(msg.createForUrl)}`
-      : msg.hash ? `#${msg.hash}`
-      : undefined;
-    const url = fragment
-      ? `${chrome.runtime.getURL('src/options/options.html')}${fragment}`
+    const parts: string[] = [];
+    if (msg.createForUrl) parts.push(`create=${encodeURIComponent(msg.createForUrl)}`);
+    else if (msg.hash) parts.push(msg.hash);
+    // `at`/`focus` are additions to whichever tab was named, so they follow it.
+    if (msg.at) parts.push(`at=${encodeURIComponent(msg.at)}`);
+    if (msg.focus) parts.push(`focus=${encodeURIComponent(msg.focus)}`);
+    const url = parts.length
+      ? `${chrome.runtime.getURL('src/options/options.html')}#${parts.join('&')}`
       : undefined;
     if (url) chrome.tabs.create({ url });
     else chrome.runtime.openOptionsPage();

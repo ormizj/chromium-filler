@@ -34,7 +34,14 @@ export interface Profile {
   custom: Record<string, string>;
 }
 
-/** The stored CV, kept in chrome.storage.local (base64-encoded bytes) plus its metadata. */
+/**
+ * The documents that can be uploaded to a form. Both are device state — see
+ * `cvStore.ts`. The cover letter is *also* a `TextFieldKey`: a site takes it as
+ * a file or as prose, and the user may supply either or both.
+ */
+export type DocKind = 'resume' | 'coverLetter';
+
+/** A stored document, kept in chrome.storage.local (base64-encoded bytes) plus its metadata. */
 export interface CvFile {
   name: string;
   type: string;

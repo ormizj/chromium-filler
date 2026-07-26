@@ -63,6 +63,12 @@
     <div class="stage">
       <div class="panel popup">
         <h2>Popup</h2>
+        <!-- `state=fresh` seeds an empty store, which is the only way to see the
+             first-run nudge — and the state the action rows have to hold their
+             shape in. Without a link it was reachable by hand-editing the URL. -->
+        <div class="states">
+          <a href="./frame.html?page=popup&amp;state=fresh">first run (nudge, nothing set up)</a>
+        </div>
         <iframe src="./frame.html?page=popup" title="Popup harness"></iframe>
       </div>
       <div class="panel phone">

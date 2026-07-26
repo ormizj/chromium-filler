@@ -496,9 +496,21 @@ export const SETUP_STEP_HELP: Record<SetupStepKey, GroupHelp> = {
 export type ConceptKey =
   | 'dots' | 'autoVsSaved' | 'todoChip' | 'picker' | 'neverSubmits'
   | 'twoStep' | 'appLink' | 'sessions' | 'urlPattern' | 'successSelector' | 'howItWorks'
-  | 'apply' | 'applyUnverified' | 'exportJobs' | 'syncClient';
+  | 'apply' | 'applyUnverified' | 'exportJobs' | 'syncClient' | 'coverLetter';
 
 export const CONCEPT_HELP: Record<ConceptKey, HelpEntry> = {
+  coverLetter: {
+    title: 'A cover letter as text or as a file',
+    short: 'Fill in either or both — whichever the site asks for is the one used.',
+    body: 'Sites are split on this: some give you a box to type into, some want a '
+      + 'document uploaded, and you cannot tell which until the form is in front of '
+      + 'you. So both live here. The text goes into a cover-letter *field*; the file '
+      + 'is attached to a cover-letter *upload*. Fill in whichever you expect to '
+      + 'need, or both — nothing is sent anywhere until you press Apply.',
+    when: 'The file is only ever attached to an upload the page names as a cover '
+      + 'letter. An unlabelled file input is treated as the CV, never as this — '
+      + 'attaching the wrong document is worse than leaving a row for you to fill.',
+  },
   dots: {
     title: 'What the dots mean',
     short: 'Green is done, yellow is worth a look, grey means nothing was found.',

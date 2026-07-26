@@ -170,3 +170,63 @@ describe('detectFields — resume file input', () => {
     expect(by.get('resume')?.confidence).toBe('high');
   });
 });
+
+/**
+ * Some sites take the cover letter as an upload rather than a textarea, so it is
+ * the second field allowed to claim a file input — but only on a *named* one.
+ */
+describe('detectFields — cover-letter file input', () => {
+  it('detects a file input labelled as a cover letter', () => {
+    const root = mount(`
+      <label for="cl">Cover letter (PDF)</label>
+      <input id="cl" type="file" />
+    `);
+    const by = get(root);
+    expect(by.get('coverLetter')?.element?.id).toBe('cl');
+    expect(by.get('coverLetter')?.confidence).toBe('high');
+  });
+
+  it('takes each of two labelled uploads, without either stealing the other', () => {
+    const root = mount(`
+      <label for="cv">Résumé</label>
+      <input id="cv" type="file" />
+      <label for="cl">Cover letter</label>
+      <input id="cl" type="file" />
+    `);
+    const by = get(root);
+    expect(by.get('resume')?.element?.id).toBe('cv');
+    expect(by.get('coverLetter')?.element?.id).toBe('cl');
+  });
+
+  // The whole point of the narrower rule: the CV may fall back to a lone
+  // unlabelled upload, the cover letter never may. Attaching the wrong document
+  // to an application is not a mistake a "best guess" is worth making.
+  it('never falls back to an unlabelled file input, the way the CV does', () => {
+    const root = mount(`<input type="file" />`);
+    const by = get(root);
+    expect(by.get('resume')?.element).not.toBeNull();
+    expect(by.get('coverLetter')?.element).toBeNull();
+    expect(by.get('coverLetter')?.confidence).toBe('none');
+  });
+
+  it('leaves the file input to the CV when only the CV is being filled', () => {
+    const root = mount(`
+      <label for="cl">Cover letter</label>
+      <input id="cl" type="file" />
+    `);
+    const by = get(root, ['resume']);
+    expect(by.get('resume')?.element?.id).toBe('cl');
+  });
+
+  it('still prefers a textarea when the page offers one', () => {
+    const root = mount(`
+      <label for="cl-text">Cover letter</label>
+      <textarea id="cl-text"></textarea>
+      <label for="cv">Résumé</label>
+      <input id="cv" type="file" />
+    `);
+    const by = get(root);
+    expect(by.get('coverLetter')?.element?.id).toBe('cl-text');
+    expect(by.get('resume')?.element?.id).toBe('cv');
+  });
+});

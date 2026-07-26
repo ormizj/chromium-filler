@@ -47,6 +47,49 @@ export const FIELD_KEYWORDS: Record<FieldKey, RegExp[]> = {
   resume: [/\bresume\b/, /\bcv\b/, /\bcurriculum vitae\b/, /\bre ?sume\b/],
 };
 
+/**
+ * The order fields are *shown* in, most consequential first.
+ *
+ * Deliberately not `TEXT_FIELDS`. That list is what detection is asked to find,
+ * and `detectFields` uses its order twice — for the rows it returns *and* as the
+ * tie-break between two fields that score equally on the same control — so
+ * reordering it would quietly change which control a field claims. This one is
+ * for display, and is applied to the *output* of detection.
+ *
+ * The CV leads because it is the field an application is actually judged on; a
+ * report that opened on "Country ✓" and buried an unattached CV at the bottom
+ * was ordered by nothing more than the order the profile happened to be typed in.
+ */
+export const FIELD_ORDER: FieldKey[] = [
+  'resume', 'coverLetter',
+  'email', 'phone',
+  'fullName', 'firstName', 'lastName',
+  'linkedin', 'github', 'website', 'portfolio',
+  'address', 'city', 'state', 'zip', 'country',
+];
+
+const ORDER_INDEX = new Map(FIELD_ORDER.map((f, i) => [f, i]));
+
+/**
+ * Sort rows into reading order: everything the user has actually provided in
+ * their profile first, then everything they have not, `FIELD_ORDER` within each.
+ *
+ * The two groups matter because the setup wizard lists every field the extension
+ * knows, filled or not. Without the split, a site's one unmatched control could
+ * sit below eleven rows for fields that will never be filled because there is
+ * nothing to fill them with — which is the opposite of "a healthy site reports no
+ * work". `filled` is about the *profile*, never about the page.
+ */
+export function orderFields<T>(
+  rows: readonly T[],
+  key: (row: T) => FieldKey,
+  filled: (row: T) => boolean,
+): T[] {
+  const rank = (row: T) => ORDER_INDEX.get(key(row)) ?? FIELD_ORDER.length;
+  return [...rows].sort((a, b) =>
+    Number(filled(b)) - Number(filled(a)) || rank(a) - rank(b));
+}
+
 /** autocomplete attribute token(s) that strongly indicate a field. */
 export const AUTOCOMPLETE_MAP: Partial<Record<FieldKey, string[]>> = {
   firstName: ['given-name'],

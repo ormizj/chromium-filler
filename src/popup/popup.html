@@ -32,15 +32,23 @@
         <button id="session-skip" class="btn">Skip &amp; next</button>
       </div>
 
-      <button id="primary" class="btn btn-primary" disabled>Fill</button>
+      <!-- Two rows, in fixed proportions, and every control in them is always
+           present. They used to appear and disappear with the page's state — Site
+           setup only on a configured site, Queue only when something was waiting —
+           so the popup was a different shape every time it opened and the one
+           control that never moved, Options, was left as a small button adrift
+           under a full-width Fill. Where a thing is is half of knowing it exists. -->
+      <div class="actions">
+        <button id="primary" class="btn btn-primary" disabled>Fill</button>
+        <a id="open-queue" href="#">Queue</a>
+      </div>
 
       <div class="links">
         <!-- Short labels, and no arrow: these are button-shaped, and the reference's
              secondary row is two one-word verbs (Reset / Queue). As sentences they
              wrapped onto a second line in a 360px popup and left the row ragged.
              The arrow stays on `.nudge`, which is a prompt rather than a button. -->
-        <a id="reconfigure" href="#" hidden>Site setup</a>
-        <a id="open-queue" href="#" hidden>Queue</a>
+        <a id="reconfigure" href="#">Site setup</a>
         <a id="open-options" href="#">Options</a>
       </div>
       <div id="build" class="build"></div>

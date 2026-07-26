@@ -94,6 +94,14 @@ export const SCENARIOS = [
     expect: 'verdict is "unknown" and it falls through to the ordinary fill path',
   },
   {
+    id: 'quick-uploads',
+    flow: 'quick-apply',
+    title: 'QuickBoard — the cover letter is an upload, not a textarea',
+    url: site(HOSTS.board, 'quick-board', '?job=uploads'),
+    config: 'quick-board',
+    expect: 'each upload takes its own document: the CV to "Résumé", the cover letter to "Cover letter"',
+  },
+  {
     id: 'mixed-quick',
     flow: 'quick-apply',
     title: 'MixedBoard — the quick-apply posting on a board that also hands off',

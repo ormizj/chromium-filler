@@ -891,7 +891,12 @@ button.cf-btn.primary[aria-disabled='true'] {
   border-radius: var(--radius-md);
   background: var(--surface);
   padding: var(--space-4);
-  margin: 0 0 var(--space-3);
+  /* Symmetric, and never zero on top: this panel is opened *under* the prose it
+     explains — the wizard's step lead, a settings caption, the previous entry in
+     the Help tab — and with `margin-top: 0` its accent edge butted straight
+     against the last line of that text. Somewhere that supplies its own gap
+     (`.cf-flow`) overrides this to 0. */
+  margin: var(--space-3) 0;
   font-size: var(--text-md);
   line-height: 1.5;
   color: var(--fg);

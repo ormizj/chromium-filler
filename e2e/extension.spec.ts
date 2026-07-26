@@ -68,6 +68,7 @@ test.beforeAll(async () => {
   // Seed profile / configs / settings (+ a CV via the real options file input).
   const opts = await context.newPage();
   await opts.goto(`chrome-extension://${extId}/src/options/options.html`);
+  await opts.waitForFunction(() => document.body.dataset.ready === '1');
   const siteConfigs = JSON.parse(fs.readFileSync(CONFIGS, 'utf8'));
   await opts.evaluate(
     async ({ profile, configs }) => {
@@ -86,6 +87,11 @@ test.beforeAll(async () => {
   await opts.setInputFiles('#cv-input', {
     name: 'cv.pdf', mimeType: 'application/pdf', buffer: Buffer.from('%PDF-1.4 test cv'),
   });
+  // The other document. Both are seeded through the real file inputs rather than
+  // written to storage, so the options page's own encode path is exercised too.
+  await opts.setInputFiles('#cover-input', {
+    name: 'cover.pdf', mimeType: 'application/pdf', buffer: Buffer.from('%PDF-1.4 test cover'),
+  });
   await opts.waitForTimeout(400);
   await opts.close();
 });
@@ -96,10 +102,18 @@ test.afterAll(async () => {
 
 /* ---------------- Extension-storage helpers ---------------- */
 
-/** Run something on an extension page, where the `chrome.*` APIs are available. */
+/**
+ * Run something on an extension page, where the `chrome.*` APIs are available.
+ *
+ * Waits for the options page to finish booting first. `load` fires while `main`
+ * is still awaiting, and the last thing it does is a read-modify-write of the
+ * capture map — so a helper that writes storage the instant the page loads is
+ * racing that write, and half the time loses to a snapshot taken before it ran.
+ */
 async function onExtensionPage<T>(fn: (page: Page) => Promise<T>): Promise<T> {
   const page = await context.newPage();
   await page.goto(`chrome-extension://${extId}/src/options/options.html`);
+  await page.waitForFunction(() => document.body.dataset.ready === '1');
   try {
     return await fn(page);
   } finally {
@@ -259,6 +273,31 @@ test('ModalLever: opens modal (prep), fills accessible-name fields, attaches inj
   const cvCount = await page.locator('#resume-hidden').evaluate((el) => (el as HTMLInputElement).files?.length ?? 0);
   expect(cvCount).toBe(1);
   await page.close();
+});
+
+/**
+ * The cover letter is two things, and the page decides which. Most sites give
+ * you a box to type into; some want a document. Both are held in the profile,
+ * and neither is any use on the site that asks for the other.
+ *
+ * Two uploads side by side is the case that matters: the CV's "fall back to the
+ * first file input" is what makes an unlabelled upload work at all, and it must
+ * not reach across and take a control the page has clearly named.
+ */
+test('QuickBoard: a cover-letter upload takes the cover letter, not the CV', async () => {
+  const page = await context.newPage();
+  try {
+    await page.goto(urlFor('quick-uploads'));
+    await expect(page.locator('#email')).toHaveValue('ada@example.com');
+
+    const attached = (sel: string) => page.locator(sel).evaluate(
+      (el) => [...((el as HTMLInputElement).files ?? [])].map((f) => f.name),
+    );
+    expect(await attached('#resume-file')).toEqual(['cv.pdf']);
+    expect(await attached('#cover')).toEqual(['cover.pdf']);
+  } finally {
+    await page.close();
+  }
 });
 
 test('ChaosForm: hashed ids + multi-step; disguised city stays unmatched', async () => {
@@ -903,7 +942,14 @@ test('Options: the archive exports what was ticked, and the ticks survive a relo
     // collects captures whose posting has gone (`pruneDetails`) once per load,
     // reading the URL list *before* this evaluate could set it. Writing the two
     // together and reloading is what keeps the seed self-consistent.
+    //
+    // Waiting for `data-ready` is the other half. That prune is a
+    // read-modify-write, and `load` fires while it is still in flight — so a seed
+    // written before it finishes is overwritten by a map read before the seed
+    // existed, and the captures vanish. Nothing a user does looks like this; it
+    // is an artifact of writing storage underneath a page that is still booting.
     await page.goto(`chrome-extension://${extId}/src/options/options.html`);
+    await page.waitForFunction(() => document.body.dataset.ready === '1');
     await page.evaluate(async ([a, s]) => {
       const now = Date.now();
       const entry = (id: string, url: string, status: string) => ({
@@ -1125,6 +1171,97 @@ test('Modal: dragging the card on a posting moves it for that page only', async 
       async () => (await chrome.storage.local.get('settings')).settings?.modalLayout,
     ));
     expect(stored, 'only the Options simulator may write the default').toEqual(chosen);
+  } finally {
+    await page.close();
+  }
+});
+
+/**
+ * The review modal used to be a dead end. Everything it offered acted on the
+ * posting, so a site that filled the wrong field could only be fixed by closing
+ * the card (losing the report), opening the toolbar popup and finding Site setup
+ * there. The three ways out now ride in the overflow beside Re-run and Reset.
+ */
+test('Modal: the overflow menu reaches setup, the importer and the options page', async () => {
+  const page = await context.newPage();
+  try {
+    await page.goto(urlFor('quick-plain'));
+    await expect(page.locator('.cf-card')).toBeVisible({ timeout: 20_000 });
+
+    const openMenu = () => page.locator('.cf-more button').first().click();
+
+    // Site setup runs in *this* tab — the panel is in the same content script,
+    // and taking the user to a new page to configure the one they are looking at
+    // would defeat a picker that works by tapping the real element.
+    await openMenu();
+    await page.getByRole('button', { name: 'Site setup', exact: true }).click();
+    await expect(page.locator('.cf-card[data-sheet="setup"]')).toBeVisible({ timeout: 20_000 });
+    // One slot, two sheets: opening the panel folds the review card away — and
+    // folds it, never destroys it, so the report it holds survives the trip.
+    await expect(page.locator('.cf-card[data-sheet="review"]')).toHaveCount(0);
+
+    // Bring the review card back. Minimize first: while a card is expanded no
+    // pill shows at all, because both pills dock where the expanded card is.
+    await page.locator('.cf-card[data-sheet="setup"] .cf-close').click();
+    await page.locator('.cf-pill[data-sheet="review"]').click();
+    await expect(page.locator('.cf-card[data-sheet="review"]')).toBeVisible({ timeout: 10_000 });
+
+    // The other two exits. Both open the options page at a *place*, not merely on
+    // a tab — a tab is not where anything is, and both of these used to land on
+    // whatever tab happens to be the default one.
+
+    await openMenu();
+    const importer = context.waitForEvent('page');
+    await page.getByRole('button', { name: 'Add links', exact: true }).click();
+    const importPage = await importer;
+    await importPage.waitForLoadState();
+    await expect(importPage.locator('#tab-queue')).toHaveAttribute('aria-selected', 'true');
+    // Focused *and* on screen. The tab alone was never the destination: the
+    // importer is the third section of it. (Not asserted as a scroll distance —
+    // a tall enough window has the section in view without moving, and that is
+    // a correct outcome, not a missing one.)
+    await expect(importPage.locator('#urls-paste')).toBeFocused();
+    await expect(importPage.locator('#import-section')).toBeInViewport();
+    await importPage.close();
+
+    await openMenu();
+    const opts = context.waitForEvent('page');
+    await page.getByRole('button', { name: 'Open options', exact: true }).click();
+    const optsPage = await opts;
+    await optsPage.waitForLoadState();
+    await expect(optsPage.locator('.topbar')).toBeVisible();
+    await optsPage.close();
+  } finally {
+    await page.close();
+  }
+});
+
+/**
+ * "Advanced (JSON)" is about the config the wizard is editing, so it has to land
+ * on the editor holding it. With no hash at all it opened the options page on the
+ * default tab — the queue — and left the user to go and find the JSON.
+ */
+test('Setup: “Advanced (JSON)” lands on the Sites tab, at the config editor', async () => {
+  const page = await context.newPage();
+  try {
+    await page.goto(urlFor('quick-plain'));
+    await expect(page.locator('.cf-card')).toBeVisible({ timeout: 20_000 });
+
+    await page.locator('.cf-more button').first().click();
+    await page.getByRole('button', { name: 'Site setup', exact: true }).click();
+    await expect(page.locator('.cf-rail')).toBeVisible({ timeout: 10_000 });
+    // Step 1 is where the raw config lives; the rail is how to get there without
+    // pressing Next five times.
+    await page.locator('.cf-rail-node').first().click();
+
+    const opened = context.waitForEvent('page');
+    await page.getByRole('button', { name: 'Advanced (JSON)' }).click();
+    const optsPage = await opened;
+    await optsPage.waitForLoadState();
+
+    await expect(optsPage.locator('#tab-sites')).toHaveAttribute('aria-selected', 'true');
+    await expect(optsPage.locator('#configs-json')).toBeFocused();
+    await optsPage.close();
   } finally {
     await page.close();
   }

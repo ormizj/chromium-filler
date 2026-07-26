@@ -170,7 +170,10 @@ section {
   gap: var(--space-4);
 }
 
-label.fld {
+/* A captioned control. Usually a `<label>`, but not where the caption sits over
+   a *row* of controls — a `for=` there makes a click on any of them, Remove
+   included, activate the one the label points at. */
+.fld {
   display: flex;
   flex-direction: column;
   gap: var(--space-1);
@@ -205,6 +208,28 @@ select {
 }
 input[type='file'] {
   padding: var(--space-2);
+  /* A file input is a button plus a filename, and as a block those sit on the
+     first line box of the `min-height: var(--tap)` every input here carries —
+     i.e. above centre, in a box drawn around them. */
+  display: flex;
+  align-items: center;
+}
+
+/* A stored document on one line: pick it, see what is held, remove it. The
+   filename takes the slack so Remove lands on the right edge on every row —
+   both documents (CV, cover letter) use this. */
+.file-row > input[type='file'] {
+  flex: 0 1 auto;
+  width: auto;
+  min-width: 0;
+}
+.file-row > .status {
+  flex: 1;
+  min-width: 0;
+  margin: 0;
+}
+.file-row > .btn-danger {
+  margin-left: auto;
 }
 input[type='checkbox'] {
   min-height: 0;
@@ -213,6 +238,15 @@ textarea {
   font-family: var(--mono);
   font-size: 12.5px;
   resize: vertical;
+}
+
+/* Mono is for the things on this page that are code — the config JSON, a blob of
+   URLs. A cover letter is prose, and prose set in a 12.5px monospace is prose
+   nobody proof-reads. */
+#cover-text {
+  font-family: var(--font);
+  font-size: var(--text-md);
+  line-height: 1.6;
 }
 
 .row {
@@ -343,6 +377,10 @@ label.check input {
   grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
   gap: var(--space-4);
   align-items: start;
+  /* What follows a list is prose about it — the simulator's two paragraphs sit
+     8px under the fullscreen switch, which read as one crammed block rather than
+     a card and its explanation. */
+  margin-bottom: var(--space-6);
 }
 
 /* A paper object standing on the recessed body — the reference's `.setrow`. */
@@ -423,12 +461,17 @@ label.check input {
 
 /* The label above a control too wide to sit beside it. Its cross axis is the
    horizontal one, so it wants the default distribution back — `flex-start` there
-   would shrink the control to its content instead of filling the row. */
+   would shrink the control to its content instead of filling the row.
+   The gap is every other row's, so a stacked card keeps the grid's rhythm: at
+   `--space-3` it was visibly tighter than the switch card beside it, which is
+   half of what made it read as a different kind of object. Pair it with `.span`
+   — a column-shaped card in one half of the grid also stretches its neighbour,
+   because `.setrow` is `height: 100%`. */
 .setrow.stacked {
   flex-direction: column;
   align-items: stretch;
   align-content: stretch;
-  gap: var(--space-3);
+  gap: var(--space-5);
 }
 
 /* A <label> used as the text block is a flex row like the div it replaces. */
@@ -1385,6 +1428,14 @@ label.fld.inline input {
 /* The chosen config's behaviour, in a sentence — the shared `.cf-help` panel
    (primitives.css) with its accent left border; only the bottom gap is added. */
 #configs-explain {
+  margin-bottom: var(--space-5);
+}
+
+/* The config chips stand on the JSON box otherwise: `.filters` has a top margin
+   and no bottom one, and a `textarea` on this page has neither. Scoped to this
+   row rather than added to `.filters`, whose other use — the queue's status
+   filters — is followed by a list that brings its own gap. */
+#configs-summary {
   margin-bottom: var(--space-5);
 }
 

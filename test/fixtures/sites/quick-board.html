@@ -24,6 +24,10 @@
                     first and must win.
         ?job=nolink the same form with nothing external on the page: the plain
                     `unknown` verdict that falls through to the fill path.
+        ?job=uploads the same form, but the cover letter is an *upload* rather
+                    than a textarea — the split that makes the cover letter two
+                    things. Two file inputs, so the CV must not take the wrong
+                    one and the cover letter must not take the CV's.
 
       `&n=…` is ignored — it just makes each queue-seed posting a distinct URL.
     -->
@@ -68,6 +72,16 @@
             <h2>Similar jobs</h2>
             <a id="decoy-apply" href="${EMPLOYER}/sites/ats-form.html?src=decoy">Apply on company website</a>
           </aside>`;
+      }
+
+      // Some employers take the cover letter as a document. The two uploads sit
+      // side by side deliberately: each has to be claimed by its own label, and
+      // the CV's "fall back to the first file input" must not reach across.
+      if (kind === 'uploads') {
+        document.querySelector('label[for="cover"]').outerHTML =
+          '<label for="cover">Cover letter (PDF)</label>';
+        document.getElementById('cover').outerHTML =
+          '<input id="cover" name="cover_letter" type="file" />';
       }
 
       document.getElementById('application-form').addEventListener('submit', (e) => {

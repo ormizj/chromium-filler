@@ -527,6 +527,14 @@ button.cf-btn.cf-applied-btn[aria-disabled='true'] {
   border: 1px solid var(--border);
   border-radius: var(--radius-md);
   box-shadow: var(--shadow-2);
+  /* The menu opens upward, inside a card that is `overflow: hidden` and may be
+     as short as MIN_H (260px). Five items at a full tap target is taller than
+     the space above the footer there, so it scrolls rather than losing its last
+     item to the card's clip — which is silent, and always costs the item the
+     user was reaching for. */
+  max-height: 280px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
 }
 
 .cf-more-menu[hidden] {

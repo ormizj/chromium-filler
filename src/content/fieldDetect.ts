@@ -113,6 +113,18 @@ function fileCandidates(root: ParentNode): HTMLElement[] {
   return Array.from(root.querySelectorAll('input[type="file"]')) as HTMLElement[];
 }
 
+/**
+ * The fields that can be satisfied by a file input, in the order they get to
+ * claim one. Order is the whole rule: a page with one unlabelled upload means
+ * the CV, and `resume` takes it before `coverLetter` is even considered.
+ *
+ * Only `resume` gets that fallback. A cover letter attached to an unlabelled
+ * input is the wrong document sent to an employer — the same class of error the
+ * submit heuristic refuses to make, and for the same reason, so this fails
+ * closed and reports the row unmatched instead.
+ */
+const UPLOAD_FIELDS: FieldKey[] = ['resume', 'coverLetter'];
+
 export function detectFields(opts: DetectOptions): DetectedField[] {
   const { root, fields, overrides, autoDetect = true } = opts;
   const result = new Map<FieldKey, DetectedField>();
@@ -174,20 +186,32 @@ export function detectFields(opts: DetectOptions): DetectedField[] {
     usedEls.add(p.el);
   }
 
-  // 3. Résumé: pick the best-matching file input; fall back to the first one (low).
-  if (fields.includes('resume') && !assignedFields.has('resume')) {
-    const files = fileCandidates(root);
+  // 3. The uploads — see UPLOAD_FIELDS. Every *named* input is claimed before the
+  //    résumé's fallback runs, or a page whose one upload says "Cover letter"
+  //    would have it taken by a CV that matched nothing on it.
+  const remainingFiles = () => fileCandidates(root).filter((el) => !usedEls.has(el));
+  const claim = (field: FieldKey, el: HTMLElement, confidence: MatchConfidence) => {
+    result.set(field, { field, element: el, source: 'heuristic', confidence });
+    usedEls.add(el);
+    assignedFields.add(field);
+  };
+
+  for (const field of UPLOAD_FIELDS) {
+    if (!fields.includes(field) || assignedFields.has(field)) continue;
     let best: HTMLElement | null = null;
     let bestWeight = 0;
-    for (const el of files) {
-      const w = scoreField(ctx(el), 'resume');
+    for (const el of remainingFiles()) {
+      const w = scoreField(ctx(el), field);
       if (w > bestWeight) { best = el; bestWeight = w; }
     }
-    if (best && bestWeight >= STRONG_WEIGHT) {
-      result.set('resume', { field: 'resume', element: best, source: 'heuristic', confidence: 'high' });
-    } else if (files.length > 0) {
-      result.set('resume', { field: 'resume', element: best ?? files[0], source: 'heuristic', confidence: 'low' });
-    }
+    if (best && bestWeight >= STRONG_WEIGHT) claim(field, best, 'high');
+  }
+
+  // The résumé alone may take an upload it did not match: an unlabelled file
+  // input on an application form is a CV far more often than it is anything else.
+  if (fields.includes('resume') && !assignedFields.has('resume')) {
+    const [first] = remainingFiles();
+    if (first) claim('resume', first, 'low');
   }
 
   return fields.map((f) => result.get(f)!);

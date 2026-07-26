@@ -37,9 +37,11 @@ footer overflow menu.
 `&state=…` picks which **flow** the surface is showing — modal: `long`, `redirect`,
 `redirect-followed`, `app-link`, `landed`, `empty`, `failed-fill`, `apply-unset`,
 `apply-unverified`, `applied`, `flush`, `fullscreen`; setup: `external`, `help`,
-`cv-steps`, `submit-unset`, `success-unset`; options: `fresh`, which seeds an
-empty store so the getting-started checklist is reachable at all (the normal seed
-ticks four of its five steps off), and `export`, which opens the archive's
+`cv-steps`, `submit-unset`, `success-unset`; options *and popup*: `fresh`, which
+seeds an empty store — on options so the getting-started checklist is reachable
+at all (the normal seed ticks four of its five steps off), on the popup because
+the first-run nudge and the never-configured action rows exist nowhere else; and
+options `export`, which opens the archive's
 "What to export" disclosure. A two-step posting
 renders a different modal body entirely (notice + "Fill this page instead", no
 report), so it needs its own state rather than being inferred from the default
@@ -129,6 +131,18 @@ leads at `--text-lg`, `.cf-title` drops to `.cf-title-sub`, the header carries a
 `Applied ✓` retires Apply. The site's own message is routinely below the fold or
 behind the card, so this is the only place the outcome is legible.
 
+The footer's **overflow (`⋯`) carries the three ways out of a posting** —
+`Site setup` · `Add links` · `Open options` — appended by `commonMenuItems()` to
+all three of the footer's branches, so they are there whether the posting is
+quick-apply, two-step, or already sent. Without them the card was a dead end: a
+site that filled the wrong field could only be fixed by closing the modal
+(losing the report), opening the toolbar popup, and finding Site setup there.
+Setup is a **direct call**, not a message — the panel is in the same content
+script, and `openSetup` already folds the review card through `arbitrateSheets`.
+**Choosing any item closes the menu**: Re-run and Reset rebuild the card and took
+it with them, so this never showed, but two of the three open another tab and
+leave this one exactly as it was.
+
 A **blocked primary de-fills rather than fading**
 (`button.cf-btn.primary[aria-disabled]` → `--surface`): the coral gradient at 45%
 opacity is a muddy brown block that reads as broken, not unavailable, and the
@@ -177,8 +191,26 @@ pure, unit-tested logic):
   with nothing saying to swipe. The cost, paid only on narrow, is that an active
   tab on the first row no longer sits on the panel.
 
+The popup's actions are **two rows in fixed proportions, and nothing in them is
+ever hidden**: Fill (75%) · Queue (25%), then Site setup (50%) · Options (50%).
+Site setup used to hide on an unconfigured site and Queue whenever a session was
+running, so the popup was a different shape every time it opened — and the
+control you wanted was missing exactly when the page was in the state you wanted
+it for. Where a control is is half of knowing it exists. **Queue deep-links to
+the URL importer**, not to the options page's default tab: the queue *is* the
+links, and as a bare `OPEN_OPTIONS` it was indistinguishable from the Options
+button beside it.
+
 Cross-context messaging goes through the typed `MSG` contract in
 `src/shared/messages.ts` (payloads must be structured-clone friendly).
+
+`MSG.OPEN_OPTIONS` carries `hash` (a tab) plus **`at` (a section id) and `focus`
+(a selector in it)**, which `options.ts` feeds to the existing `revealSection`.
+A tab is not a destination — the importer is the third section of Queue and the
+config JSON sits below a reference and a chip row — so every deep link that
+names only a tab leaves the user to go and find what they were sent for. That
+was the whole bug in the setup wizard's "Advanced (JSON)", which named no tab at
+all and opened on the queue.
 
 ### UI layer
 The look is **Soft / Warm** (warm paper neutrals, one clay accent, icon status
@@ -367,6 +399,30 @@ every fillable field (`resume` = the CV file).
 `SiteConfig` drives per-site behavior: `urlPatterns` (match-pattern or `/regex/`),
 `waitFor`, `prep`, `extract`, `fieldOverrides` (beat the heuristics), `cvUpload`,
 `submitCv`, `autoDetect`, `successSelector`.
+
+**Two documents, one mechanism.** `cvStore.ts` is keyed by `DocKind`
+(`resume` → `'cv'`, `coverLetter` → `'coverLetterFile'`); `getCv`/`setCv`/
+`clearCv` are wrappers on it. The cover letter is the one field that is *both* a
+`TextFieldKey` and a file, because sites are split on how they ask for it and the
+user cannot know which in advance — so Options → Profile gives it its own section
+with a box **and** an upload, and `applyFill` branches on the control the page
+actually offers. Detection follows `UPLOAD_FIELDS` (`fieldDetect.ts`): every
+*named* upload is claimed first, and only then may `resume` fall back to a
+leftover unlabelled file input. Only the CV gets that fallback — attaching a
+cover letter to an input nobody labelled is the wrong document sent to an
+employer, which is the same failure `findSubmitControl` refuses to risk.
+
+**`FIELD_ORDER` and `orderFields` (`fieldKeys.ts`) decide what order fields are
+read in**: the CV, the cover letter, then contact details, then the rest —
+and, within that, everything the user actually filled in before everything they
+did not. It is applied to the **output** of detection, never to its input:
+`detectFields` uses its `fields` argument as the tie-break between two fields
+scoring equally on one control, so reordering the input would quietly change
+which control a field claims. Both the modal's report and the wizard's step 5
+sort through it; Options → Profile renders in the same order but *without* the
+filled-first half, because a form that reshuffles as you type is worse than one
+with a fixed order. Before this the report was ordered by nothing better than the
+order the profile happened to be typed in, with the CV always last.
 
 `settings.modalLayout` (`shared/modalLayout.ts`) is where an on-page sheet sits and
 how big it is — **both** of them, the review modal and the setup panel, because
@@ -857,3 +913,13 @@ whole-URL globs, so **every pattern needs a trailing `*`** to survive a `?job=�
 query string; and a destination fixture that must have *no* config of its own
 (so `ensureConfigForUrl` creates one) has to live on an origin no other config
 covers — the auto-created `*://127.0.0.1:5199/*` would otherwise adopt it.
+
+**Wait for `document.body.dataset.ready` before writing storage under an options
+page.** `main()` ends by setting it; `load` fires long before, while the boot is
+still awaiting — and the last thing it does is `pruneDetails`, a read-modify-write
+of the capture map. A spec that seeds storage the instant the page loads is
+racing that write and loses to a snapshot taken before the seed existed, which is
+how the archive spec failed intermittently and only in a full serial run.
+`onExtensionPage` waits for it, so anything going through that helper is already
+safe. Nothing a user does has this shape — it is an artifact of writing storage
+beneath a page that is still starting up.

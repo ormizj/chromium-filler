@@ -101,15 +101,20 @@ const SESSION: SessionState = {
   progress: { total: 60, queued: 46, inFlight: 5, applied: 8, skipped: 1, done: 9, ratio: 9 / 60 },
 };
 
-/** The report a filled quick-apply posting produces — one row of every shape. */
+/**
+ * The report a filled quick-apply posting produces — one row of every shape, in
+ * `FIELD_ORDER`, which is what `detectAndFill` now sorts the real one into.
+ * Written sorted rather than sorted here, so a controller that stopped sorting
+ * would still show up in this harness.
+ */
 const REPORT: FieldMatch[] = [
-  match('fullName', 'high', true, { valueToFill: 'Ada Lovelace', selectorUsed: '#name' }),
+  match('resume', 'high', true, { selectorUsed: 'input[type=file]' }),
+  match('coverLetter', 'high', true, { valueToFill: 'I love building widgets.', selectorUsed: 'textarea' }),
   match('email', 'high', true, { valueToFill: 'ada@example.com', selectorUsed: '#email' }),
   // A low-confidence row: the only shape with two actions (Confirm + Pick).
   match('phone', 'low', false, { valueToFill: '+1 555 123 4567', selectorUsed: '.field input:nth-of-type(3)' }),
-  match('coverLetter', 'high', true, { valueToFill: 'I love building widgets.', selectorUsed: 'textarea' }),
+  match('fullName', 'high', true, { valueToFill: 'Ada Lovelace', selectorUsed: '#name' }),
   match('city', 'none', false),
-  match('resume', 'high', true, { selectorUsed: 'input[type=file]' }),
 ];
 
 const BASE_MODAL: ModalData = {
@@ -354,12 +359,18 @@ function bootSetup(): void {
       { key: 'jobDescription', label: 'Description', status: 'high', note: 'saved · Acme is hiring a Staff…', hasSave: true },
       { key: 'jobRequirements', label: 'Requirements', status: 'none', note: 'not set', hasSave: false },
     ],
+    // In `FIELD_ORDER`, because that is what `refreshSetup` now sorts these rows
+    // into before rendering — the CV first, then the cover letter, then contact
+    // details. Written in the sorted order rather than sorted here: the panel is
+    // the thing under test, and a harness that re-derives its fixture would hide
+    // a controller that stopped sorting.
     fields: [
-      { key: 'fullName', label: 'Full name', status: 'high', note: 'auto · #name', hasSave: false },
+      { key: 'resume', label: 'Résumé / CV', status: 'high', note: 'saved · input[type=file]', hasSave: true },
+      { key: 'coverLetter', label: 'Cover letter', status: 'low', note: 'auto (low) · textarea#msg', hasSave: false },
       { key: 'email', label: 'Email', status: 'high', note: 'auto · #email', hasSave: false },
       { key: 'phone', label: 'Phone', status: 'low', note: 'auto (low) · .field input:nth-of-type(3)', hasSave: false },
+      { key: 'fullName', label: 'Full name', status: 'high', note: 'auto · #name', hasSave: false },
       { key: 'city', label: 'City', status: 'none', note: 'not found', hasSave: false },
-      { key: 'resume', label: 'Résumé / CV', status: 'high', note: 'saved · input[type=file]', hasSave: true },
     ],
     verdict: 'Quick apply (assumed) — no external apply link found on this page',
     redirect: [

@@ -108,6 +108,7 @@ export type ActionKey =
   | 'pick'
   | 'done'
   | 'openOptions'
+  | 'addLinks'
   | 'more'
   | 'openApplication'
   | 'openApplicationAgain'
@@ -127,6 +128,10 @@ export const ACTION_LABELS: Record<ActionKey, string> = {
   pick: 'Pick',
   done: 'Done',
   openOptions: 'Open options',
+  // Two words, and named for what you do there rather than for the tab it
+  // lands on: the popup's Queue button and the review modal's menu item both
+  // arrive at the same paste box.
+  addLinks: 'Add links',
   more: '⋯',
   openApplication: 'Open application',
   openApplicationAgain: 'Open again',
