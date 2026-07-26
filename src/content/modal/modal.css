@@ -294,38 +294,35 @@ button.cf-btn.cf-applied-btn[aria-disabled='true'] {
   flex: none;
 }
 
+/**
+ * The counts and the report's key, in one line above the rows. Three colours and
+ * a row of buttons mean nothing on their own, and the key used to sit under
+ * sixteen rows — past the point where anyone still needed telling. So each count
+ * carries the dot it is counting, and the line leads the report instead.
+ */
 .cf-summary {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-1) var(--space-4);
   font-size: var(--text-sm);
   color: var(--muted);
   margin: 0 0 var(--space-3);
 }
 
-/**
- * The report's key, under the rows. Three colours and a row of buttons mean
- * nothing on their own, and the one thing a user most needs to know at this
- * moment — that nothing has been sent yet, whatever the report says — was never
- * written down anywhere they would see it.
- */
-.cf-legend-line {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: var(--space-1) var(--space-4);
-  margin: var(--space-4) 0 0;
-  padding-top: var(--space-3);
-  border-top: 1px solid var(--border);
-  font-size: var(--text-xs);
-  color: var(--muted);
-}
-
-/* Each dot hugs the word it explains, rather than floating between pairs. */
-.cf-legend-line .cf-dot {
+/* Each dot hugs the count it explains, rather than floating between pairs. */
+.cf-summary .cf-dot {
   margin-right: calc(var(--space-4) * -1 + var(--space-2));
 }
 
+/* The one thing a user most needs to know at this moment — that this report is a
+   record rather than a plan — closing the report off with the hairline the key
+   used to draw. */
 .cf-legend-send {
   display: block;
-  margin-top: var(--space-2);
+  margin-top: var(--space-4);
+  padding-top: var(--space-3);
+  border-top: 1px solid var(--border);
   font-size: var(--text-xs);
   color: var(--muted);
   opacity: 0.8;

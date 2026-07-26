@@ -85,9 +85,26 @@ export function orderFields<T>(
   key: (row: T) => FieldKey,
   filled: (row: T) => boolean,
 ): T[] {
+  return orderFieldsBy(rows, key, (row) => (filled(row) ? 0 : 1));
+}
+
+/**
+ * The same sort with an arbitrary number of groups: `group` returns the band a
+ * row belongs in (lowest first), `FIELD_ORDER` decides the order within it.
+ *
+ * Two groups is what the wizard needs — provided / not provided — and the review
+ * modal needs three, because there what a row *needs from the user* outranks
+ * which field it is: unmatched, then to check, then filled. Both sorts have to
+ * share this tie-break or the two surfaces would disagree about the reading
+ * order of rows that are level on status, which is most of them.
+ */
+export function orderFieldsBy<T>(
+  rows: readonly T[],
+  key: (row: T) => FieldKey,
+  group: (row: T) => number,
+): T[] {
   const rank = (row: T) => ORDER_INDEX.get(key(row)) ?? FIELD_ORDER.length;
-  return [...rows].sort((a, b) =>
-    Number(filled(b)) - Number(filled(a)) || rank(a) - rank(b));
+  return [...rows].sort((a, b) => group(a) - group(b) || rank(a) - rank(b));
 }
 
 /** autocomplete attribute token(s) that strongly indicate a field. */

@@ -313,7 +313,7 @@ test('ChaosForm: hashed ids + multi-step; disguised city stays unmatched', async
 
   // The disguised city field is NOT auto-filled, and the modal flags it red.
   await expect(page.getByLabel('Where are you located?')).toHaveValue('');
-  await expect(page.locator('.cf-dot.none').first()).toBeVisible();
+  await expect(page.locator('.cf-view .cf-dot.none').first()).toBeVisible();
   await page.close();
 });
 
@@ -910,7 +910,7 @@ test('ListingBoard: several apply links are ambiguous, so nothing is followed', 
 
   // It stays on the page and reports honestly: no form here, so every row is red.
   await expect(page.locator('.cf-card')).toBeVisible({ timeout: 20_000 });
-  await expect(page.locator('.cf-dot.none').first()).toBeVisible();
+  await expect(page.locator('.cf-view .cf-dot.none').first()).toBeVisible();
   expect(newTabs, 'a listing page must never pick one of its postings').toBe(0);
 
   context.off('page', countTab);

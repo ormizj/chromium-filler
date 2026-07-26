@@ -203,7 +203,19 @@ The modal has **two views behind a header toggle**, and Job is the default: once
 the form is filled the user's question is "do I want this job?", not "which of
 sixteen fields matched". The report lives behind the Fields tab, which carries the
 report's *worst* status as a dot — hiding the report must never hide a problem,
-and that dot is what the E2E `.cf-dot.none` assertions now see.
+and that dot is what the E2E `.cf-view .cf-dot.none` assertions see.
+
+**The report's key is its count line, above the rows.** `.cf-summary` is
+`● n filled · ◐ n to check · ○ n unmatched` — the dot, the count and the word
+from `STATUS_TEXT` in one item, all three statuses present even at zero, because
+the line is a key as well as a tally. As a separate legend under the rows it was
+read after the colours it explains, if at all: on a sixteen-field report the key
+was a scroll past everything it was meant to help with. The Job view's three stat
+tiles carry the same dot for the same reason — their number is coloured by
+status, and colour alone is not a status anywhere else in the card. What stays
+below the rows is `.cf-legend-send`, which is not a key: it is the note saying
+this report is a record rather than a plan, and it takes the hairline the legend
+used to draw.
 
 Three runtime contexts, all sharing `src/shared` (which holds every piece of
 pure, unit-tested logic):
@@ -542,11 +554,23 @@ and, within that, everything the user actually filled in before everything they
 did not. It is applied to the **output** of detection, never to its input:
 `detectFields` uses its `fields` argument as the tie-break between two fields
 scoring equally on one control, so reordering the input would quietly change
-which control a field claims. Both the modal's report and the wizard's step 5
-sort through it; Options → Profile renders in the same order but *without* the
-filled-first half, because a form that reshuffles as you type is worse than one
-with a fixed order. Before this the report was ordered by nothing better than the
-order the profile happened to be typed in, with the CV always last.
+which control a field claims. The wizard's step 5 sorts through it; Options →
+Profile renders in the same order but *without* the filled-first half, because a
+form that reshuffles as you type is worse than one with a fixed order. Before
+this the report was ordered by nothing better than the order the profile happened
+to be typed in, with the CV always last.
+
+**The modal's report sorts by outcome first** (`orderReport`, `fieldStatus.ts`,
+on the shared `orderFieldsBy`): unmatched, then to check, then filled, with
+`FIELD_ORDER` deciding ties inside each band. What a row needs from the user
+outranks which field it is — in plain `FIELD_ORDER` the one field needing a Pick
+sat wherever the list happened to put it, under eleven green rows. It ranks on
+`matchStatus`, not on `confidence`, so a high-confidence match the control would
+not take sorts where its own dot says it belongs; and it runs at **render** time,
+not once at fill time, so confirming or picking a row moves it down into the
+filled band — which is how the card shows the work going down. The wizard keeps
+the profile-filled split instead: it lists every field the extension knows, where
+most `none` rows only mean "this page never asked for it".
 
 `settings.modalLayout` (`shared/modalLayout.ts`) is where an on-page sheet sits and
 how big it is — **both** of them, the review modal and the setup panel, because

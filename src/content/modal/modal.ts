@@ -25,7 +25,7 @@ import { progressDots } from '../../shared/queue';
 import type { JobBlock } from '../../shared/jobText';
 import type { JobMeta } from '../../shared/jobMeta';
 import { FIELD_LABELS } from '../../shared/fieldKeys';
-import { STATUS_LABELS, matchStatus } from '../../shared/fieldStatus';
+import { STATUS_LABELS, matchStatus, orderReport } from '../../shared/fieldStatus';
 import { ACTION_LABELS, STATUS_TEXT } from '../../shared/labels';
 import { flowBanner, type ApplyState } from '../../shared/flowState';
 import { CONCEPT_HELP } from '../../shared/help';
@@ -545,7 +545,14 @@ export class FillerModal extends Sheet<ModalData> {
       const n = el('div', 'cf-stat-n');
       n.textContent = String(counts[status]);
       const k = el('div', 'cf-stat-k');
-      k.textContent = STATUS_TEXT[status].tile;
+      // The same dot the rows and the key carry: the tile's number is coloured
+      // by status, and colour on its own is not a status anywhere else here.
+      const dot = el('span', `cf-dot ${status}`);
+      dot.setAttribute('role', 'img');
+      dot.setAttribute('aria-label', STATUS_LABELS[status]);
+      const word = el('span');
+      word.textContent = STATUS_TEXT[status].tile;
+      k.append(dot, word);
       tile.append(n, k);
       wrap.append(tile);
     }
@@ -561,27 +568,32 @@ export class FillerModal extends Sheet<ModalData> {
     const banner = this.flowBanner(data);
     if (!banner.classList.contains('quiet')) body.append(banner);
 
+    // The counts and the key are one line. Three colours and a row of buttons
+    // mean nothing on their own, and as a separate legend under the rows the key
+    // sat below sixteen of them — read, if at all, after the colours it explains.
+    // Each count wears its own dot instead: icon, number, word. A status stays on
+    // the line at zero, because this is a key as well as a tally.
     const counts = statCounts(data.matches);
     const summary = el('p', 'cf-summary');
-    // One vocabulary with the tiles and the legend — the words come from labels.ts.
-    summary.textContent = `${counts.high} ${STATUS_TEXT.high.word} · `
-      + `${counts.low} ${STATUS_TEXT.low.word} · ${counts.none} ${STATUS_TEXT.none.word}`;
-    body.append(summary);
-
-    const report = el('div', 'cf-report');
-    for (const m of data.matches) report.append(this.row(m));
-    body.append(report);
-
-    // The report is three colours and a set of buttons, and nothing on screen
-    // says what any of them mean — or that nothing has been sent yet.
-    const legend = el('p', 'cf-legend-line');
     for (const status of ['high', 'low', 'none'] as const) {
       const dot = el('span', `cf-dot ${status}`);
+      dot.setAttribute('role', 'img');
+      dot.setAttribute('aria-label', STATUS_LABELS[status]);
       const label = el('span');
-      label.textContent = STATUS_TEXT[status].word;
-      legend.append(dot, label);
+      // One vocabulary with the tiles and the rows — the words come from labels.ts.
+      label.textContent = `${counts[status]} ${STATUS_TEXT[status].word}`;
+      summary.append(dot, label);
     }
-    body.append(legend);
+    body.append(summary);
+
+    // Sorted here rather than in `main.ts`, and on every render: what a row needs
+    // from the user outranks which field it is, and confirming or picking one
+    // changes that — so the row leaving the top of the report is how the card
+    // shows the work going down. See `orderReport`. The counts above and the tab
+    // dot are aggregates, so neither cares about the order.
+    const report = el('div', 'cf-report');
+    for (const m of orderReport(data.matches)) report.append(this.row(m));
+    body.append(report);
 
     // Only once it has been sent. "Nothing has been sent yet" now rides in the
     // footer next to Apply, and repeating it here — forty pixels above that same

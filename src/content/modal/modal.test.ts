@@ -74,11 +74,12 @@ function tab(root: ShadowRoot, label: 'Job' | 'Fields'): HTMLButtonElement {
     .find((b) => b.textContent?.includes(label))!;
 }
 
-/** The rows, in render order, as `[dot class, aria-label, button labels]`. */
+/** The rows, in render order, as `[field, dot class, aria-label, button labels]`. */
 function rows(shadow: ShadowRoot) {
   return Array.from(shadow.querySelectorAll('.cf-row')).map((row) => {
     const dot = row.querySelector('.cf-dot')!;
     return {
+      field: row.querySelector('.cf-field b')!.textContent,
       dot: dot.className,
       label: dot.getAttribute('aria-label'),
       buttons: Array.from(row.querySelectorAll('button')).map((b) => b.textContent),
@@ -132,7 +133,8 @@ describe('FillerModal — the report tells the truth about each field', () => {
       match({ field: 'phone', confidence: 'low', filled: false }),
       match({ field: 'city', confidence: 'none', filled: false }),
     ]));
-    const [low, none] = rows(shadow);
+    // Unmatched leads the report now, whichever order the matches arrived in.
+    const [none, low] = rows(shadow);
     expect(low.label).toBe('needs review');
     expect(low.buttons).toContain('Confirm');
     expect(none.label).toBe('not found');
@@ -225,6 +227,18 @@ describe('FillerModal — the posting comes first', () => {
     expect(root.querySelectorAll('.cf-row')).toHaveLength(0);
   });
 
+  // The tile's number is coloured by status, and colour alone is not a status
+  // anywhere else in the card — the rows and the report's key both carry a dot.
+  it('gives each summary tile the dot its number is coloured by', () => {
+    modal = new FillerModal(callbacks());
+    modal.render(posting());
+    const tiles = Array.from(shadow().querySelectorAll('.cf-stat'));
+    expect(tiles).toHaveLength(3);
+    for (const tile of tiles) {
+      expect(tile.querySelector('.cf-stat-k .cf-dot')).not.toBeNull();
+    }
+  });
+
   it('renders the description as prose, not as one welded string', () => {
     modal = new FillerModal(callbacks());
     modal.render(posting());
@@ -275,14 +289,65 @@ describe('FillerModal — the posting comes first', () => {
  * fact a user most needs at that moment — that nothing has gone anywhere yet,
  * whatever the report says — appeared nowhere they would actually read it.
  */
+/**
+ * The report used to be in `FIELD_ORDER` and nothing else, so the one field that
+ * needed a Pick sat wherever that list happened to put it — under eleven green
+ * rows on a form with eleven fields it filled. What a row needs from the user
+ * outranks which field it is; `orderReport` is the rule, and this is the surface
+ * that has to apply it on every render.
+ */
+describe('FillerModal — the report leads with what needs attention', () => {
+  it('puts unmatched above to-check above filled', () => {
+    const shadow = render(data([
+      match({ field: 'email', filled: true }),
+      match({ field: 'phone', confidence: 'low', filled: false }),
+      match({ field: 'city', confidence: 'none', filled: false }),
+    ]));
+    expect(rows(shadow).map((r) => r.label)).toEqual(['not found', 'needs review', 'filled']);
+  });
+
+  it('keeps the reading order within a group — the CV still leads the reds', () => {
+    const shadow = render(data([
+      match({ field: 'country', confidence: 'none', filled: false }),
+      match({ field: 'email', filled: true }),
+      match({ field: 'resume', confidence: 'none', filled: false }),
+    ]));
+    expect(rows(shadow).map((r) => r.field)).toEqual(['Résumé / CV', 'Country', 'Email']);
+  });
+
+  // Re-sorted per render, not once at fill time: the row moving down to the
+  // filled group is how the card shows the work going down.
+  it('moves a row down to the filled group once it is confirmed', () => {
+    const d = data([
+      match({ field: 'email', filled: true }),
+      match({ field: 'phone', confidence: 'low', filled: false }),
+    ]);
+    const shadow = render(d);
+    expect(rows(shadow).map((r) => r.field)).toEqual(['Phone', 'Email']);
+
+    d.matches[1].filled = true; // what Controller.confirmField does
+    modal!.render(d);
+    expect(rows(shadow).map((r) => r.field)).toEqual(['Email', 'Phone']);
+  });
+});
+
 describe('FillerModal — the report says what it means', () => {
-  it('keys the three dot colours under the rows', () => {
-    const legend = render(data([match()])).querySelector('.cf-legend-line')!;
-    expect(legend.textContent).toContain('filled');
-    expect(legend.textContent).toContain('to check');
-    expect(legend.textContent).toContain('unmatched');
-    // A colour alone is not a key; each word gets the dot it describes.
-    expect(legend.querySelectorAll('.cf-dot').length).toBe(3);
+  it('keys the three dot colours in the count line above the rows', () => {
+    const key = render(data([match()])).querySelector('.cf-summary')!;
+    expect(key.textContent).toContain('filled');
+    expect(key.textContent).toContain('to check');
+    expect(key.textContent).toContain('unmatched');
+    // A colour alone is not a key; each count gets the dot it is counting.
+    expect(key.querySelectorAll('.cf-dot').length).toBe(3);
+  });
+
+  // The key was under the rows, i.e. read after the colours it explains — and on
+  // a sixteen-field report, a scroll past everything it was meant to help with.
+  it('puts the key ahead of the rows it explains', () => {
+    const body = render(data([match()])).querySelector('.cf-body')!;
+    const kids = [...body.children];
+    expect(kids.findIndex((k) => k.classList.contains('cf-summary')))
+      .toBeLessThan(kids.findIndex((k) => k.classList.contains('cf-report')));
   });
 
   // Said once, in the footer, beside the button that would change it — rather
@@ -297,7 +362,7 @@ describe('FillerModal — the report says what it means', () => {
     const shadow = render(data([], {
       redirect: { host: 'jobs.acme.com', reason: 'apply link is cross-origin', followed: false },
     }));
-    expect(shadow.querySelector('.cf-legend-line')).toBeNull();
+    expect(shadow.querySelector('.cf-summary')).toBeNull();
   });
 });
 

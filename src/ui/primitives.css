@@ -953,7 +953,14 @@ button.cf-btn.primary[aria-disabled='true'] {
   color: var(--accent);
 }
 
+/* A caption, optionally with the status dot the number is coloured by — the
+   modal's three tiles carry one, the options queue's do not. Flex either way: a
+   lone centred text node lays out the same as it did as a block. */
 .cf-stat-k {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-2);
   margin-top: 2px;
   font-size: var(--text-xs);
   color: var(--muted);
