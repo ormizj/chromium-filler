@@ -130,6 +130,30 @@ describe('popup render', () => {
     expect(sent).toContainEqual(expect.objectContaining({ type: MSG.SETUP }));
   });
 
+  /**
+   * Filling hands the work to the page, and the review modal reports it in full.
+   * The popup used to stay open on top of that repeating a one-line summary of
+   * it — every other action here closes.
+   */
+  it('Fill runs the page and closes the popup', async () => {
+    await mountPopup(matched());
+    const sent = recordTabMessages(matched({ hasRun: true, filledCount: 3, reportedCount: 5 }));
+    (document.getElementById('primary') as HTMLButtonElement).click();
+    await flush();
+    expect(sent).toContainEqual(expect.objectContaining({ type: MSG.RUN }));
+    expect(window.close).toHaveBeenCalled();
+  });
+
+  /** Reset does not: it puts the button back to Fill, which is what to press next. */
+  it('Reset & Re-run leaves the popup open on a Fill button', async () => {
+    await mountPopup(matched({ hasRun: true, filledCount: 3, reportedCount: 5 }));
+    recordTabMessages(matched());
+    (document.getElementById('primary') as HTMLButtonElement).click();
+    await flush();
+    expect(window.close).not.toHaveBeenCalled();
+    expect((document.getElementById('primary') as HTMLButtonElement).textContent).toBe('Fill');
+  });
+
   it('exposes a Site setup link that enters setup in the tab', async () => {
     await mountPopup(matched());
     const link = document.getElementById('reconfigure') as HTMLAnchorElement;

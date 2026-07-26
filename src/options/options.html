@@ -8,7 +8,14 @@
     <link rel="stylesheet" href="../ui/primitives.css" />
     <link rel="stylesheet" href="./options.css" />
   </head>
-  <body>
+  <!-- Matches `aria-selected` on the Queue tab below, so the panel's corners are
+       right on the first paint rather than after `selectTab` runs. -->
+  <body data-tab-pos="first">
+    <!-- The bottom scroll fade. Fixed to the viewport and purely decorative; the
+         top one is drawn by `.topbar::after`, which has to hang off the sticky
+         bar rather than sit under it. Both are shown by `data-scroll` on <body>. -->
+    <div class="scrollfade" aria-hidden="true"></div>
+
     <div class="topbar">
       <div class="topbar-inner">
         <h1>Chromium Filler</h1>
@@ -136,14 +143,16 @@
         <section id="cv-section">
           <h2>CV / Résumé</h2>
           <p class="hint">Stored on-device (chrome.storage.local). Attached to file inputs during fill.</p>
-          <!-- One line: the picker, what is stored, and Remove on the right. As a
-               full-width input with the filename on a paragraph below it, the row
-               was three stacked things for one document. -->
+          <!-- The two controls on one line — pick a file, or remove the one that
+               is there — and what is *currently* held on its own beneath them.
+               Wedged between the picker and Remove, that line squeezed the two
+               controls apart by however long the filename happened to be, and put
+               a `role="status"` live region in the middle of a control row. -->
           <div class="row file-row">
             <input type="file" id="cv-input" />
-            <span id="cv-current" class="status" role="status" aria-live="polite"></span>
             <button id="clear-cv" class="btn-danger">Remove</button>
           </div>
+          <p id="cv-current" class="doc-current" role="status" aria-live="polite"></p>
         </section>
 
         <!-- Its own section, not a cell in the profile grid: a site takes the
@@ -165,11 +174,14 @@
                too, and a click on Remove would then also open the file picker. -->
           <div class="fld">
             <span id="cover-file-label">File — for a site that asks for an upload</span>
+            <!-- Same shape as the CV's row above: the two controls inline, what
+                 is held beneath them. They are one object built by one `initDoc`,
+                 and two different shapes for it read as two different things. -->
             <div class="row file-row">
               <input type="file" id="cover-input" aria-labelledby="cover-file-label" />
-              <span id="cover-current" class="status" role="status" aria-live="polite"></span>
               <button id="clear-cover" class="btn-danger">Remove</button>
             </div>
+            <p id="cover-current" class="doc-current" role="status" aria-live="polite"></p>
           </div>
         </section>
       </div>
@@ -301,9 +313,9 @@
                  change, so the words live here for screen readers. -->
             <span id="sim-readout-sr" class="sr-only"></span>
           </p>
-          <!-- Every limit chip, always present, shown or hidden in place: chips that
-               came and went reflowed this block and shifted the buttons below it on
-               every drag. -->
+          <!-- The limits that are currently biting, in flow — one appears, the next
+               follows it. The block reserves a single row's height so that going
+               from none to one does not shift the buttons below it mid-drag. -->
           <div id="sim-limits" class="sim-limits" aria-hidden="true"></div>
           <div class="row">
             <button id="sim-preview" class="btn">Preview at full size</button>

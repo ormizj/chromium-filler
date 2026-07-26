@@ -79,6 +79,7 @@ const TABS = ['queue', 'profile', 'settings', 'sites', 'sync', 'help'] as const;
 type TabName = (typeof TABS)[number];
 
 function selectTab(name: TabName, pushHash = true): void {
+  const changed = $(`tab-${name}`).getAttribute('aria-selected') !== 'true';
   for (const tab of TABS) {
     const button = $(`tab-${tab}`);
     const panel = $(`panel-${tab}`);
@@ -86,6 +87,21 @@ function selectTab(name: TabName, pushHash = true): void {
     button.setAttribute('aria-selected', String(active));
     panel.hidden = !active;
   }
+  // Which of the panel's two top corners a tab is standing on. The strip spans
+  // the panel, so only the first and last tabs touch one; every other tab leaves
+  // both corners exposed and they have to be rounded. See options.css.
+  document.body.dataset.tabPos =
+    name === TABS[0] ? 'first' : name === TABS[TABS.length - 1] ? 'last' : 'mid';
+  // A tab switch is a navigation: the panel underneath has been replaced whole,
+  // so keeping the old scroll offset opens the new one halfway down itself with
+  // its first section — the one the tab is named after — above the viewport.
+  //
+  // Instant, not smooth: there is nothing left on screen to follow, and the
+  // smooth scroll belongs to `revealSection`, which is a journey *to* a place.
+  // Only on a real change, so the deep links that call `selectTab` and then
+  // `revealSection` (boot, and the checklist's "Go →") are left alone when the
+  // tab they name is already the open one.
+  if (changed) window.scrollTo({ top: 0 });
   if (pushHash) {
     // Preserve any `create=` payload so a deep link survives a tab switch.
     const create = parseHash().create;
@@ -156,6 +172,34 @@ function initTabs(): void {
     selectTab(TABS[next]);
     $(`tab-${TABS[next]}`).focus();
   });
+}
+
+/**
+ * Say, in a gradient at each end of the page, that there is more of it.
+ *
+ * This page scrolls in the window and the platform scrollbar is an overlay that
+ * is invisible at rest, so a section clipped by the bottom of the viewport looks
+ * exactly like a section that ends there — which is the whole reason the queue's
+ * lower rows and the simulator's buttons kept going unnoticed.
+ *
+ * A `ResizeObserver` on `<main>` and not just a scroll listener: switching tab,
+ * opening a `?`, and rendering the queue all change how far the page scrolls
+ * without scrolling it, and a fade left showing at the very bottom is worse than
+ * no fade at all. The 4px slack absorbs fractional device-pixel scroll heights,
+ * where `scrollY` never quite reaches its own maximum.
+ */
+function initScrollFade(): void {
+  const update = () => {
+    const max = document.documentElement.scrollHeight - window.innerHeight;
+    const tokens = [];
+    if (window.scrollY > 4) tokens.push('up');
+    if (window.scrollY < max - 4) tokens.push('down');
+    document.body.dataset.scroll = tokens.join(' ');
+  };
+  window.addEventListener('scroll', update, { passive: true });
+  window.addEventListener('resize', update, { passive: true });
+  new ResizeObserver(update).observe(document.querySelector('main')!);
+  update();
 }
 
 /* ---------------- Profile ---------------- */
@@ -311,21 +355,28 @@ function attachHelp(
 function attachRowHelp(control: HTMLElement, entry: HelpEntry): void {
   const row = control.closest('.setrow') as HTMLElement;
   const text = row.querySelector('.setrow-text') as HTMLElement;
-  // The `?` is attached BEFORE the caption, so it rides at the end of the title
-  // line and the caption still wraps whole beneath both. Anchoring it inside the
-  // `h5` — which is what this did — put it at a different x on every row (the
-  // title's own width) and drove a control through the middle of a text block.
+  // The `?` goes in the text block, so it rides at the end of the title it
+  // explains. Anchoring it inside the `h5` — which is what this did — drove a
+  // control through the middle of a text block; the caption is no longer in
+  // there at all, so nothing runs through anything now.
   attachHelp(text, entry, (panel) => {
     panel.classList.add('setrow-help');
     row.append(panel);
   });
   if (entry.short) {
-    // A span, not a <p>: half of these text blocks are the control's own <label>,
-    // which takes phrasing content only.
+    // A span, not a <p>: this used to live inside the text block, half of which
+    // are the control's own <label> and take phrasing content only.
     const caption = document.createElement('span');
     caption.className = 'setrow-caption';
     caption.textContent = entry.short;
-    text.append(caption);
+    // A *sibling* of the text block, and the last thing in the row. Inside the
+    // block it made that block two lines tall, and `align-items: center` then
+    // centred the toggle against both — so every switch on this page sat half a
+    // line below the title it belongs to. Last, not straight after the text: its
+    // `flex: 1 0 100%` starts a new line, which between the title and the control
+    // would have taken the control down with it. The lazily-built `?` panel is
+    // appended to the row too, so it still opens beneath this.
+    row.append(caption);
   }
 }
 
@@ -558,8 +609,11 @@ async function initModalLayout(initial: ModalLayout): Promise<void> {
   };
 
   /**
-   * Every limit chip, rendered once and only ever shown or hidden. Adding and
-   * removing them reflowed the readout and shifted the buttons under it mid-drag.
+   * Every limit chip, built once and only ever shown or hidden — they are
+   * rewritten on every `pointermove`, and rebuilding the block each time would
+   * throw away and re-create six elements per frame. They flow now rather than
+   * holding six reserved cells; `.sim-limits` reserves the one row's height that
+   * keeps the buttons below from moving. See options.css.
    */
   const chips = new Map(ALL_LIMITS.map(({ key, label, tone }) => {
     const el = document.createElement('span');
@@ -1776,6 +1830,7 @@ function initGettingStarted(): void {
 
 async function main(): Promise<void> {
   initTabs();
+  initScrollFade();
   initHelp();
   initGettingStarted();
   await Promise.all([

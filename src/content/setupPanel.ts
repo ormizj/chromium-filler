@@ -22,8 +22,9 @@ import {
 import {
   SETUP_STEP_ICONS, SETUP_STEP_ORDER, firstStepWithWork, stepStates,
   type ContainerKey, type PrepListKey, type PrepRow, type RowStatus, type SetupRow,
-  type SetupSnapshot, type SetupStepKey, type StepState,
+  type SetupSnapshot, type SetupStepKey, type SetupVerdict, type StepState,
 } from '../shared/setupSteps';
+import type { PostingKind } from '../shared/redirect';
 import { ACTION_LABELS } from '../shared/labels';
 import { helpButton, helpPanel, richText } from '../ui/help';
 import { Sheet, type SheetCallbacks, type SheetData } from './sheet';
@@ -32,7 +33,7 @@ import setupCss from './setupPanel.css?inline';
 // Re-exported so the Controller, the dev harness and the E2E keep one import
 // path for the row shapes, while the pure step model owns their definitions.
 export type {
-  ContainerKey, PrepListKey, PrepRow, RowStatus, SetupRow, SetupStepKey,
+  ContainerKey, PrepListKey, PrepRow, RowStatus, SetupRow, SetupStepKey, SetupVerdict,
 } from '../shared/setupSteps';
 
 const DOT: Record<RowStatus, string> = { high: 'ok', low: 'warn', none: 'none' };
@@ -89,15 +90,32 @@ const PREP_LABEL: Record<PrepAction, string> = {
 /**
  * The two verdicts the `kind` step decides between, and the rows that argue for
  * each. See `appendRedirectRows` for why this is a grouping and not a list.
+ *
+ * Quick apply leads because it is the ordinary case — the form is on the page in
+ * front of you — and because it is the group every site has something to say
+ * about. Not every board hands off to an employer ATS, and an empty group draws
+ * no heading, so leading with External made the commonest site open onto a
+ * section about the thing it does not do.
+ *
+ * `kinds` is which verdicts each group is the answer to, and it is what puts the
+ * live verdict banner inside a group rather than above both of them. An
+ * `unknown` posting sits with quick apply because that is what it is treated as:
+ * the fill path runs, and "(assumed)" is the whole of the difference.
  */
-const REDIRECT_GROUPS: ReadonlyArray<{ head: string; keys: readonly string[] }> = [
-  {
-    head: 'External — the application is on the employer’s site',
-    keys: ['markerSelector', 'applySelector'],
-  },
+const REDIRECT_GROUPS: ReadonlyArray<{
+  head: string;
+  keys: readonly string[];
+  kinds: readonly PostingKind[];
+}> = [
   {
     head: 'Quick apply — the form is on this page',
     keys: ['quickApplySelector'],
+    kinds: ['quickApply', 'unknown'],
+  },
+  {
+    head: 'External — the application is on the employer’s site',
+    keys: ['markerSelector', 'applySelector'],
+    kinds: ['redirect'],
   },
 ];
 
@@ -366,11 +384,7 @@ export class SetupPanel extends Sheet<SetupData> {
     }
 
     if (key === 'kind') {
-      const verdict = el('div', 'cf-verdict');
-      verdict.textContent = data.verdict;
-      verdict.title = data.verdict;
-      body.append(verdict);
-      this.appendRedirectRows(body, data.redirect);
+      this.appendRedirectRows(body, data.redirect, data.verdict);
     }
 
     if (key === 'info') {
@@ -476,11 +490,19 @@ export class SetupPanel extends Sheet<SetupData> {
    * catch-all group, so a new `RedirectSelectorKey` shows up unfiled instead of
    * silently not showing up at all.
    */
-  private appendRedirectRows(body: HTMLElement, rows: SetupRow[]): void {
+  private appendRedirectRows(body: HTMLElement, rows: SetupRow[], verdict: SetupVerdict): void {
     const grouped = new Set<string>();
-    const emit = (head: string, group: SetupRow[]) => {
+    let verdictPlaced = false;
+    const emit = (head: string, group: SetupRow[], answers = false) => {
       if (!group.length) return;
       body.append(sectionHead(head));
+      // The verdict leads the group it argues for: it is the answer, and these
+      // are the rows that decide it. Above both headings it was a caption about
+      // nothing in particular, and the one thing on the step nobody read.
+      if (answers) {
+        body.append(verdictBanner(verdict));
+        verdictPlaced = true;
+      }
       for (const row of group) {
         body.append(this.row('redirect', row,
           () => this.cb.onPickRedirect(row.key),
@@ -488,7 +510,7 @@ export class SetupPanel extends Sheet<SetupData> {
       }
     };
 
-    for (const { head, keys } of REDIRECT_GROUPS) {
+    for (const { head, keys, kinds } of REDIRECT_GROUPS) {
       // Ordered by the group, not by the order the rows arrived in: the marker
       // ("this posting applies elsewhere") has to be read before the link that
       // says where, and `REDIRECT_ROWS` lists them the other way round.
@@ -496,9 +518,12 @@ export class SetupPanel extends Sheet<SetupData> {
         .map((k) => rows.find((r) => r.key === k))
         .filter((r): r is SetupRow => !!r);
       for (const r of group) grouped.add(r.key);
-      emit(head, group);
+      emit(head, group, kinds.includes(verdict.kind));
     }
     emit('Other', rows.filter((r) => !grouped.has(r.key)));
+    // A group with no rows draws no heading, and must not swallow the verdict
+    // with it — the step would then state no answer at all.
+    if (!verdictPlaced) body.prepend(verdictBanner(verdict));
   }
 
   /** A step list plus its "+ step" bar; all three prep lists render identically. */
@@ -634,4 +659,36 @@ function sectionHead(text: string): HTMLElement {
   const h = el('div', 'cf-section');
   h.textContent = text;
   return h;
+}
+
+/**
+ * The `kind` step's answer, drawn as the review modal's flow banner — same
+ * object, same classes, one stylesheet (`primitives.css`).
+ *
+ * It used to be a `--text-sm` caption in a plain box with no status mark on it at
+ * all, which made the one conclusion on the step quieter than the rows that led
+ * to it. It carries a dot for the same reason every other status here does:
+ * status is never colour alone, and `unknown` — the classifier guessing — is the
+ * state the user has to act on, so it gets the `!`.
+ */
+function verdictBanner(verdict: SetupVerdict): HTMLElement {
+  const tone = verdict.kind === 'unknown' ? 'warn' : 'ok';
+  const box = el('div', `cf-flow cf-verdict ${tone}`);
+
+  const head = el('div', 'cf-flow-head');
+  const dot = el('span', `cf-dot ${tone}`);
+  dot.setAttribute('role', 'img');
+  dot.setAttribute('aria-label', tone === 'warn' ? 'assumed' : 'confirmed');
+
+  const titleLine = el('div', 'cf-flow-titleline');
+  const title = el('b', 'cf-flow-title');
+  title.textContent = verdict.title;
+  titleLine.append(title);
+
+  const detail = el('span', 'cf-flow-detail');
+  detail.textContent = verdict.detail;
+
+  head.append(dot, titleLine, detail);
+  box.append(head);
+  return box;
 }

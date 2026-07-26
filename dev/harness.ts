@@ -372,7 +372,11 @@ function bootSetup(): void {
       { key: 'fullName', label: 'Full name', status: 'high', note: 'auto · #name', hasSave: false },
       { key: 'city', label: 'City', status: 'none', note: 'not found', hasSave: false },
     ],
-    verdict: 'Quick apply (assumed) — no external apply link found on this page',
+    verdict: {
+      title: 'Quick apply (assumed)',
+      detail: 'no external apply link found on this page',
+      kind: 'unknown',
+    },
     redirect: [
       { key: 'applySelector', label: 'External apply link', status: 'none', note: 'not set', hasSave: false },
       { key: 'quickApplySelector', label: 'Quick-apply marker', status: 'high', note: 'saved · #application_form', hasSave: true },
@@ -456,7 +460,11 @@ function bootSetup(): void {
       urlPattern: '*://*/sites/external-board.html*',
       prep: [],
       fields: BASE_SETUP.fields.map((f) => ({ ...f, status: 'none' as const, note: 'not found', hasSave: false })),
-      verdict: 'External application — configured external apply link',
+      verdict: {
+        title: 'External application',
+        detail: 'configured external apply link',
+        kind: 'redirect',
+      },
       redirect: [
         { key: 'applySelector', label: 'External apply link', status: 'high', note: 'saved · → ats.acme.test', hasSave: true },
         { key: 'quickApplySelector', label: 'Quick-apply marker', status: 'none', note: 'not set', hasSave: false },

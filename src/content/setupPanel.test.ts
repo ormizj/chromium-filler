@@ -41,7 +41,7 @@ function data(over: Partial<SetupData> = {}): SetupData {
       { key: 'resume', label: 'CV / Résumé', status: 'high', note: 'auto · #cv', hasSave: false },
       { key: 'email', label: 'Email', status: 'high', note: 'auto · #email', hasSave: false },
     ],
-    verdict: 'Quick-apply — a form was found here',
+    verdict: { title: 'Quick apply', detail: 'a form was found here', kind: 'quickApply' as const },
     redirect: [],
     beforeFollow: [],
     submitCv: [],
@@ -125,7 +125,9 @@ describe('setup wizard steps', () => {
     nextBtn(shadow).click();
     expect(shown(shadow)).toBe(SETUP_STEP_TITLES.kind);
 
-    panel!.render(data({ verdict: 'External application' }));
+    panel!.render(data({
+      verdict: { title: 'External application', detail: 'configured apply link', kind: 'redirect' },
+    }));
     expect(shown(shadow)).toBe(SETUP_STEP_TITLES.kind);
   });
 
@@ -361,7 +363,9 @@ describe('setup wizard help', () => {
     shadow.querySelector<HTMLButtonElement>('.cf-step-head .cf-help-btn')!.click();
     expect(shadow.querySelectorAll('.cf-help').length).toBe(1);
 
-    panel!.render(data({ verdict: 'External application' }));
+    panel!.render(data({
+      verdict: { title: 'External application', detail: 'configured apply link', kind: 'redirect' },
+    }));
     expect(shadow.querySelectorAll('.cf-help').length).toBe(1);
   });
 });
@@ -394,6 +398,9 @@ describe('setup wizard step contents', () => {
    * The external marker and the external apply link are one answer between them
    * — "this posting applies elsewhere, and here is what to press" — so they are
    * headed together, away from the marker that argues the opposite verdict.
+   *
+   * Quick apply leads: it is the ordinary case, and the only group a site that
+   * never hands off has anything to fill in.
    */
   it('groups the redirect rows under the verdict each argues for', () => {
     const shadow = render(data({
@@ -408,11 +415,11 @@ describe('setup wizard step contents', () => {
     const order = [...shadow.querySelectorAll('.cf-section, .cf-row .cf-field b')]
       .map((n) => n.textContent);
     expect(order).toEqual([
+      'Quick apply — the form is on this page',
+      'Quick-apply marker',
       'External — the application is on the employer’s site',
       'External marker',
       'External apply link',
-      'Quick apply — the form is on this page',
-      'Quick-apply marker',
     ]);
   });
 
@@ -427,6 +434,55 @@ describe('setup wizard step contents', () => {
     panel!.setStep('kind');
     expect(shadow.textContent).not.toContain('the application is on the employer');
     expect(shadow.textContent).toContain('the form is on this page');
+  });
+
+  /**
+   * The verdict is the step's answer, so it leads the group that argues for it
+   * rather than floating above both headings — where it read as a caption about
+   * nothing in particular and went unread. `unknown` sits with quick apply
+   * because that is how it is treated: the fill path runs either way.
+   */
+  const kinds = [
+    { kind: 'quickApply', head: 'Quick apply — the form is on this page', tone: 'ok' },
+    { kind: 'unknown', head: 'Quick apply — the form is on this page', tone: 'warn' },
+    { kind: 'redirect', head: 'External — the application is on the employer’s site', tone: 'ok' },
+  ] as const;
+
+  for (const { kind, head, tone } of kinds) {
+    it(`puts a ${kind} verdict directly under "${head.split(' —')[0]}"`, () => {
+      const shadow = render(data({
+        verdict: { title: 'Verdict title', detail: 'why', kind },
+        redirect: [
+          { key: 'applySelector', label: 'External apply link', status: 'none', note: 'not set', hasSave: false },
+          { key: 'quickApplySelector', label: 'Quick-apply marker', status: 'none', note: 'not set', hasSave: false },
+          { key: 'markerSelector', label: 'External marker', status: 'none', note: 'not set', hasSave: false },
+        ],
+      }));
+      panel!.setStep('kind');
+
+      const banner = shadow.querySelector('.cf-verdict')!;
+      expect(banner.previousElementSibling!.textContent).toBe(head);
+      expect(banner.querySelector('.cf-flow-title')!.textContent).toBe('Verdict title');
+      expect(banner.querySelector('.cf-flow-detail')!.textContent).toBe('why');
+      // Status is never colour alone: `unknown` is the state to act on, so it
+      // carries the `!` shape and the other two carry the check.
+      expect(banner.querySelector(`.cf-dot.${tone}`)).not.toBeNull();
+      expect(banner.classList.contains(tone)).toBe(true);
+    });
+  }
+
+  // A group with no rows draws no heading — and must not take the verdict down
+  // with it, or the step states no answer at all.
+  it('still states the verdict when its group has no rows', () => {
+    const shadow = render(data({
+      verdict: { title: 'External application', detail: 'why', kind: 'redirect' },
+      redirect: [
+        { key: 'quickApplySelector', label: 'Quick-apply marker', status: 'none', note: 'not set', hasSave: false },
+      ],
+    }));
+    panel!.setStep('kind');
+    expect(shadow.querySelector('.cf-verdict .cf-flow-title')!.textContent)
+      .toBe('External application');
   });
 });
 

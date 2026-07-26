@@ -1105,6 +1105,71 @@ test('Options: a checklist “Go →” lands on the section it names, not just 
   }
 });
 
+/* ---------------- Settings rows ---------------- */
+
+test('Options: a settings row keeps its disclosure inside the card, on either shape of row', async () => {
+  // `.setrow.stacked` turns the row's flex axis vertical but every length in it
+  // was written for a row: with `flex-wrap: wrap` still on, `.setrow-help`'s
+  // `flex-basis: 100%` — of the card's *height*, in a column — could not fit
+  // beside its siblings and wrapped into a second **column**, so the explanation
+  // left the card entirely and hung off its right-hand edge over the page.
+  //
+  // jsdom evaluates neither the cascade nor layout, so nothing but a real browser
+  // can see this. Both shapes of row are checked: the bug only ever hit the
+  // stacked one, and a fix that broke the ordinary one would be no fix.
+  const page = await context.newPage();
+  try {
+    await page.setViewportSize({ width: 1280, height: 900 });
+    await page.goto(`chrome-extension://${extId}/src/options/options.html`);
+    await page.waitForFunction(() => document.body.dataset.ready === '1');
+    await page.locator('#tab-settings').click();
+
+    for (const id of ['redirect-target', 'auto-run']) {
+      const row = page.locator(`#${id}`).locator('xpath=ancestor::*[contains(@class,"setrow")][1]');
+      await row.locator('.cf-help-btn').click();
+      const panel = row.locator('.cf-help');
+      await expect(panel).toBeVisible();
+
+      const [outer, inner] = await Promise.all([row.boundingBox(), panel.boundingBox()]);
+      expect(inner!.x, `${id}: the panel starts inside its row`)
+        .toBeGreaterThanOrEqual(outer!.x - 1);
+      expect(inner!.x + inner!.width, `${id}: and ends inside it`)
+        .toBeLessThanOrEqual(outer!.x + outer!.width + 1);
+      expect(inner!.y + inner!.height, `${id}: the row grew to hold it`)
+        .toBeLessThanOrEqual(outer!.y + outer!.height + 1);
+    }
+  } finally {
+    await page.close();
+  }
+});
+
+test('Options: a switch sits on its title line, not below it', async () => {
+  // The caption used to live *inside* the row's text block, which made that block
+  // two lines tall — and `align-items: center` then centred the control against
+  // both of them, so every toggle on this page rode half a line below the title
+  // it belongs to. The caption is a line of the row now. Geometry, so this is
+  // only visible here.
+  const page = await context.newPage();
+  try {
+    await page.setViewportSize({ width: 1280, height: 900 });
+    await page.goto(`chrome-extension://${extId}/src/options/options.html`);
+    await page.waitForFunction(() => document.body.dataset.ready === '1');
+    await page.locator('#tab-settings').click();
+
+    const row = page.locator('#auto-run').locator('xpath=ancestor::*[contains(@class,"setrow")][1]');
+    await expect(row.locator('.setrow-caption')).toBeVisible();
+    const [title, control] = await Promise.all([
+      row.locator('.setrow-text').boundingBox(),
+      row.locator('.switch').boundingBox(),
+    ]);
+    const centre = (b: { y: number; height: number }) => b.y + b.height / 2;
+    expect(Math.abs(centre(control!) - centre(title!)), 'switch centred on the title')
+      .toBeLessThanOrEqual(2);
+  } finally {
+    await page.close();
+  }
+});
+
 /* ---------------- Review-modal layout simulator ---------------- */
 
 test('Options: resizing the window leaves the configured layout and its ratios alone', async () => {

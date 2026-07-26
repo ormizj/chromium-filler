@@ -175,110 +175,10 @@ button.cf-view .cf-dot {
   margin-bottom: 0;
 }
 
-/* ---------------- The flow banner ---------------- */
+/* ---------------- The flow banner: the modal's own states ---------------- */
 
-/**
- * Where this posting is in the one flow the extension has, at the top of both
- * views. It replaces three separate renderings — an applied banner, a redirect
- * notice, and an explanation of the greyed Apply that only appeared once the
- * user had pressed it — none of which covered the commonest case: a posting
- * filled and waiting, about which the card said nothing at all.
- *
- * One box, four tones. The tone is chosen in `shared/flowState.ts`; all this
- * knows is that `quiet` reports a position and the other three report a status,
- * so only they are tinted.
- */
-.cf-flow {
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-3);
-  border-radius: var(--radius-md);
-  margin: 0 0 var(--space-5);
-}
-
-.cf-flow-head {
-  display: flex;
-  align-items: flex-start;
-  gap: var(--space-3);
-}
-
-.cf-flow-text {
-  flex: 1;
-  min-width: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-}
-
-/* The title and its `?` on one line, so the disclosure reads as belonging to
-   those words rather than to the banner. `align-items: baseline` would drop the
-   28px button below the 1.35 line box; centred, it rides on it. */
-.cf-flow-titleline {
-  display: flex;
-  align-items: center;
-  gap: var(--space-2);
-}
-
-.cf-flow-title {
-  font-size: var(--text-md);
-  font-weight: 600;
-  line-height: 1.35;
-}
-
-.cf-flow-detail {
-  font-size: var(--text-sm);
-  line-height: 1.5;
-  color: var(--muted);
-}
-
-/* The dot sits on the title's line, not on the box's centre — the detail can run
-   to three lines on a narrow sheet and the mark would drift down with it. */
-.cf-flow-head > .cf-dot {
-  margin-top: 3px;
-}
-
-/**
- * A resting state: no tint, no box, and it lives in the footer rather than the
- * body — see `FillerModal.footer`. It is the sentence that explains the button
- * directly beneath it ("nothing has been sent yet"), and as a tinted band above
- * the job title it both buried the posting and competed with the one thing on
- * this card that is genuinely coloured.
- */
-.cf-flow.quiet {
-  padding: 0;
-  gap: var(--space-2);
-}
-.cf-flow.quiet .cf-flow-title {
-  color: var(--fg);
-  font-weight: 500;
-}
-.cf-flow.quiet .cf-flow-detail {
-  color: var(--muted-2);
-}
-
-.cf-flow.accent,
-.cf-flow.warn,
-.cf-flow.ok {
-  padding: var(--space-4);
-}
-
-.cf-flow.accent {
-  background: var(--accent-weak);
-}
-.cf-flow.accent .cf-flow-title {
-  color: var(--accent);
-}
-.cf-flow.accent .cf-flow-detail {
-  color: var(--accent);
-  opacity: 0.85;
-}
-
-.cf-flow.warn {
-  background: var(--warn-weak);
-}
-.cf-flow.warn .cf-flow-title {
-  color: var(--warn);
-}
+/* The banner itself is in primitives.css — the setup wizard states its verdict in
+   the same object. What is left here is the one state only this card has. */
 
 /**
  * The application went through — the loudest thing the card ever says. It is the
@@ -286,24 +186,21 @@ button.cf-view .cf-dot {
  * own confirmation is routinely below the fold or behind this very card. As a
  * 13px line above a 24px job title it lost that contest every time, which is the
  * reason this state is now a block rather than a strip.
+ *
+ * Keyed on `.cf-applied` (which `modal.ts` adds for that state alone) rather than
+ * on the `ok` tone: a green banner is not by itself a receipt, and the setup
+ * panel's confident verdict must not render at a headline size.
  */
-.cf-flow.ok {
-  background: var(--ok-weak);
+.cf-flow.ok.cf-applied {
   padding: var(--space-5);
 }
-.cf-flow.ok .cf-flow-title {
+.cf-flow.ok.cf-applied .cf-flow-title {
   font-size: var(--text-lg);
-  color: var(--ok);
-}
-.cf-flow.ok .cf-flow-detail {
-  color: var(--ok);
-  opacity: 0.85;
 }
 /* Scaled to the headline it now sits beside. */
-.cf-flow.ok > .cf-flow-head > .cf-dot {
+.cf-flow.ok.cf-applied .cf-flow-head > .cf-dot {
   width: 20px;
   height: 20px;
-  margin-top: 2px;
 }
 
 /* The outcome on the header strip, which never scrolls away. */
@@ -326,12 +223,6 @@ button.cf-view .cf-dot {
   .cf-header:has(> .cf-sent-chip) > .cf-sent-chip {
     margin-right: auto;
   }
-}
-
-/* Disclosed explanation, inside the banner it belongs to rather than floating in
-   the footer — the question is asked here now, at rest, so the answer is here. */
-.cf-flow > .cf-help {
-  margin: 0;
 }
 
 /* The footer's Apply once it has nothing left to do. Green rather than greyed:

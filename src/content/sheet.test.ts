@@ -63,7 +63,7 @@ function setupData(over: Partial<SetupData> = {}): SetupData {
     prep: [],
     containers: [],
     fields: [],
-    verdict: 'Quick-apply — a form was found here',
+    verdict: { title: 'Quick apply', detail: 'a form was found here', kind: 'quickApply' },
     redirect: [],
     beforeFollow: [],
     submitCv: [],

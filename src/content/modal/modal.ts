@@ -384,15 +384,16 @@ export class FillerModal extends Sheet<ModalData> {
       head.append(dot);
     }
 
-    const text = el('div', 'cf-flow-text');
+    // The title line and the detail are the head's own children, not a wrapper's:
+    // the head is a grid, and it is being a grid that centres the dot on the
+    // title's row whatever height the `?` gives it.
     const titleLine = el('div', 'cf-flow-titleline');
     const title = el('b', 'cf-flow-title');
     title.textContent = flow.title;
     titleLine.append(title);
     const detail = el('span', 'cf-flow-detail');
     detail.textContent = flow.detail;
-    text.append(titleLine, detail);
-    head.append(text);
+    head.append(titleLine, detail);
 
     // The long form stays behind a disclosure: the blocked states have a
     // paragraph's worth of explanation each, and rendering it inline filled the

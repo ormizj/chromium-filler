@@ -335,6 +335,145 @@ button.cf-btn.primary[aria-disabled='true'] {
   margin: var(--space-6) 0 var(--space-2);
 }
 
+/* ---------------- The flow banner ---------------- */
+
+/**
+ * A dot, a title and a line saying where you are — the one shape this extension
+ * states a position in. The review modal leads both its views with it (where the
+ * posting is in the flow: applied, handing off, blocked, filled and waiting), and
+ * the setup wizard's `kind` step states its verdict in it.
+ *
+ * It lives here rather than in `modal.css` because those are two shadow surfaces
+ * wanting the same object, which is the whole rule this file exists for. As a
+ * modal-private block the setup panel would have had a second copy to drift from
+ * — and the alignment bug below would have had to be found twice.
+ *
+ * One box, four tones. The tone is chosen by the caller (`shared/flowState.ts`
+ * for the modal); all this knows is that `quiet` reports a position and the other
+ * three report a status, so only they are tinted.
+ */
+.cf-flow {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  border-radius: var(--radius-md);
+  margin: 0 0 var(--space-5);
+}
+
+/**
+ * Dot · title, then the detail beneath the title — a grid, so that the dot is
+ * centred **on the title's own row** rather than nudged down from the top of the
+ * box by a fixed offset.
+ *
+ * The offset was `margin-top: 3px`, measured against a bare 19px line of text.
+ * But the title line also carries the `?`, which is 28px tall on a fine pointer
+ * and 44px on a coarse one, and the text centres inside whichever of those it
+ * gets: the mark ended up ~4px high with a mouse and ~11px high on touch, on
+ * exactly the blocked states whose explanation is the reason the `?` is there.
+ * No single number can be right for all three heights, so there is no number.
+ */
+.cf-flow-head {
+  display: grid;
+  grid-template-columns: 1fr;
+  row-gap: 2px;
+  align-items: center;
+}
+
+/* The dot's column exists only on the tones that draw one — an `auto` track and
+   its gap would otherwise indent the quiet and accent banners by a mark that is
+   not there. */
+.cf-flow.ok .cf-flow-head,
+.cf-flow.warn .cf-flow-head {
+  grid-template-columns: auto 1fr;
+  column-gap: var(--space-3);
+}
+.cf-flow.ok .cf-flow-detail,
+.cf-flow.warn .cf-flow-detail {
+  grid-column: 2;
+}
+
+/* The title and its `?` on one line, so the disclosure reads as belonging to
+   those words rather than to the banner. `align-items: baseline` would drop the
+   28px button below the 1.35 line box; centred, it rides on it. */
+.cf-flow-titleline {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-width: 0;
+}
+
+.cf-flow-title {
+  font-size: var(--text-md);
+  font-weight: 600;
+  line-height: 1.35;
+}
+
+.cf-flow-detail {
+  font-size: var(--text-sm);
+  line-height: 1.5;
+  color: var(--muted);
+}
+
+/**
+ * A resting state: no tint, no box. In the modal it lives in the footer rather
+ * than the body (see `FillerModal.footer`) — it is the sentence that explains the
+ * button directly beneath it ("nothing has been sent yet"), and as a tinted band
+ * above the job title it both buried the posting and competed with the one thing
+ * on that card that is genuinely coloured.
+ */
+.cf-flow.quiet {
+  padding: 0;
+  gap: var(--space-2);
+}
+.cf-flow.quiet .cf-flow-title {
+  color: var(--fg);
+  font-weight: 500;
+}
+.cf-flow.quiet .cf-flow-detail {
+  color: var(--muted-2);
+}
+
+.cf-flow.accent,
+.cf-flow.warn,
+.cf-flow.ok {
+  padding: var(--space-4);
+}
+
+.cf-flow.accent {
+  background: var(--accent-weak);
+}
+.cf-flow.accent .cf-flow-title {
+  color: var(--accent);
+}
+.cf-flow.accent .cf-flow-detail {
+  color: var(--accent);
+  opacity: 0.85;
+}
+
+.cf-flow.warn {
+  background: var(--warn-weak);
+}
+.cf-flow.warn .cf-flow-title {
+  color: var(--warn);
+}
+
+.cf-flow.ok {
+  background: var(--ok-weak);
+}
+.cf-flow.ok .cf-flow-title {
+  color: var(--ok);
+}
+.cf-flow.ok .cf-flow-detail {
+  color: var(--ok);
+  opacity: 0.85;
+}
+
+/* Disclosed explanation, inside the banner it belongs to rather than floating in
+   the footer — the question is asked here now, at rest, so the answer is here. */
+.cf-flow > .cf-help {
+  margin: 0;
+}
+
 /* ---------------- Floating sheet (modal + setup panel) ---------------- */
 
 /**

@@ -26,7 +26,7 @@ function snapshot(over: Partial<SetupSnapshot> = {}): SetupSnapshot {
     // The CV row is always in this list — `main.ts` runs detection over every
     // text field *plus* `resume` — and it is the only one the step counts.
     fields: [row({ key: 'resume' }), row({ key: 'email' }), row({ key: 'fullName' })],
-    verdict: 'Quick apply — a form was found here',
+    verdict: { title: 'Quick apply', detail: 'a form was found here', kind: 'quickApply' as const },
     redirect: [
       { key: 'applySelector', label: 'External apply link', status: 'none', note: 'not set', hasSave: false },
       { key: 'quickApplySelector', label: 'Quick-apply marker', status: 'none', note: 'not set', hasSave: false },

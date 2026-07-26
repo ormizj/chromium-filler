@@ -8,6 +8,18 @@ import { normalizeAttr } from './fieldKeys';
 import { navigableUrl } from './appLink';
 
 /**
+ * What a posting turned out to be: the form is on this page, it hands off to the
+ * employer's own site, or the classifier is not confident enough to say — which
+ * takes the ordinary fill path, because a false positive navigates away from a
+ * page that could have been filled.
+ *
+ * Here rather than beside the DOM walk that produces it because the setup
+ * wizard's snapshot carries it (`SetupVerdict`), and `shared/` never imports
+ * from `content/`.
+ */
+export type PostingKind = 'quickApply' | 'redirect' | 'unknown';
+
+/**
  * Labels that mean "this button leaves the board for the employer's own form".
  * Tested against `normalizeAttr` output (lower-cased, separators -> spaces), so
  * patterns are space-based. Deliberately narrow: a false positive here would

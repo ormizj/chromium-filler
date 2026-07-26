@@ -87,6 +87,43 @@ h3:has(> .cf-help-btn) {
   padding: var(--space-5) var(--space-6) 0;
 }
 
+/**
+ * The two scroll fades. This page scrolls in the window, and an overlay scrollbar
+ * is invisible at rest — so a panel cut off by the viewport looked exactly like a
+ * panel that ends there. A fade is the only cue left once the scrollbar is gone.
+ *
+ * The top one hangs off the *bottom* of the sticky bar rather than sitting at
+ * `top: 0`, where the bar's own opaque `--canvas` would cover it, and it is hidden
+ * at `scrollY === 0` so it never washes over the tab/panel join. The bottom one is
+ * fixed to the viewport. Both are `--canvas` fading to nothing, so what they read
+ * as is content going under the page rather than a band drawn on top of it.
+ */
+.topbar::after,
+.scrollfade {
+  content: '';
+  position: fixed;
+  left: 0;
+  right: 0;
+  height: 28px;
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 120ms ease;
+}
+.topbar::after {
+  position: absolute;
+  top: 100%;
+  background: var(--fade-down);
+}
+.scrollfade {
+  bottom: 0;
+  z-index: 9;
+  background: var(--fade-up);
+}
+body[data-scroll~='up'] .topbar::after,
+body[data-scroll~='down'] .scrollfade {
+  opacity: 1;
+}
+
 /* The same inner box as `main`, padding included — the tabs sat 16px to the left
    of the panel they open, which a folder tab cannot afford: its edge has to line
    up with the sheet it belongs to. */
@@ -111,9 +148,16 @@ h3:has(> .cf-help-btn) {
  * Folder tabs: the active tab is a raised paper tab with rounded top corners
  * rising off the bar, rather than the old underline. This is the reference's tab
  * treatment and the clearest "these are different" tell between the two designs.
+ *
+ * `flex: 1 1 0` — the strip spans the panel it opens, exactly as the popup's
+ * action row divides its width. Left-packed, the six tabs ran out a third of the
+ * way across and the folder read as a small pill above a very wide sheet; worse,
+ * nothing reached the sheet's right-hand corner, so only one of the two corners
+ * below could ever mean anything. Six one-word labels in ~136px each: nothing
+ * here wraps or truncates.
  */
 .tab {
-  flex: 0 1 auto;
+  flex: 1 1 0;
   min-height: var(--tap);
   padding: 0 var(--space-5);
   border: none;
@@ -161,6 +205,23 @@ section {
   border-top: 0;
   border-top-left-radius: 0;
   border-top-right-radius: 0;
+}
+
+/**
+ * ...but a corner is only squared off where a tab actually stands on it. The
+ * strip spans the panel, so the first tab owns the top-left corner and the last
+ * owns the top-right, and no other tab owns either. Squaring both on every tab
+ * left the sheet with two hard 90° corners that nothing was joined to — which
+ * reads as a clipping bug, not as a folder.
+ *
+ * `data-tab-pos` is written by `selectTab`: one attribute, three outcomes, so the
+ * two rules read as the single decision they are.
+ */
+body:not([data-tab-pos='first']) [role='tabpanel'] > section {
+  border-top-left-radius: var(--radius-xl);
+}
+body:not([data-tab-pos='last']) [role='tabpanel'] > section {
+  border-top-right-radius: var(--radius-xl);
 }
 
 [role='tabpanel'] > section:not([hidden]) ~ section {
@@ -232,21 +293,25 @@ input[type='file']::file-selector-button {
   vertical-align: middle;
 }
 
-/* A stored document on one line: pick it, see what is held, remove it. The
-   filename takes the slack so Remove lands on the right edge on every row —
-   both documents (CV, cover letter) use this. */
+/* A stored document: the two controls on one line — pick a file, remove the one
+   that is there — with Remove held against the right edge, away from the picker,
+   as a destructive action should be. Both documents (CV, cover letter) use this. */
 .file-row > input[type='file'] {
   flex: 0 1 auto;
   width: auto;
   min-width: 0;
 }
-.file-row > .status {
-  flex: 1;
-  min-width: 0;
-  margin: 0;
-}
 .file-row > .btn-danger {
   margin-left: auto;
+}
+
+/* And what is currently held, on its own line beneath them. Between the two
+   controls it pushed them apart by however long the filename was, so the same
+   button sat at a different x on the two document rows. */
+.doc-current {
+  margin: var(--space-2) 0 0;
+  font-size: var(--text-sm);
+  color: var(--muted);
 }
 input[type='checkbox'] {
   min-height: 0;
@@ -411,7 +476,11 @@ label.check input {
      — and centred, that neighbour's one line floated in the middle of an empty
      card. `align-items` still centres the control against its title within a line. */
   align-content: flex-start;
-  gap: var(--space-5);
+  /* Row gap is the caption's, column gap the control's. The caption is a line of
+     *this* row now rather than a child of the text block (see `attachRowHelp`),
+     and at the 20px that separates a title from its toggle it read as a second
+     setting rather than as a note on the first. */
+  gap: var(--space-2) var(--space-5);
   background: var(--bg);
   border: 1px solid var(--border);
   border-radius: var(--radius-card);
@@ -419,11 +488,16 @@ label.check input {
   height: 100%;
 }
 
+/* Title and its `?`, and nothing else — the caption is a line of the row now.
+   `nowrap` because the only thing that may wrap here is the title's own text: let
+   the `?` drop to a line of its own and the text block is two lines tall again,
+   which puts the toggle back below the title on a narrow screen. `min-width: 0`
+   on the title is what lets it shrink far enough for that to hold. */
 .setrow-text {
   flex: 1;
   min-width: 0;
   display: flex;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
   align-items: center;
   gap: var(--space-2);
 }
@@ -444,10 +518,14 @@ label.check input {
    works on a half-width card and is absurd on a full-width one, where it flew to
    the far edge with 600px of nothing between it and the title it explains. A `?`
    is only legible as belonging to the words immediately before it. */
-.setrow-text p,
+/* The caption is a sibling of the text block, not a child of it — `flex: 1 0 100%`
+   puts it on its own line of the `.setrow`. Inside the text block it made that
+   block two lines tall, and `align-items: center` then centred the toggle against
+   *both* lines, so every switch on this page rode half a line below the title it
+   belongs to. */
 .setrow-caption {
   flex: 1 0 100%;
-  margin: 2px 0 0;
+  margin: 0;
   font-size: var(--text-sm);
   color: var(--muted-2);
   line-height: 1.5;
@@ -493,7 +571,19 @@ label.check input {
   flex-direction: column;
   align-items: stretch;
   align-content: stretch;
-  gap: var(--space-5);
+  gap: var(--space-3);
+  /* Turning the axis on its side reverses what every length in this row means,
+     and the two below were written for a row. `flex-wrap: wrap` in a column wraps
+     into a second *column*: `.setrow-help`'s `flex-basis: 100%` — of the card's
+     height, here — cannot fit beside its siblings, so the disclosure panel left
+     the card entirely and hung off its right-hand edge, over the page. */
+  flex-wrap: nowrap;
+}
+/* And `flex: 1` on the text block grew it *vertically*, which floated the caption
+   in the middle of the card and pinned the control to the bottom. Nothing in a
+   stacked row wants to grow: each child is as tall as it is. */
+.setrow.stacked > * {
+  flex: 0 0 auto;
 }
 
 /* A <label> used as the text block is a flex row like the div it replaces. */
@@ -833,13 +923,41 @@ label.fld.inline input {
    * metaphor is untouched. `revealSection` already measures the topbar per call,
    * so a two-row strip does not throw its scroll offset out.
    */
+  /**
+   * A grid rather than `flex-wrap`, now that the tabs divide the width: wrapped,
+   * a row of four and a row of two gave the second row's tabs twice the width of
+   * the first's, so the same strip changed rhythm halfway down. Three columns is
+   * two even rows of the six, and a seventh tab would simply start a third row.
+   */
   .tabs {
-    flex-wrap: wrap;
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
   }
 }
 @media (min-width: 641px) {
   .rowmenu {
     display: none;
+  }
+
+  /**
+   * The tab that owns a corner owns the edge under it too.
+   *
+   * A section draws a hairline up both its sides and the active tab drew none, so
+   * the outline ran up the left of the panel and stopped dead where the Queue tab
+   * began — the folder read as a detached block of colour sitting near a sheet
+   * rather than as the top of it. Only the *outer* edge of each: Queue's left and
+   * Help's right are the two that continue something. `data-tab-pos` already says
+   * the selected tab is the first or the last one, which is the same one
+   * attribute the squared corners above are decided by.
+   *
+   * Narrow is excluded with the rest of the folder metaphor: the strip is a
+   * 3-column grid there and a first-row tab stands on nothing.
+   */
+  body[data-tab-pos='first'] .tab[aria-selected='true'] {
+    border-left: 1px solid var(--border);
+  }
+  body[data-tab-pos='last'] .tab[aria-selected='true'] {
+    border-right: 1px solid var(--border);
   }
 }
 
@@ -1217,19 +1335,26 @@ label.fld.inline input {
   min-height: 2.6em;
   font-variant-numeric: tabular-nums;
 }
+/**
+ * The chips flow: one lights up, the next follows it. They used to be six reserved
+ * grid cells hidden in place so that nothing moved when one came on — which bought
+ * a still block at the cost of a permanently empty two-row band under the readout,
+ * on a panel that is empty of limits most of the time.
+ *
+ * Only the *height of one row* is reserved now, which is all that was ever needed:
+ * 0→1 is the only transition that could shift the buttons below, and six chips at
+ * ~120px cannot reach a second line in an 820px panel.
+ */
 .sim-limits {
-  display: grid;
-  /* Narrow enough that all six fit one row on a desktop panel: the row is always
-     reserved, so a second one is empty space the user stares at. */
-  grid-template-columns: repeat(auto-fill, minmax(124px, 1fr));
+  display: flex;
+  flex-wrap: wrap;
   gap: var(--space-2);
   margin-top: var(--space-2);
-}
-.sim-limits .chip {
-  justify-content: center;
+  /* One chip: its text, plus 4px padding and a 1px border top and bottom. */
+  min-height: calc(var(--text-xs) * 1.55 + 10px);
 }
 .sim-limits .chip.is-off {
-  visibility: hidden;
+  display: none;
 }
 
 /* ---------------- Getting started ---------------- */

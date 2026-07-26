@@ -15,6 +15,7 @@
  */
 
 import type { PrepAction } from './types';
+import type { PostingKind } from './redirect';
 
 /* ---------------- Rows (shared with the panel that renders them) ---------------- */
 
@@ -49,6 +50,22 @@ export type ContainerKey = 'jobTitle' | 'jobDescription' | 'jobRequirements';
  */
 export type PrepListKey = 'prep' | 'beforeFollow' | 'submitCv';
 
+/**
+ * What the `kind` step decided about the page in front of you.
+ *
+ * Split in two because it is drawn as a flow banner, which is a title and a line
+ * under it — and because "Quick apply (assumed)" and "no external apply link
+ * found" answer different questions: what this posting is, and what made the
+ * classifier say so. `kind` is the machine-readable half, and it decides both the
+ * banner's tone and which of the step's two groups the banner sits in — the
+ * verdict belongs with the rows that argue for it.
+ */
+export interface SetupVerdict {
+  title: string;
+  detail: string;
+  kind: PostingKind;
+}
+
 /** Everything the wizard reads. `SetupData` is this plus the sheet's geometry. */
 export interface SetupSnapshot {
   name: string;
@@ -57,7 +74,7 @@ export interface SetupSnapshot {
   containers: SetupRow[];
   fields: SetupRow[];
   /** Live quick-apply vs. external-redirect verdict for the page being set up. */
-  verdict: string;
+  verdict: SetupVerdict;
   /** Redirect-classification selectors (apply link, quick-apply / external markers). */
   redirect: SetupRow[];
   /** Steps run on the posting before following an external apply link. */

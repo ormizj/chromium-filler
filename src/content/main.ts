@@ -39,7 +39,10 @@ import { detectRedirect, type RedirectDetection } from './redirectDetect';
 import { fillTextField, fillFileInput, highlight, clearHighlights } from './fill';
 import { startPicker } from './picker';
 import { FillerModal, type ApplyState } from './modal/modal';
-import { SetupPanel, type ContainerKey, type SetupRow, type PrepRow, type PrepListKey } from './setupPanel';
+import {
+  SetupPanel,
+  type ContainerKey, type SetupRow, type PrepRow, type PrepListKey, type SetupVerdict,
+} from './setupPanel';
 
 const CONTAINER_LABELS: Record<ContainerKey, string> = {
   jobTitle: 'Job title',
@@ -712,11 +715,15 @@ class Controller {
     // How this posting applies: quick-apply here, or a handoff to the employer.
     const detection = detectRedirect({ root: document, pageUrl: location.href, config: config.redirect });
     this.detection = detection;
-    const verdict = detection.kind === 'redirect'
-      ? `External application — ${detection.reason}`
-      : detection.kind === 'quickApply'
-        ? `Quick apply — ${detection.reason}`
-        : `Quick apply (assumed) — ${detection.reason}`;
+    const verdict: SetupVerdict = {
+      title: detection.kind === 'redirect'
+        ? 'External application'
+        : detection.kind === 'quickApply'
+          ? 'Quick apply'
+          : 'Quick apply (assumed)',
+      detail: detection.reason,
+      kind: detection.kind,
+    };
     if (detection.element) highlight(detection.element, detection.kind === 'redirect' ? 'high' : 'low');
 
     const redirectRows: SetupRow[] = REDIRECT_ROWS.map(({ key, label }) => {

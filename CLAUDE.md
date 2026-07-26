@@ -129,7 +129,20 @@ Once the confirmation appears the whole card becomes the receipt: the `ok` banne
 leads at `--text-lg`, `.cf-title` drops to `.cf-title-sub`, the header carries a
 `Sent` chip (the body scrolls; the header does not), and the footer's green
 `Applied ✓` retires Apply. The site's own message is routinely below the fold or
-behind the card, so this is the only place the outcome is legible.
+behind the card, so this is the only place the outcome is legible. That loudness
+is keyed on **`.cf-flow.ok.cf-applied`, not on the `ok` tone**: a green banner is
+not by itself a receipt, and the setup wizard states a confident verdict in the
+same object (below) at ordinary size.
+
+The banner itself lives in **`primitives.css`**, because two shadow surfaces draw
+it. `.cf-flow-head` is a **grid**, and that is what centres the dot on the
+*title's row*: the title line also carries the `?`, which is 28px tall on a fine
+pointer and 44px on a coarse one, so the old `margin-top: 3px` (measured against a
+bare 19px line) left the mark ~4px high with a mouse and ~11px high on touch — on
+exactly the blocked states whose explanation is why the `?` is there. No single
+number can be right for all three heights, so there is no number. The dot's grid
+column exists only on the tones that draw one, or `quiet` and `accent` would be
+indented by a mark that is not there.
 
 The footer's **overflow (`⋯`) carries the two ways out of a posting** —
 `Site setup` · `Options` — appended by `commonMenuItems()` to all three of the
@@ -191,10 +204,40 @@ pure, unit-tested logic):
   Help) managing the job queue, profile, CV, behavior settings, site configs and
   the job-database sync. Adding a tab is `'name'` in `TABS` plus a button and a
   panel following the `tab-`/`panel-` id convention — deep-linking comes free.
-  At ≤640px the strip **wraps** (`options.css`): six tabs are 401px wide on a
-  390px screen, and `overflow-x: auto` with a hidden scrollbar hides the last two
-  with nothing saying to swipe. The cost, paid only on narrow, is that an active
-  tab on the first row no longer sits on the panel.
+  The strip **spans the panel it opens** (`.tab { flex: 1 1 0 }`, the popup's
+  idiom): left-packed it ran out a third of the way across, so the folder read as
+  a small pill above a very wide sheet and *nothing ever reached the sheet's
+  right-hand corner*. That matters because the panel's first section squares off
+  only the corner a tab actually stands on — the first tab owns the top-left, the
+  last owns the top-right, and every tab between them leaves both rounded
+  (`data-tab-pos`, written by `selectTab`). Two hard corners joined to nothing
+  read as a clipping bug. **The tab that owns a corner owns the edge under it
+  too**: a section draws a hairline up both its sides and the active tab drew
+  none, so the outline ran up the left of the panel and stopped dead where the
+  Queue tab began. The first tab takes a `border-left` and the last a
+  `border-right` — only the outer edge of each, since those are the two that
+  continue anything.
+  **Switching tab scrolls to the top** (`selectTab`, only when the tab actually
+  changes): the panel underneath is replaced whole, so keeping the offset opened
+  the new one halfway down itself. Instant, not smooth — the smooth scroll belongs
+  to `revealSection`, which is a journey *to* a place, and guarding on a real
+  change is what keeps this out of the way of the deep links that call both.
+  At ≤640px the strip becomes a **3-column grid** (`options.css`): six tabs are
+  401px wide on a 390px screen, and `overflow-x: auto` with a hidden scrollbar hid
+  the last two with nothing saying to swipe. A grid rather than `flex-wrap`
+  because wrapping gave a row of four and a row of two, i.e. two different tab
+  widths in one strip. The cost, paid only on narrow, is that an active tab on the
+  first row no longer sits on the panel — so the corner rule is approximate there.
+
+  Both ends of the page carry a **scroll fade** (`--fade-down`/`--fade-up`,
+  `data-scroll` on `<body>`, `initScrollFade`). The page scrolls in the window and
+  the platform's overlay scrollbar is invisible at rest, so a panel clipped by the
+  viewport looked exactly like a panel that ends there. The top one hangs off the
+  *bottom* of the sticky `.topbar` — at `top: 0` the bar's own opaque `--canvas`
+  would cover it — and is hidden at `scrollY === 0` so it never washes over the
+  tab/panel join. A `ResizeObserver` on `<main>` drives it alongside the scroll
+  listener: switching tab, opening a `?` and rendering the queue all change how
+  far the page scrolls without scrolling it.
 
 The popup's actions are **two rows in fixed proportions, and nothing in them is
 ever hidden**: Fill (100%), then Site setup · Queue · Options in equal thirds.
@@ -210,6 +253,11 @@ from the Options button — which now sits two along from it, so this matters mo
 than it did. Three buttons at `flex: 1 1 0` fit 360px with ~35px to spare and
 there is no `flex-wrap`, so the labels staying one or two words is what keeps the
 row a row; an E2E measures their `y`.
+
+**Fill closes the popup**, like every other action there: the work moves to the
+page, and the review modal reports it in full while the popup sat on top of that
+repeating a one-line summary. Only that branch — `Reset & Re-run` puts the button
+back to `Fill`, and the press that follows is the point of having pressed it.
 
 Cross-context messaging goes through the typed `MSG` contract in
 `src/shared/messages.ts` (payloads must be structured-clone friendly).
@@ -403,10 +451,30 @@ is `Step n of 6` · `?` … `N to do` with the *chip* taking the slack, and the
 modal's flow banner puts the `?` on a `.cf-flow-titleline` beside the title
 instead of after a `flex: 1` text block.
 
-It still never goes *inside* a heading: `attachRowHelp` anchors it on the
-`.setrow` after the title and **before** the caption, so no control runs through
-the middle of a text block, and the wizard's `?` stays on the meta line above the
-step title rather than in it.
+It still never goes *inside* a heading: `attachRowHelp` puts it in the row's text
+block after the title, so no control runs through the middle of a text block, and
+the wizard's `?` stays on the meta line above the step title rather than in it.
+
+**A settings row's caption is a line of the row, not part of its text block**, and
+that is what puts the control on the title line: `<title> <?>` … `<toggle>`, then
+the caption, then the disclosure. Inside the text block the caption made it two
+lines tall and `.setrow`'s `align-items: center` centred the toggle against both,
+so every switch on the page rode half a line below the title it belongs to.
+`attachRowHelp` therefore appends it to the **row** — last, because its
+`flex: 1 0 100%` starts a new line, and between the title and the control it would
+have taken the control down with it. `.setrow-text` is `flex-wrap: nowrap` for the
+same reason: let the `?` drop to a line of its own and the block is two lines tall
+again, which is exactly what happens at 390px.
+
+**A `.setrow.stacked` is the same row with its axis turned**, and every length in
+it was written for a row: it must carry `flex-wrap: nowrap` and reset its children
+to `flex: 0 0 auto`. Wrapping in a column wraps into a second *column* —
+`.setrow-help`'s `flex-basis: 100%` is the card's **height** there, cannot fit
+beside its siblings, and so the disclosure panel left the card entirely and hung
+off its right-hand edge over the page. `flex: 1` on the text block grew it
+vertically, which floated the caption in the middle of the card and pinned the
+control to the bottom. Neither is visible to jsdom; an E2E measures the panel
+inside its row on both shapes of row.
 
 ### Data model & storage
 `src/shared/types.ts` is the source of truth: `Profile`, `SiteConfig`,
@@ -429,6 +497,14 @@ actually offers. Detection follows `UPLOAD_FIELDS` (`fieldDetect.ts`): every
 leftover unlabelled file input. Only the CV gets that fallback — attaching a
 cover letter to an input nobody labelled is the wrong document sent to an
 employer, which is the same failure `findSubmitControl` refuses to risk.
+
+Both render as **one `.file-row`, and both the same shape**: the two controls
+inline (pick a file, remove the one that is there, Remove held against the right
+edge away from the picker) with what is *currently* stored on its own line
+beneath. Wedged between the two controls that line pushed them apart by however
+long the filename happened to be, so the same button sat at a different x on the
+two document rows — and it put a `role="status"` live region in the middle of a
+control row.
 
 **`FIELD_ORDER` and `orderFields` (`fieldKeys.ts`) decide what order fields are
 read in**: the CV, the cover letter, then contact details, then the rest —
@@ -523,12 +599,27 @@ rather than the model's:
   because that named one of the two, and not "Setup steps" because "Step 2 of 6:
   Setup steps" stutters.
 - **`kind` groups its redirect rows by the verdict each argues for**
-  (`REDIRECT_GROUPS` in `setupPanel.ts`): External marker + External apply link
-  under one head, Quick-apply marker under the other. The first two are one
+  (`REDIRECT_GROUPS` in `setupPanel.ts`): Quick-apply marker under one head,
+  External marker + External apply link under the other. Those last two are one
   answer between them — "this posting applies elsewhere, and here is what to
-  press" — and neither is any use alone. The group's key order wins over
-  `REDIRECT_ROWS`', and a key in no group renders under a trailing "Other" head
-  rather than silently not rendering.
+  press" — and neither is any use alone. **Quick apply leads**: it is the ordinary
+  case, and the only group a site that never hands off has anything to fill in —
+  and since an empty group draws no heading, leading with External opened the
+  commonest site onto a section about the thing it does not do. The group's key
+  order wins over `REDIRECT_ROWS`', and a key in no group renders under a trailing
+  "Other" head rather than silently not rendering.
+
+  **The live verdict leads the group it argues for**, which is what each group's
+  `kinds` is: quick-apply *and* `unknown` under the first head (an assumed posting
+  is treated as quick apply — "(assumed)" is the whole difference), `redirect`
+  under the second. It is drawn as the modal's flow banner, `warn` with the `!`
+  when the classifier is guessing and `ok` otherwise — the step's one conclusion
+  was a `--text-sm` caption in a plain box carrying no status mark at all, quieter
+  than the rows that led to it, and floating above both headings it was about
+  nothing in particular. `SetupVerdict` is `{ title, detail, kind }` for that:
+  the banner is a title and a line under it, and `kind` decides both the tone and
+  the group. A group with no rows draws no heading and must not take the verdict
+  down with it, so an unplaced banner falls back to the top of the step.
 
 Four rules the panel enforces:
 
@@ -661,9 +752,14 @@ Two rules that panel breaks easily. `paint()` clamps **for display only** and mu
 never assign back to the stored layout — `modal.ts` follows the same rule, and this
 panel did not, so one short options window permanently shrank a card configured on
 a big screen; only a real gesture (`commit`) may clamp. And the limit chips are
-rendered once and toggled with `visibility`, never added and removed: they are
-rewritten on every `pointermove`, so anything that reflows shifts the buttons under
-them mid-drag. `layoutLimits`/`describeLimits`/`activeLimits` say which edges have
+built once and only ever shown or hidden — they are rewritten on every
+`pointermove`, and rebuilding six elements a frame is not free — but they **flow**
+rather than holding six reserved cells: `.sim-limits` reserves exactly one chip's
+height, which is all that was needed, because 0→1 is the only transition that can
+shift the buttons below and six chips cannot reach a second line in an 820px
+panel. Reserving all six bought a still block at the price of a permanently empty
+two-row band on a panel that is usually showing no limits at all.
+`layoutLimits`/`describeLimits`/`activeLimits` say which edges have
 run out of room and why — screen edge (accent) vs minimum size (warn), in colour
 *and* words — and `snapLayout` pulls a drag onto the edge or the 16px gutter,
 without which "flush" is reachable only by luck.

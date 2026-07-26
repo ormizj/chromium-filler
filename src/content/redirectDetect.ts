@@ -14,7 +14,10 @@ import { isExternalUrl, looksLikeExternalApply, resolveHref } from '../shared/re
 import { isAppLink } from '../shared/appLink';
 import { normalizeAttr } from '../shared/fieldKeys';
 
-export type PostingKind = 'quickApply' | 'redirect' | 'unknown';
+// Declared in `shared/redirect.ts` (the setup snapshot carries it), re-exported
+// here so it stays importable from the detector that produces it.
+export type { PostingKind } from '../shared/redirect';
+import type { PostingKind } from '../shared/redirect';
 
 export interface RedirectDetection {
   kind: PostingKind;

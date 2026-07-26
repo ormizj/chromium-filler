@@ -172,12 +172,17 @@ primary.addEventListener('click', async () => {
     return;
   }
   if (status.hasRun) {
+    // Reset leaves the popup open: it puts the button back to Fill, and the press
+    // that follows is the point of having pressed this one.
     await send(MSG.RESET);
     status = await send<StatusResponse>(MSG.STATUS);
-  } else {
-    status = await send<StatusResponse>(MSG.RUN);
+    render();
+    return;
   }
-  render();
+  // Filling moves the work to the page. The review modal reports it in full, and
+  // the popup was left on top of that repeating a one-line summary of it.
+  await send(MSG.RUN);
+  window.close();
 });
 
 sessionSkip.addEventListener('click', async () => {

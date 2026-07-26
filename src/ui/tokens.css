@@ -153,6 +153,15 @@
   --shadow-1: 0 1px 2px rgba(80, 60, 40, 0.1);
   --shadow-2: 0 18px 40px -24px rgba(80, 60, 40, 0.35), 0 2px 6px -3px rgba(80, 60, 40, 0.12);
   --ring: 0 0 0 2px var(--bg), 0 0 0 4px var(--accent);
+
+  /* A scrolled edge, fading into the page behind it — the cue that stands in for
+     a scrollbar where the platform draws an overlay one that is invisible at
+     rest. Two tokens because the two ends of a scroll are not the same gradient:
+     `--fade-down` is opaque at the top (content going *under* what is above it),
+     `--fade-up` opaque at the bottom. They resolve `--canvas` at use, so the dark
+     scheme below needs no copy of them. */
+  --fade-down: linear-gradient(var(--canvas), transparent);
+  --fade-up: linear-gradient(transparent, var(--canvas));
 }
 
 @media (prefers-color-scheme: dark) {

@@ -133,9 +133,22 @@ only place that draws.
   → "UI layer" for the alternation rule.
 - **Settings is a two-column grid** of rows, as the reference's body is, and the two
   loose controls (close delay, redirect target) are now rows themselves — a value on
-  the right like the reference's "Batch size · 3", and a stacked row for the select
-  whose options are sentences. Each row's caption comes from
-  `SETTINGS_HELP[…].short` rather than from the HTML.
+  the right like the reference's "Batch size · 3", and a stacked row for the select,
+  which is the one control too wide to sit beside its own label. Each row's caption
+  comes from `SETTINGS_HELP[…].short` rather than from the HTML, and it is a line of
+  the **row** rather than part of its text block: inside the text block it made that
+  block two lines tall, and `align-items: center` then centred every toggle on the
+  page half a line below the title it belongs to. A stacked row also has to reset
+  the flex properties its children inherit — they are all written for a row axis,
+  and turned on their side `flex-wrap: wrap` wrapped the `?` disclosure into a
+  second *column*, off the card and over the page.
+- **The options tab strip spans the panel it opens** (`flex: 1 1 0`; a 3-column grid
+  under 640px), so the first and last tabs stand on the panel's two top corners —
+  which is what lets the sheet square off only the corner a tab is actually joined
+  to and round the other, instead of carrying two hard corners joined to nothing.
+  Both ends of the page carry a scroll fade (`--fade-down` / `--fade-up`), because
+  the platform's overlay scrollbar is invisible at rest and a clipped panel looked
+  like a panel that ends there.
 - **The Job view leads with the meta chips** the reference shows, and they are real:
   `shared/jobMeta.ts` reads company / location / employment type from the posting's
   own `JobPosting` JSON-LD (what every board emits for Google Jobs), with optional
@@ -146,7 +159,7 @@ only place that draws.
 
 ## Verification
 
-`npm run typecheck`, `npx vitest run` (406 tests, incl. the labels + guardrail +
-`jobMeta` + `progressDots` tests), and `npm run build && npm run test:e2e` (25
+`npm run typecheck`, `npx vitest run` (691 tests, incl. the labels + guardrail +
+`jobMeta` + `progressDots` tests), and `npm run build && npm run test:e2e` (43
 specs) all green; every surface screenshotted at desktop and 390px in both colour
 schemes against the reference.
