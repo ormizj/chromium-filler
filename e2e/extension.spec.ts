@@ -352,8 +352,16 @@ test('DialogATS: Apply confirms the CV, presses Send, and the posting lands appl
 
   // Said on screen too. The site's own banner is often below the fold or behind
   // this card, so the modal answering "did that go through?" is the point.
+  //
+  // Asserted here and not after the storage reads below: this suite runs with
+  // `closeTabOnSubmit` on and a 200ms delay, so the tab is about to go.
   await expect(page.locator('.cf-applied')).toContainText(/sent/i);
   await expect(page.locator('.cf-footer button.cf-btn', { hasText: 'Applied' })).toBeVisible();
+  // Skip retires beside Apply the moment the application lands. Pressing it would
+  // reach `recordStatus`, which overwrites rather than promotes — filing "skipped"
+  // over the application that just went through.
+  await expect(page.locator('.cf-footer button.cf-btn', { hasText: 'Skip' }))
+    .toHaveAttribute('aria-disabled', 'true');
 
   // And what the posting SAID is kept, not just that it was applied to. The tab
   // is about to close and the page is then unreadable forever.
@@ -365,6 +373,49 @@ test('DialogATS: Apply confirms the CV, presses Send, and the posting lands appl
   expect(exported.status).toBe('applied');
   expect(exported.appliedAt).toBeTruthy();
   expect(exported.description.map((b) => b.text).join(' ')).toContain('Infrastructure Engineer');
+
+  await page.close();
+});
+
+/**
+ * The gap this closes: the `applied` record was write-only from the page's point
+ * of view. Nothing in the content script read it back, so re-opening a posting
+ * you had already applied to handed you a live coral Apply — and pressing it
+ * pressed the site's own Send button a second time.
+ *
+ * A fresh page-load, so `Controller.applied` is false and the only thing that can
+ * possibly retire these two controls is the database.
+ */
+test('DialogATS: re-opening an applied posting retires both decisions', async () => {
+  const url = urlFor('cv-confirm');
+  // Ordered after the apply spec above, which is what puts this URL on record.
+  await waitForJobUrl(url, (e) => e.status === 'applied');
+
+  const page = await context.newPage();
+  await page.goto(url);
+  await expect(page.locator('.cf-card')).toBeVisible({ timeout: 20_000 });
+
+  // The card is a receipt, on a page where nothing has happened.
+  await expect(page.locator('.cf-applied')).toContainText(/already applied/i);
+  await expect(page.locator('.cf-footer button.cf-btn', { hasText: 'Apply' })).toHaveCount(0);
+  const done = page.locator('.cf-footer button.cf-btn', { hasText: 'Applied' });
+  await expect(done).toBeVisible();
+  await expect(done).toHaveAttribute('aria-disabled', 'true');
+
+  const skip = page.locator('.cf-footer button.cf-btn', { hasText: 'Skip' });
+  await expect(skip).toHaveAttribute('aria-disabled', 'true');
+
+  // `force: true` because Playwright's actionability check honours `aria-disabled`
+  // — and pressing them is exactly what has to stay harmless. The press answers
+  // with the note instead of the action.
+  await done.click({ force: true });
+  await skip.click({ force: true });
+  await expect(page.locator('.cf-flow .cf-help')).toContainText(/second application|already applied/i);
+
+  // The site's own form was never submitted again, and the record still stands.
+  await expect(page.locator('#dialog-success')).toBeHidden();
+  const entry = await waitForJobUrl(url, (e) => e.status === 'applied');
+  expect(entry.status).toBe('applied');
   await page.close();
 });
 
@@ -606,6 +657,43 @@ test('MixedBoard: external posting saves on the board, hands off, and links both
   expect(rows[0].description.length).toBeGreaterThan(0);
 
   await dest.close();
+  await board.close();
+});
+
+/**
+ * The other half of the re-apply guard, and the one with a side effect: following
+ * is automatic, so without a check on the stored status, re-opening an applied
+ * board posting would open the employer's form all over again — and under the
+ * default `newTabCloseSource` it would close the posting the user just opened.
+ *
+ * Runs straight after the spec above, which is what leaves this URL applied.
+ */
+test('MixedBoard: an applied two-step posting is not handed off a second time', async () => {
+  test.setTimeout(60_000);
+  await patchSettings({ redirectTarget: 'newTab' });
+
+  const boardUrl = urlFor('mixed-external');
+  await waitForJobUrl(boardUrl, (e) => e.status === 'applied');
+
+  const before = context.pages().length;
+  const board = await context.newPage();
+  await board.goto(boardUrl);
+  await expect(board.locator('.cf-card')).toBeVisible({ timeout: 20_000 });
+
+  // Still on the board, with the receipt rather than the handoff notice.
+  expect(board.url()).toBe(boardUrl);
+  await expect(board.locator('.cf-applied')).toContainText(/already applied/i);
+  await expect(board.locator('.cf-footer button.cf-btn', { hasText: 'Applied' })).toBeVisible();
+  // "Open application" is still reachable, just no longer the thing being done
+  // for you — it moves into the overflow.
+  await expect(board.locator('.cf-footer-actions > button.cf-btn', { hasText: 'Open application' }))
+    .toHaveCount(0);
+
+  // Nothing was opened. The handoff would have produced a page by now — the spec
+  // above sees one within 30s, and the board's own prep steps have already run.
+  await board.waitForTimeout(2_000);
+  expect(context.pages().length).toBe(before + 1);
+
   await board.close();
 });
 
@@ -1656,6 +1744,40 @@ test('Modal: the two view segments are the same width, at one tap size', async (
       const box = (await page.locator(sel).first().boundingBox())!;
       expect(box.height, `${sel} is one tap tall`).toBeGreaterThanOrEqual(44);
     }
+  } finally {
+    await page.close();
+  }
+});
+
+test("Setup: the verdict's dot lines up with the rows it argues about", async () => {
+  // The `kind` step is a verdict banner and, directly beneath it, the rows that
+  // verdict is drawn from — the same 14px dot against the same two-line block.
+  // `.cf-flow-head` centres the dot on the *title's* row, which is right in the
+  // modal (the `?` on that line changes height with the pointer) and wrong here,
+  // where there is no `?` and the mark sat ~10px above every other one in the
+  // section. Only a browser can see it: jsdom lays nothing out.
+  const page = await context.newPage();
+  try {
+    await page.setViewportSize({ width: 390, height: 780 });
+    await page.goto(urlFor('quick-plain'));
+    await expect(page.locator('.cf-card[data-sheet="review"]')).toBeVisible({ timeout: 20_000 });
+
+    await openSetupPanel(page);
+    const setup = page.locator('.cf-card[data-sheet="setup"]');
+    await expect(setup).toBeVisible({ timeout: 20_000 });
+
+    // "Application type" — step 3 of 6, the one step that states a conclusion.
+    await setup.locator('.cf-rail-node').nth(2).click();
+    await expect(setup.locator('.cf-step-count')).toHaveText('Step 3 of 6');
+
+    const banner = setup.locator('.cf-verdict');
+    await expect(banner).toBeVisible();
+    const head = (await banner.locator('.cf-flow-head').boundingBox())!;
+    const dot = (await banner.locator('.cf-dot').boundingBox())!;
+    expect(dot.y + dot.height / 2, 'the dot centres on the whole banner').toBeCloseTo(
+      head.y + head.height / 2,
+      0,
+    );
   } finally {
     await page.close();
   }

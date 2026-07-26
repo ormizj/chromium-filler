@@ -331,6 +331,23 @@
   overflow-wrap: anywhere;
 }
 
+/*
+ * The dot spans both rows here, where in the modal it sits on the title's.
+ * That grid exists because the modal's title line also carries the `?`, whose
+ * height changes with the pointer — so the dot has to track the title's own row
+ * or it drifts. This banner has no `?` (the step's lives on the meta line
+ * above), and it is read against the `.cf-row`s directly beneath it, each of
+ * which centres its dot on a two-line text block. Centred on the title alone it
+ * sat ~10px high of every other mark in the section.
+ *
+ * `span 2` rather than `1 / -1`: the grid declares no explicit rows, so `-1`
+ * resolves against the explicit grid and would collapse back to one row.
+ */
+.cf-verdict .cf-flow-head > .cf-dot {
+  grid-row: 1 / span 2;
+  align-self: center;
+}
+
 .cf-ms {
   width: 68px;
   border: 1px solid var(--border);

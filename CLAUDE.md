@@ -36,7 +36,8 @@ footer overflow menu.
 
 `&state=…` picks which **flow** the surface is showing — modal: `long`, `redirect`,
 `redirect-followed`, `app-link`, `landed`, `empty`, `failed-fill`, `apply-unset`,
-`apply-unverified`, `applied`, `flush`, `fullscreen`; setup: `external`, `help`,
+`apply-unverified`, `applied`, `already-applied`, `already-applied-redirect`,
+`flush`, `fullscreen`; setup: `external`, `help`,
 `cv-steps`, `submit-unset`, `success-unset`; options *and popup*: `fresh`, which
 seeds an empty store — on options so the getting-started checklist is reachable
 at all (the normal seed ticks four of its five steps off), on the popup because
@@ -97,9 +98,9 @@ actions from the user.
 ### The flow banner
 `src/shared/flowState.ts` (pure) is the one place that decides **where a posting
 is in the flow**, and `labels.FLOW_TEXT` is where each state is worded.
-`flowBanner()` returns `{ key, tone, title, detail, help? }` for one of eight
-states: `applied` · `appLink` · `external` / `externalOpened` · `noButton` /
-`noConfirmation` · `empty` · `ready`.
+`flowBanner()` returns `{ key, tone, title, detail, help? }` for one of nine
+states: `applied` / `alreadyApplied` · `appLink` · `external` / `externalOpened` ·
+`noButton` / `noConfirmation` · `empty` · `ready`.
 
 It exists because the modal used to say none of this. Three unrelated renderings
 — an applied banner, a redirect notice, and an explanation of the greyed-out
@@ -107,9 +108,18 @@ Apply that only appeared *after* the user pressed it — between them still left
 the commonest case silent: a posting filled and waiting showed a job advert and a
 coral button with nothing connecting them.
 
-Four rules the branch order encodes, each with a test:
+Five rules the branch order encodes, each with a test:
 - **`applied` outranks everything**, including a two-step posting and a blocked
   Apply — neither can still be the answer once something went through.
+- **`alreadyApplied` sits directly below it and above all the rest.** The two are
+  kept apart because only one is a receipt for something that just happened:
+  `applied` means a confirmation appeared during *this* page-load, and its wording
+  ("Acme confirmed it"), its `role="status"` live region and "safe to close this
+  tab" all say so. `alreadyApplied` is the database read back — see "Applied is a
+  lock" below — so it says what the record says, announces nothing, and points at
+  Options → Queue. What they share is `isApplied()` in `modal.ts`: the `Sent`
+  chip, the demoted title, `.cf-applied`, the legend line and the pill are about a
+  posting being *finished*, not about the instant it finished.
 - **`appLink` outranks the redirect states.** A *configured* two-step site whose
   apply link turns out to be an app link is both at once, and "Opening the
   employer's application" would be a lie — nothing was opened. `main.ts` enforces
@@ -997,7 +1007,36 @@ needs no `downloads` permission, and an MV3 service worker has no
   in the review modal — no timer, no auto-run path, and no "it looked complete"
   heuristic may ever call it. Note this is a rule about who decides, not about
   capability: Apply presses Send with no guard once pressed, even with required
-  fields empty.
+  fields empty — *unless* the posting is already applied, which is the one thing
+  it does refuse (below).
+- **Applied is a lock, and it is read from storage.** `Controller.applied` only
+  ever meant "a confirmation appeared during this page-load", so the `applied`
+  record was write-only from the page's point of view and re-opening a posting
+  handed the user a live Apply that would press Send a second time.
+  `readAppliedRecord` fixes that from `statusForUrl(state.jobUrls, location.href)`
+  — no new message and no new key, because `getState()` was already fetching
+  `jobUrls` on every run and discarding them. It is re-read **per run**, so a
+  status corrected in Options → Queue reaches the card that Re-run rebuilds. Three
+  guards enforce it, and the UI is deliberately not one of them: `apply()` and
+  `skipPosting()` return early, and `shouldFollow()` declines — otherwise a
+  re-visited two-step posting re-opens the employer's form, and under the default
+  `newTabCloseSource` closes the posting the user just opened. No `sourceUrl` walk
+  is needed: `applyStatusChain` already marks both ends of a chain.
+- **Skip must never run on an applied posting**, and not for tidiness: it ends in
+  `recordStatus` → `applyStatus`, which is a blunt overwrite rather than a
+  `promote()`, so it files `skipped` over `applied` (rank 4 → 3) and appends that
+  to the history — which the sync merge derives status from, carrying the loss to
+  the other device. So the modal retires Skip beside Apply on **both** applied
+  states, using the same `aria-disabled` + swapped-`onclick` convention as the
+  blocked Apply (never the `disabled` property — it swallows the press that asks
+  why the control is grey).
+- **The footer's applied branch comes before its redirect branch.** It has to:
+  `shouldFollow` now declines an applied handoff, so a two-step posting opened
+  again arrives with `redirect` *and* `alreadyApplied` set, and the other order put
+  a live "Open application" primary on a job already applied for. `Open
+  application` moves into the `⋯` there, and only when there is a redirect to
+  open. This is also what makes the footer agree with `flowState.classify`, which
+  had always ordered the two this way.
 - **The submit heuristic must fail closed.** `findSubmitControl` returns `none`
   rather than a best guess, and its veto list beats any positive match. Never
   "improve" it by falling back to the highest-scoring button.

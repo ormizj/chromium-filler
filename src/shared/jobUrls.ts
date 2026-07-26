@@ -146,7 +146,18 @@ export function recordStatus(
   return applyStatus(ensureUrl(list, url, now), url, status, now);
 }
 
-function statusOf(list: JobUrlEntry[], url: string): JobLogStatus | undefined {
+/**
+ * What the database currently says about one URL, or `undefined` if it has never
+ * seen it.
+ *
+ * Exported because the *page* now needs to ask this, not just the merge rules:
+ * `content/main.ts` reads it to find out whether the posting in front of the user
+ * was already applied on an earlier visit, which is the one thing that retires
+ * Apply and Skip. Note a tombstone answers `'deleted'` rather than `undefined` —
+ * callers compare against the status they care about, so a deleted entry falls
+ * out on its own without a special case here.
+ */
+export function statusForUrl(list: JobUrlEntry[], url: string): JobLogStatus | undefined {
   return list.find((e) => e.url === url)?.status;
 }
 
@@ -164,7 +175,7 @@ function promote(
   status: JobUrlStatus,
   now: number,
 ): JobUrlEntry[] {
-  const current = statusOf(list, url);
+  const current = statusForUrl(list, url);
   if (current === undefined) return applyStatus(list, url, status, now);
   if (!isKnownStatus(current)) return list;
   return statusRank(current) >= statusRank(status) ? list : applyStatus(list, url, status, now);

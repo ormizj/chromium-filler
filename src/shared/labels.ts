@@ -52,6 +52,7 @@ export const STATUS_TEXT: Record<MatchConfidence, StatusText> = {
  */
 export type FlowKey =
   | 'applied'
+  | 'alreadyApplied'
   | 'appLink'
   | 'external'
   | 'externalOpened'
@@ -69,6 +70,18 @@ export const FLOW_TEXT: Record<FlowKey, FlowText> = {
   // Worded as what the *site* said, not as what the extension did: the claim is
   // only as good as the confirmation element that produced it.
   applied: { title: 'Application sent', detail: 'confirmed it' },
+  // The same posting, opened again later. It cannot borrow the line above:
+  // nothing was confirmed on *this* page-load, and claiming otherwise would put a
+  // live announcement on a page where nothing happened. What it does share is the
+  // consequence — Apply and Skip are both retired — so that is what it leads with.
+  // `{when}` is the one interpolation slot in this file that is not an append:
+  // the date belongs to "recorded as applied", and tacked on the end it read as
+  // "…are retired here on 5/12/2026". `flowBanner` fills it, or removes it on an
+  // entry with no `appliedAt`.
+  alreadyApplied: {
+    title: 'Already applied',
+    detail: 'is recorded as applied{when}, so Apply and Skip are retired here.',
+  },
   // Names the control that was left alone, and what to do instead. Without this
   // the page just fills in place and the untouched Apply button reads as a bug.
   appLink: {

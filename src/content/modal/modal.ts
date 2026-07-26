@@ -86,6 +86,17 @@ export interface ModalData extends SheetData {
   applyState: ApplyState;
   /** The site's own confirmation appeared — this posting really was sent. */
   applied?: boolean;
+  /**
+   * The job database already had this URL down as `applied` when the page opened.
+   *
+   * Separate from `applied` because only one of them is a receipt for something
+   * that just happened: the wording and the live region belong to that one. What
+   * they share is `isApplied()` below — the renderings that are true of a finished
+   * posting however it got that way.
+   */
+  alreadyApplied?: boolean;
+  /** When the record says the application went in, if the entry carries it. */
+  appliedAt?: number;
   redirect?: RedirectNotice;
   /**
    * This page's apply control hands off to a phone app and was left alone. Never
@@ -107,6 +118,18 @@ export interface ModalData extends SheetData {
  * tints from primitives.css, so this is the one place the two vocabularies meet.
  */
 const TAG_TONE: Record<MatchConfidence, string> = { high: 'ok', low: 'warn', none: 'err' };
+
+/**
+ * Is this posting finished, however it got that way?
+ *
+ * The card becomes a receipt on both — the `Sent` chip, the demoted title, the
+ * legend, the pill, and the footer's two retired controls are all about a posting
+ * with no decisions left, not about the moment a confirmation arrived. Only the
+ * sentences distinguish the two, so only they read the flags directly.
+ */
+function isApplied(data: ModalData): boolean {
+  return !!data.applied || !!data.alreadyApplied;
+}
 
 export class FillerModal extends Sheet<ModalData> {
   private cb: ModalCallbacks;
@@ -132,7 +155,10 @@ export class FillerModal extends Sheet<ModalData> {
     this.data = data;
     // A note about a button that is no longer grey is just wrong text on screen:
     // picking the Send button mid-session flips this without a further click.
-    if (data.applyState === 'ready') this.applyHelp = false;
+    // But an applied posting *is* blocked while `applyState` reads `ready` — the
+    // two controls are retired for a reason that has nothing to do with whether
+    // Apply could physically run — so it must not close the note it just opened.
+    if (data.applyState === 'ready' && !isApplied(data)) this.applyHelp = false;
     this.paint();
   }
 
@@ -212,7 +238,7 @@ export class FillerModal extends Sheet<ModalData> {
     header.append(site);
     // The outcome, on the one strip of the card that is always visible — the body
     // scrolls, and on a long posting the confirmation banner scrolls away with it.
-    if (data.applied) {
+    if (isApplied(data)) {
       const chip = el('span', 'chip ok cf-sent-chip');
       chip.textContent = 'Sent';
       header.append(chip);
@@ -273,9 +299,44 @@ export class FillerModal extends Sheet<ModalData> {
 
     const actions = el('div', 'cf-footer-actions');
     // A posting you do not want is worth skipping whether or not you can apply
-    // to it here, so Skip is on both branches. The label names the consequence:
+    // to it here, so Skip is on every branch. The label names the consequence:
     // during a session skipping also pulls in the next posting.
     const skip = btn(data.session?.active ? ACTION_LABELS.skipNext : ACTION_LABELS.skip, () => this.cb.onSkip());
+
+    // Finished, by either route: nothing here is a decision any more, and an Apply
+    // that still looked live would invite a second application to the same job.
+    //
+    // Ahead of the redirect branch, and it has to be. The controller declines to
+    // follow a handoff on an applied posting, so a two-step posting opened again
+    // arrives here with `redirect` *and* `alreadyApplied` set — and this branch
+    // second would have put a live "Open application" primary on a job already
+    // applied for. `flowState.classify` orders the two the same way.
+    if (isApplied(data)) {
+      const done = btn(ACTION_LABELS.applied, () => {}, true);
+      done.setAttribute('aria-disabled', 'true');
+      done.classList.add('cf-applied-btn');
+      // Skip retires beside it, and not only for symmetry: `skipPosting` writes a
+      // status, and `recordStatus` is a blunt overwrite rather than a promote, so
+      // pressing it here would file "skipped" over "applied" and lose the record
+      // of an application that really was sent — on this device and, through the
+      // history union the sync merge derives status from, on the other one too.
+      this.retire(skip, 'Skip — this posting is already applied to, press to find out why');
+      actions.append(
+        done,
+        skip,
+        this.overflow([
+          // Only when there is somewhere to go: an applied quick-apply posting has
+          // no external application, and an item that opens nothing is worse than
+          // no item.
+          ...(data.redirect ? [btn(ACTION_LABELS.openApplication, () => this.cb.onFollow())] : []),
+          btn(ACTION_LABELS.rerun, () => this.cb.onRerun()),
+          btn(ACTION_LABELS.reset, () => this.cb.onReset()),
+          ...this.commonMenuItems(),
+        ]),
+      );
+      footer.append(actions);
+      return footer;
+    }
 
     if (data.redirect) {
       // Same shape as below — the primary action, Skip, then the overflow. "Fill
@@ -294,38 +355,11 @@ export class FillerModal extends Sheet<ModalData> {
       return footer;
     }
 
-    // Sent and confirmed: there is nothing left to press here, and an Apply that
-    // still looked live would invite a second application to the same posting.
-    if (data.applied) {
-      const done = btn(ACTION_LABELS.applied, () => {}, true);
-      done.setAttribute('aria-disabled', 'true');
-      done.classList.add('cf-applied-btn');
-      actions.append(
-        done,
-        skip,
-        this.overflow([
-          btn(ACTION_LABELS.rerun, () => this.cb.onRerun()),
-          btn(ACTION_LABELS.reset, () => this.cb.onReset()),
-          ...this.commonMenuItems(),
-        ]),
-      );
-      footer.append(actions);
-      return footer;
-    }
-
     const apply = btn(ACTION_LABELS.apply, () => this.cb.onApply(), true);
     if (data.applyState !== 'ready') {
-      // `aria-disabled`, not `disabled`: a disabled button swallows pointer
-      // events, so the one thing the user does — press it — could not answer
-      // them. It still takes the tap, and the tap explains why it is grey.
-      apply.setAttribute('aria-disabled', 'true');
-      // Say so in the name as well. "Unavailable" is true of the action, but a
-      // screen-reader user would otherwise never learn that pressing it is
-      // still worth doing. The visible label stays a prefix of the spoken one.
-      apply.setAttribute('aria-label', data.applyState === 'noConfirmation'
+      this.retire(apply, data.applyState === 'noConfirmation'
         ? 'Apply — this site has no confirmation configured, press to find out why'
         : 'Apply — no Send button found on this page, press to find out why');
-      apply.onclick = () => this.setApplyHelp(!this.applyHelp);
     }
 
     actions.append(
@@ -361,6 +395,8 @@ export class FillerModal extends Sheet<ModalData> {
     const flow = flowBanner({
       applyState: data.applyState,
       applied: data.applied,
+      alreadyApplied: data.alreadyApplied,
+      appliedAt: data.appliedAt,
       redirect: data.redirect,
       appLink: data.appLink,
       filled: data.matches.filter((m) => m.filled).length,
@@ -368,10 +404,15 @@ export class FillerModal extends Sheet<ModalData> {
       siteName: data.siteName,
     });
 
-    const box = el('div', `cf-flow ${flow.tone}${flow.key === 'applied' ? ' cf-applied' : ''}`);
+    // `.cf-applied` is what makes the card a receipt, and both applied states earn
+    // it — the loudness is about a posting being finished, not about the instant a
+    // confirmation landed.
+    const done = flow.key === 'applied' || flow.key === 'alreadyApplied';
+    const box = el('div', `cf-flow ${flow.tone}${done ? ' cf-applied' : ''}`);
     // A live region only where something genuinely arrived without the user
     // having moved focus. On the resting states it would announce the same
-    // sentence after every Confirm.
+    // sentence after every Confirm — and on `alreadyApplied` there is nothing to
+    // announce at all: the record was already there when the page opened.
     if (flow.key === 'applied') box.setAttribute('role', 'status');
 
     const head = el('div', 'cf-flow-head');
@@ -429,7 +470,7 @@ export class FillerModal extends Sheet<ModalData> {
       // Once the application is in, the posting is no longer the headline — it is
       // the receipt's subject line. `.cf-title` at 24px next to a 13px "sent"
       // banner said the opposite, which is why the confirmation was hard to find.
-      const t = el('h2', `cf-title${data.applied ? ' cf-title-sub' : ''}`);
+      const t = el('h2', `cf-title${isApplied(data) ? ' cf-title-sub' : ''}`);
       t.textContent = data.jobTitle;
       body.append(t);
     }
@@ -452,9 +493,16 @@ export class FillerModal extends Sheet<ModalData> {
     // The one thing left to tell someone whose application is in: that there is
     // nothing left to do here. Without it the card just stops, and a user who had
     // been told to review before applying kept looking for the next step.
-    if (data.applied) {
+    //
+    // Two sentences, because the two states are answering different questions.
+    // Fresh: "did that go through?" — yes, and you can close this. Revisited: "why
+    // can I not do anything?" — because it is already done, and here is where to
+    // change that if the record is wrong.
+    if (isApplied(data)) {
       const done = el('p', 'cf-empty');
-      done.textContent = 'Recorded as applied — safe to close this tab.';
+      done.textContent = data.applied
+        ? 'Recorded as applied — safe to close this tab.'
+        : 'Nothing to do here. Change the status in Options → Queue if this is wrong.';
       body.append(done);
     }
 
@@ -541,9 +589,17 @@ export class FillerModal extends Sheet<ModalData> {
     // footer next to Apply, and repeating it here — forty pixels above that same
     // sentence — was the report saying the same thing twice. What survives is the
     // part the footer cannot say: that this report is a record, not a plan.
-    if (data.applied) {
+    //
+    // The two states cannot share the sentence. After a fresh send this report
+    // really is the one that went in. On a revisit it is a *new* fill of the same
+    // form, which happens to match because the profile has not changed — claiming
+    // it as the submitted application would be inventing a record the extension
+    // does not keep.
+    if (isApplied(data)) {
       const sent = el('small', 'cf-legend-send');
-      sent.textContent = 'Already sent — this report is what went in.';
+      sent.textContent = data.applied
+        ? 'Already sent — this report is what went in.'
+        : 'Already applied — this is a fresh fill, not the application that was sent.';
       body.append(sent);
     }
 
@@ -555,12 +611,13 @@ export class FillerModal extends Sheet<ModalData> {
     const filled = data.matches.filter((m) => m.filled).length;
     // Collapsed, the dot is the only status left on screen, so it has to carry
     // the same meaning as the rows it is hiding.
-    const dot = el('span', `cf-dot ${data.applied ? 'ok' : pillStatus(data, filled)}`);
+    const dot = el('span', `cf-dot ${isApplied(data) ? 'ok' : pillStatus(data, filled)}`);
     pill.setAttribute('aria-label', 'Reopen the fill report');
     const label = el('span');
     // Collapsed, this is the only thing left on screen — so once the posting is
     // sent, that is what it has to say. A fill count reads as unfinished work.
     label.textContent = data.applied ? 'Application sent'
+      : data.alreadyApplied ? 'Already applied'
       : data.redirect ? 'External application'
       : `${filled}/${data.matches.length} filled`;
     pill.append(dot, label);
@@ -613,6 +670,23 @@ export class FillerModal extends Sheet<ModalData> {
       btn(ACTION_LABELS.siteSetup, () => this.cb.onOpenSetup()),
       btn(ACTION_LABELS.openOptions, () => this.cb.onOpenOptions()),
     ];
+  }
+
+  /**
+   * Take a footer button out of service without taking away the press.
+   *
+   * `aria-disabled`, never the `disabled` property: a disabled button swallows
+   * pointer events, so the one thing the user does about a grey control — press it
+   * — could not answer them. It still takes the tap, and the tap opens the note.
+   *
+   * The name is spoken as well, because "unavailable" is true of the action but
+   * would leave a screen-reader user with no idea that pressing it is still worth
+   * doing. The visible label stays a prefix of `name`.
+   */
+  private retire(button: HTMLButtonElement, name: string): void {
+    button.setAttribute('aria-disabled', 'true');
+    button.setAttribute('aria-label', name);
+    button.onclick = () => this.setApplyHelp(!this.applyHelp);
   }
 
   /** A "more" button whose menu holds the secondary footer actions. */

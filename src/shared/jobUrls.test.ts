@@ -1,9 +1,36 @@
 import { describe, it, expect } from 'vitest';
 import {
   ALL_JOB_STATUSES, addUrls, applyStatus, applyStatusChain, deleteUrl, jobUrlStats, linkRedirect,
-  normalizeEntry, pruneTombstones, recordStatus, removeUrl, TOMBSTONE_TTL_MS, visibleUrls,
+  normalizeEntry, pruneTombstones, recordStatus, removeUrl, statusForUrl, TOMBSTONE_TTL_MS,
+  visibleUrls,
 } from './jobUrls';
 import type { JobUrlEntry } from './types';
+
+describe('statusForUrl — what the database says about the page in front of you', () => {
+  const list = applyStatus(addUrls([], ['a://1', 'a://2'], 1000).list, 'a://1', 'applied', 2000);
+
+  it('reports a recorded status', () => {
+    expect(statusForUrl(list, 'a://1')).toBe('applied');
+    expect(statusForUrl(list, 'a://2')).toBe('new');
+  });
+
+  /**
+   * The commonest answer by far: most pages the extension runs on were browsed
+   * rather than imported, and have never been near the database.
+   */
+  it('is undefined for a url it has never seen', () => {
+    expect(statusForUrl(list, 'a://nope')).toBeUndefined();
+  });
+
+  /**
+   * A tombstone answers `'deleted'`, not `undefined`. Callers compare against the
+   * one status they care about, so a deleted posting falls out of every such test
+   * without this needing to know about tombstones at all.
+   */
+  it('reports a tombstone as deleted rather than hiding it', () => {
+    expect(statusForUrl(deleteUrl(list, 'a://1', 3000), 'a://1')).toBe('deleted');
+  });
+});
 
 describe('ALL_JOB_STATUSES', () => {
   /**

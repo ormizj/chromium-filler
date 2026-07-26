@@ -37,6 +37,17 @@ export interface FlowInput {
   applyState: ApplyState;
   /** The site's own confirmation appeared — this posting really was sent. */
   applied?: boolean;
+  /**
+   * The job database already had this URL down as `applied` before this visit.
+   *
+   * Kept apart from `applied` rather than folded into it because the two are true
+   * of different moments and so cannot share a sentence: one is a receipt for
+   * something that just happened, the other is a record being read back. They do
+   * share their consequence — neither posting has a decision left to take.
+   */
+  alreadyApplied?: boolean;
+  /** When that record says the application went in, if the entry carries it. */
+  appliedAt?: number;
   redirect?: { host?: string; followed: boolean };
   /**
    * This page's apply control hands off to a phone app with no web form to reach
@@ -60,6 +71,7 @@ export interface FlowBanner {
 
 const TONES: Record<FlowKey, FlowTone> = {
   applied: 'ok',
+  alreadyApplied: 'ok',
   // `warn`, not `accent`: unlike a two-step posting, nothing is being followed —
   // there is a control on the page the extension cannot use.
   appLink: 'warn',
@@ -73,6 +85,11 @@ const TONES: Record<FlowKey, FlowTone> = {
 
 /** The longer explanation each blocked state discloses. */
 const HELP: Partial<Record<FlowKey, ConceptKey>> = {
+  // Both applied states, because both retire Apply *and* Skip. A control that has
+  // gone grey needs somewhere to say why, and until now the confirmed state had
+  // nothing behind it because nothing there was blocked.
+  applied: 'alreadyApplied',
+  alreadyApplied: 'alreadyApplied',
   noButton: 'apply',
   noConfirmation: 'applyUnverified',
   external: 'twoStep',
@@ -100,6 +117,12 @@ export function flowBanner(input: FlowInput): FlowBanner {
 
 function classify(input: FlowInput): FlowKey {
   if (input.applied) return 'applied';
+  // Directly below it, and above everything else for the same reason `applied` is:
+  // once a posting is on record as done, a pending handoff or a blocked Apply
+  // cannot still be the useful answer. Below `applied` because a confirmation that
+  // arrived just now is the more specific truth about the page on screen — and it
+  // is the one that earns the live announcement.
+  if (input.alreadyApplied) return 'alreadyApplied';
   // Above the redirect branch, because a *configured* apply control can be both:
   // the site is marked two-step and its link turns out to open an app. "Opening
   // the employer's application" would then be a plain lie — nothing was opened —
@@ -130,6 +153,15 @@ function title(key: FlowKey, base: string, input: FlowInput): string {
 
 function detail(key: FlowKey, base: string, input: FlowInput): string {
   if (key === 'applied') return `${input.siteName ?? 'The site'} ${base}`;
+  if (key === 'alreadyApplied') {
+    // The date only when the entry actually carries one — `appliedAt` is stamped
+    // by `applyStatus`, so a posting marked applied by hand before that existed
+    // has none, and a sentence with "undefined" in it is worse than no date. The
+    // slot is mid-sentence rather than appended, because the date is a fact about
+    // the record and not about the buttons the clause ends on.
+    const when = input.appliedAt ? ` on ${new Date(input.appliedAt).toLocaleDateString()}` : '';
+    return `${input.siteName ?? 'This posting'} ${base.replace('{when}', when)}`;
+  }
   if (key === 'ready') return `${input.filled} of ${input.total} fields filled — ${base}`;
   return base;
 }

@@ -7,8 +7,10 @@
  */
 
 import type {
-  FieldKey, FieldMatch, ModalLayout, PrepAction, PrepStep, Profile, Settings, SiteConfig,
+  FieldKey, FieldMatch, JobUrlEntry, ModalLayout, PrepAction, PrepStep, Profile, Settings,
+  SiteConfig,
 } from '../shared/types';
+import { statusForUrl } from '../shared/jobUrls';
 import { findMatchingConfig } from '../shared/matcher';
 import { generateSelector } from '../shared/selector';
 import { isExternalUrl } from '../shared/redirect';
@@ -75,6 +77,20 @@ class Controller {
   private submitArmed = false;
   /** The site's own confirmation appeared: this posting really was sent. */
   private applied = false;
+  /**
+   * The job database already had this URL down as `applied` when the page opened.
+   *
+   * The record was write-only from the page's point of view until this existed:
+   * `applied` above only ever means "a confirmation appeared during *this*
+   * page-load", so re-opening a posting handed the user a live Apply and the
+   * extension would press the site's Send button a second time.
+   *
+   * Read straight from `getState()`, which was already fetching `jobUrls` on every
+   * run and throwing them away — no new message and no new storage key.
+   */
+  private alreadyApplied = false;
+  /** When that record says it went in, for the modal's banner. */
+  private appliedAt?: number;
   private successObserver?: MutationObserver;
   /** Latest quick-apply vs. external-redirect verdict for this page. */
   private detection?: RedirectDetection;
@@ -105,6 +121,7 @@ class Controller {
     this.profile = state.profile;
     this.settings = state.settings;
     this.config = findMatchingConfig(location.href, state.siteConfigs);
+    this.readAppliedRecord(state.jobUrls);
 
     chrome.runtime.onMessage.addListener((msg: Message, _sender, sendResponse) => {
       this.handleMessage(msg, sendResponse);
@@ -174,6 +191,20 @@ class Controller {
     });
   }
 
+  /**
+   * Ask the database what it already knows about the page in front of the user.
+   *
+   * Only this exact URL. `applyStatusChain` marks both ends of a two-step posting
+   * when one is applied, so the board posting and the employer's form each carry
+   * their own `applied` entry and there is no `sourceUrl` chain left to walk.
+   */
+  private readAppliedRecord(urls: JobUrlEntry[]): void {
+    this.alreadyApplied = statusForUrl(urls, location.href) === 'applied';
+    this.appliedAt = this.alreadyApplied
+      ? urls.find((e) => e.url === location.href)?.appliedAt
+      : undefined;
+  }
+
   private status(): StatusResponse {
     return {
       siteMatched: !!this.config,
@@ -238,6 +269,10 @@ class Controller {
     const state = await getState();
     this.profile = state.profile;
     this.config = findMatchingConfig(location.href, state.siteConfigs) ?? config;
+    // Re-read per run, not once at startup: a status corrected in Options → Queue
+    // has to reach the card that Re-run rebuilds, and this is the only moment the
+    // page looks at the database.
+    this.readAppliedRecord(state.jobUrls);
 
     const [cv, cover] = await Promise.all([getDoc('resume'), getDoc('coverLetter')]);
     this.cvFile = cv ? cvFileToFile(cv) : null;
@@ -287,6 +322,10 @@ class Controller {
 
   private shouldFollow(det: RedirectDetection): boolean {
     if (det.kind !== 'redirect' || this.fillAnyway) return false;
+    // Already applied for: following would re-open the employer's form for a job
+    // that is finished, and on `redirectTarget: newTabCloseSource` it would close
+    // the posting the user just opened to look at.
+    if (this.alreadyApplied) return false;
     // An apply control that hands off to a phone app is not followable: with no
     // href the background answers `{ click: true }`, and clicking it is precisely
     // the app launch `settings.keepInBrowser` exists to prevent. Falling through
@@ -450,8 +489,18 @@ class Controller {
     }
   }
 
-  /** Mark this posting skipped; the background closes the tab and opens the next. */
+  /**
+   * Mark this posting skipped; the background closes the tab and opens the next.
+   *
+   * Refuses on a posting already applied to, and the reason is not tidiness: this
+   * ends in `recordStatus`, which is a blunt overwrite rather than a promote, so a
+   * skip here would file "skipped" over "applied" and lose the record of an
+   * application that really was sent — and, because the sync merge derives status
+   * from the newest history event, would carry that loss to the other device. The
+   * modal retires the button; this is what makes it true.
+   */
   private skipPosting(): void {
+    if (this.applied || this.alreadyApplied) return;
     chrome.runtime.sendMessage({ type: MSG.SESSION_SKIP, url: location.href })
       .catch((e) => console.warn(LOG, 'skip failed', e));
   }
@@ -508,6 +557,8 @@ class Controller {
       matches: this.matches,
       applyState: this.applyState(isRedirect),
       applied: this.applied,
+      alreadyApplied: this.alreadyApplied,
+      appliedAt: this.appliedAt,
       redirect: isRedirect
         ? { host: det!.href ? hostOf(det!.href) : undefined, reason: det!.reason, followed: this.followed }
         : undefined,
@@ -1051,6 +1102,14 @@ class Controller {
    * the rest of the form.
    */
   private async apply(): Promise<void> {
+    // Never twice. The modal retires the button, but the UI must not be the only
+    // thing between a finished posting and a second application — this method is
+    // the sole caller of `target.click()`, so the guard belongs where the press
+    // happens rather than only where it is offered.
+    if (this.applied || this.alreadyApplied) {
+      console.warn(LOG, 'apply: this posting is already recorded as applied');
+      return;
+    }
     if (this.config?.submitCv?.length) {
       try {
         await runPrepSteps(this.config.submitCv);

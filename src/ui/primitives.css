@@ -87,7 +87,7 @@ button.cf-btn:not(.primary):hover {
  * solid-accent dark-mode fallback) lives entirely in `--btn-primary`, so no
  * surface opts in or restyles it. Two states are primary buttons but must NOT
  * read as this live CTA, and each overrides it downstream: a blocked Apply
- * (`aria-disabled`, faded by the `opacity` rule below) and the green "Applied ✓"
+ * (`aria-disabled`, de-filled by the rule below) and the green "Applied ✓"
  * button (`.cf-applied-btn` in modal.css, its own `--ok` fill — it reports
  * success, not a pending action).
  */
@@ -150,20 +150,29 @@ button.cf-btn:disabled {
 
 /* Muted but still pressable. `disabled` swallows pointer events, so a control
    that cannot act could not answer the one question it provokes — "why is this
-   grey?". `aria-disabled` keeps the press, and with it the full tap target. */
+   grey?". `aria-disabled` keeps the press, and with it the full tap target.
+
+   Drops the emphasis rather than fading the control, exactly as `:disabled` above
+   does, and for the same reason: at 45% opacity the border goes too, and a button
+   with no outline reads as a gap where a button should be. That was invisible
+   while the only `aria-disabled` controls were primaries — both the blocked Apply
+   and the green "Applied ✓" override this block wholesale — and it stopped being
+   invisible when the modal started retiring Skip, a secondary, beside them. */
 .btn[aria-disabled='true'],
 button.cf-btn[aria-disabled='true'] {
-  opacity: 0.45;
+  background: var(--surface);
+  border-color: var(--border);
+  color: var(--muted-2);
   cursor: help;
   filter: none;
 }
 /* Cancels the hover above for a button that cannot act — and, like it, leaves
    the primary alone: repainting a blocked Apply paper put its white label on
    paper too, so the button the user hovers to ask "why is this grey?" is the
-   one that went blank. Faded by the `opacity` above, it needs nothing more. */
+   one that went blank. */
 .btn[aria-disabled='true']:not(.btn-primary):hover,
 button.cf-btn[aria-disabled='true']:not(.primary):hover {
-  background: var(--bg);
+  background: var(--surface);
   border-color: var(--border);
 }
 
@@ -371,6 +380,10 @@ button.cf-btn.primary[aria-disabled='true'] {
  * gets: the mark ended up ~4px high with a mouse and ~11px high on touch, on
  * exactly the blocked states whose explanation is the reason the `?` is there.
  * No single number can be right for all three heights, so there is no number.
+ *
+ * The setup panel's verdict banner overrides this to span both rows
+ * (`setupPanel.css`): it carries no `?`, and it is read against the rows under
+ * it rather than on its own. Do not undo one from the other.
  */
 .cf-flow-head {
   display: grid;

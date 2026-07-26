@@ -646,6 +646,149 @@ describe('FillerModal — it says when the application went through', () => {
     expect(shadow.querySelector('.cf-applied')).toBeNull();
     expect(footerBtn(shadow, 'Apply')).toBeDefined();
   });
+
+  /**
+   * Skip writes a status, and `recordStatus` is a blunt overwrite rather than a
+   * promote — so a skip here files "skipped" over "applied" and loses the record
+   * of an application that really was sent. `main.ts` refuses the message as well;
+   * this is the half that stops the user asking for it.
+   */
+  it('retires Skip beside it, rather than leaving a way to unfile the application', () => {
+    const onSkip = vi.fn();
+    const shadow = render(sent(), callbacks({ onSkip }));
+    const skip = footerBtn(shadow, 'Skip');
+    expect(skip.getAttribute('aria-disabled')).toBe('true');
+    // Never `disabled`: it has to keep taking the press that asks why it is grey.
+    expect(skip.hasAttribute('disabled')).toBe(false);
+    skip.click();
+    expect(onSkip).not.toHaveBeenCalled();
+  });
+
+  it('answers the press with the note instead of the action', () => {
+    const shadow = render(sent());
+    expect(shadow.querySelector('.cf-flow .cf-help')).toBeNull();
+    footerBtn(shadow, 'Skip').click();
+    expect(shadow.querySelector('.cf-flow .cf-help')!.textContent).toMatch(/already applied|second application/i);
+  });
+
+  /**
+   * `applyState` is `ready` on an applied posting — the page still has a Send
+   * button, it is just not ours to press any more — so the "the button went live,
+   * drop the note" rule would have closed this the moment anything re-rendered.
+   */
+  it('keeps that note open across a re-render', () => {
+    const shadow = render(sent());
+    footerBtn(shadow, 'Skip').click();
+    modal!.render(sent());
+    expect(shadow.querySelector('.cf-flow .cf-help')).not.toBeNull();
+  });
+});
+
+/**
+ * The same posting, opened again later. Nothing happens on the page — the record
+ * is simply read back — but the two decisions are as spent as they are on a fresh
+ * confirmation, so the card is the same receipt with different sentences.
+ */
+describe('FillerModal — a posting applied to on an earlier visit', () => {
+  const seen = (over: Partial<ModalData> = {}) =>
+    data([match()], { jobTitle: 'A job', alreadyApplied: true, ...over });
+
+  /** The Job view, which is the default — `render` above opens the report. */
+  const renderJob = (d: ModalData, cb = callbacks()): ShadowRoot => {
+    modal = new FillerModal(cb);
+    modal.render(d);
+    return shadow();
+  };
+
+  it('leads with the record rather than with the posting', () => {
+    const root = renderJob(seen());
+    const banner = root.querySelector('.cf-applied')!;
+    expect(banner).not.toBeNull();
+    expect(banner.textContent).toMatch(/already applied/i);
+    expect(root.querySelector('.cf-title')!.className).toContain('cf-title-sub');
+    expect(root.querySelector('.cf-header .cf-sent-chip')).not.toBeNull();
+  });
+
+  /**
+   * No live region. `role="status"` announces something that has just arrived, and
+   * on this state the record was already there when the page opened — there is
+   * nothing to announce, and announcing it on every posting you revisit is noise.
+   */
+  it('does not announce itself the way a fresh confirmation does', () => {
+    expect(renderJob(seen()).querySelector('.cf-applied')!.getAttribute('role')).toBeNull();
+  });
+
+  it('leaves the announcement to a confirmation that just arrived', () => {
+    expect(renderJob(data([match()], { applied: true })).querySelector('.cf-applied')!
+      .getAttribute('role')).toBe('status');
+  });
+
+  it('retires both decisions', () => {
+    const onApply = vi.fn();
+    const onSkip = vi.fn();
+    const shadow = render(seen(), callbacks({ onApply, onSkip }));
+    expect(footerBtn(shadow, 'Apply')).toBeUndefined();
+    footerBtn(shadow, 'Applied ✓').click();
+    footerBtn(shadow, 'Skip').click();
+    expect(onApply).not.toHaveBeenCalled();
+    expect(onSkip).not.toHaveBeenCalled();
+  });
+
+  /**
+   * The report is a *fresh* fill of the same form, not the application that went
+   * in — the extension keeps no copy of that. Saying otherwise would invent a
+   * record it does not have.
+   */
+  it('does not claim the report is what was submitted', () => {
+    const legend = render(seen()).querySelector('.cf-legend-send')!;
+    expect(legend.textContent).toMatch(/fresh fill/i);
+    expect(legend.textContent).not.toMatch(/what went in/i);
+  });
+
+  it('points at where the record can be corrected', () => {
+    expect(renderJob(seen()).textContent).toMatch(/Options → Queue/);
+  });
+
+  it('says so on the minimized pill', () => {
+    const shadow = render(seen());
+    modal!.minimize();
+    expect(shadow.querySelector('.cf-pill')!.textContent).toMatch(/already applied/i);
+    expect(shadow.querySelector('.cf-pill .cf-dot')!.className).toContain('ok');
+  });
+
+  /**
+   * The controller declines to follow a handoff on an applied posting, so a
+   * two-step posting revisited arrives with both flags set. With the redirect
+   * branch first this footer led with a live "Open application" primary on a job
+   * already applied for — `flowState.classify` orders the two the other way, and
+   * the footer now agrees with it.
+   */
+  it('beats the redirect branch, and demotes its action into the menu', () => {
+    const shadow = render(seen({
+      redirect: { host: 'ats.test', reason: 'Apply leaves for ats.test', followed: false },
+    }));
+    const labels = [...shadow.querySelectorAll('.cf-footer-actions > button.cf-btn')]
+      .map((b) => b.textContent?.trim());
+    expect(labels).toEqual(['Applied ✓', 'Skip']);
+    expect([...shadow.querySelectorAll('.cf-more-menu button')].map((b) => b.textContent?.trim()))
+      .toContain('Open application');
+  });
+
+  // A quick-apply posting has no external application, and a menu item that opens
+  // nothing is worse than no item.
+  it('offers no such item when there was never a handoff', () => {
+    const shadow = render(seen());
+    expect([...shadow.querySelectorAll('.cf-more-menu button')].map((b) => b.textContent?.trim()))
+      .not.toContain('Open application');
+  });
+
+  // The coral belongs to the one live thing a surface is for, and here there is
+  // none — the green receipt is the only filled button on the card.
+  it('still spends the primary fill exactly once', () => {
+    const shadow = render(seen());
+    expect(shadow.querySelectorAll('button.cf-btn.primary')).toHaveLength(1);
+    expect(footerBtn(shadow, 'Applied ✓').classList.contains('cf-applied-btn')).toBe(true);
+  });
 });
 
 describe('FillerModal — the Fields tab advertises what it is hiding', () => {

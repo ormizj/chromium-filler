@@ -28,6 +28,61 @@ describe('flowBanner', () => {
     expect(flowBanner({ ...base, applied: true, appLink: true }).key).toBe('applied');
   });
 
+  /**
+   * The state the modal had no way of reaching: a posting whose record already
+   * says `applied`, revisited. Nothing happened on this page-load, so it cannot
+   * borrow `applied`'s wording ("Acme Careers confirmed it") — but it retires the
+   * same two controls, so it carries the same explanation behind its `?`.
+   */
+  it('recognises a posting that was applied to on an earlier visit', () => {
+    const b = flowBanner({ ...base, alreadyApplied: true });
+    expect(b.key).toBe('alreadyApplied');
+    expect(b.tone).toBe('ok');
+    expect(b.help).toBe('alreadyApplied');
+    expect(b.title).toMatch(/already applied/i);
+    expect(b.detail).toContain('Acme Careers');
+  });
+
+  it('names the date when the record carries one', () => {
+    const at = Date.UTC(2026, 2, 14);
+    const b = flowBanner({ ...base, alreadyApplied: true, appliedAt: at });
+    // Locale-formatted, so the year is what can be asserted without pinning the
+    // test to one machine's date order.
+    expect(b.detail).toContain(String(new Date(at).getFullYear()));
+    // Mid-sentence, before the clause about the buttons — appended it read as
+    // "…are retired here on 5/12/2026".
+    expect(b.detail).toMatch(/recorded as applied on .*, so/);
+    // And it must not invent one, or leave the slot showing, when the entry
+    // predates `appliedAt`.
+    const undated = flowBanner({ ...base, alreadyApplied: true }).detail;
+    expect(undated).not.toMatch(/undefined|NaN|\{when\}/);
+    expect(undated).toMatch(/recorded as applied, so/);
+  });
+
+  it('outranks everything except a confirmation that just arrived', () => {
+    // Same reasoning as `applied`: once a posting is recorded as done, a blocked
+    // Apply or a pending handoff cannot still be the useful answer.
+    for (const applyState of ['ready', 'noButton', 'noConfirmation'] as const) {
+      expect(flowBanner({ ...base, alreadyApplied: true, applyState }).key).toBe('alreadyApplied');
+    }
+    expect(flowBanner({ ...base, alreadyApplied: true, appLink: true }).key).toBe('alreadyApplied');
+    expect(flowBanner({ ...base, alreadyApplied: true, redirect: { followed: false } }).key)
+      .toBe('alreadyApplied');
+    expect(flowBanner({ ...base, alreadyApplied: true, filled: 0, total: 0 }).key)
+      .toBe('alreadyApplied');
+    // A send that just landed is the more specific truth, and keeps its receipt.
+    expect(flowBanner({ ...base, alreadyApplied: true, applied: true }).key).toBe('applied');
+  });
+
+  /**
+   * Skip is retired on a fresh send too now, so that state needs the same
+   * explanation it never had — otherwise a control goes grey with nothing to press
+   * for a reason.
+   */
+  it('explains the retired controls on a fresh confirmation as well', () => {
+    expect(flowBanner({ ...base, applied: true }).help).toBe('alreadyApplied');
+  });
+
   it('explains an apply control that opens an app', () => {
     const b = flowBanner({ ...base, appLink: true });
     expect(b.key).toBe('appLink');
@@ -128,6 +183,8 @@ describe('flowBanner', () => {
     const inputs: FlowInput[] = [
       base,
       { ...base, applied: true },
+      { ...base, alreadyApplied: true },
+      { ...base, alreadyApplied: true, appliedAt: Date.UTC(2026, 2, 14) },
       { ...base, redirect: { followed: false } },
       { ...base, redirect: { followed: true } },
       { ...base, applyState: 'noButton' },

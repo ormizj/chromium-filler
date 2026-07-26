@@ -504,7 +504,7 @@ export const SETUP_STEP_HELP: Record<SetupStepKey, GroupHelp> = {
 export type ConceptKey =
   | 'dots' | 'autoVsSaved' | 'todoChip' | 'picker' | 'neverSubmits'
   | 'twoStep' | 'appLink' | 'sessions' | 'urlPattern' | 'successSelector' | 'howItWorks'
-  | 'apply' | 'applyUnverified' | 'exportJobs' | 'syncClient' | 'coverLetter';
+  | 'apply' | 'applyUnverified' | 'alreadyApplied' | 'exportJobs' | 'syncClient' | 'coverLetter';
 
 export const CONCEPT_HELP: Record<ConceptKey, HelpEntry> = {
   coverLetter: {
@@ -583,6 +583,28 @@ export const CONCEPT_HELP: Record<ConceptKey, HelpEntry> = {
       + 'received” message the site shows after a successful send. Then Apply goes live, '
       + 'and that same element is what marks the posting applied.',
     when: 'Apply is grey on a site you have not finished setting up.',
+  },
+  /**
+   * Why *two* controls are retired at once, which is the part nobody would guess.
+   * Apply retiring on a finished posting reads as obvious; Skip retiring beside it
+   * does not, and the reason is a real one — Skip writes a status, and writing
+   * "skipped" over "applied" is how a completed application quietly loses its
+   * record. So this says what happened, why neither button is live, and where the
+   * decision can still be changed.
+   */
+  alreadyApplied: {
+    title: 'This posting is already applied to',
+    short: 'Apply and Skip are retired so an application cannot be sent or filed twice.',
+    body: 'This posting is recorded as applied, so there is nothing left to decide here. '
+      + 'Apply is retired because pressing the site\'s Send button again would submit a '
+      + 'second application to the same job. Skip is retired because skipping writes a '
+      + 'status of its own, and writing “skipped” over “applied” would lose the record of '
+      + 'an application you actually sent. Re-run and Reset are still in the ⋯ menu if you '
+      + 'want to look at the form again — neither of them sends anything, and neither '
+      + 'changes the record. If the posting was recorded wrongly, change its status in '
+      + 'Options → Queue and it goes back to being an ordinary posting.',
+    when: 'You open a posting you applied to earlier, or one an application just went '
+      + 'through on.',
   },
   /**
    * The archive button in the Queue tab. Two things need saying and neither is

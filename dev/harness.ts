@@ -255,6 +255,19 @@ const MODAL_STATES: Record<string, Partial<ModalData>> = {
   // Sent and confirmed. The banner, the retired Apply, and the pill all change,
   // and none of it is reachable without actually submitting a real application.
   applied: { applied: true },
+  // The same posting opened again later — the record read back rather than a
+  // confirmation seen. Both decisions are retired here too, so this is where to
+  // check that a de-emphasised Skip still reads as a button and not as a gap.
+  // Otherwise reachable only by applying for a job and then revisiting it.
+  'already-applied': { alreadyApplied: true, appliedAt: Date.UTC(2026, 4, 12) },
+  // The two-step version, and the reason the footer's applied branch has to come
+  // before its redirect branch: without that, this state leads with a live
+  // "Open application" primary on a job that is already applied for.
+  'already-applied-redirect': {
+    alreadyApplied: true,
+    appliedAt: Date.UTC(2026, 4, 12),
+    redirect: { host: 'ats.acme.test', reason: 'Apply link leaves for ats.acme.test', followed: false },
+  },
   empty: {
     siteName: 'ListingBoard',
     jobTitle: 'Platform engineering jobs',
