@@ -1373,7 +1373,7 @@ test('Modal: dragging the card on a posting moves it for that page only', async 
  * The review modal used to be a dead end. Everything it offered acted on the
  * posting, so a site that filled the wrong field could only be fixed by closing
  * the card (losing the report), opening the toolbar popup and finding Site setup
- * there. The two ways out now ride in the overflow beside Re-run and Reset.
+ * there. The two ways out now lead the overflow, ahead of Re-run.
  */
 test('Modal: the overflow menu reaches setup and the options page', async () => {
   const page = await context.newPage();

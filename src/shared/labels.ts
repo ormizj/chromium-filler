@@ -116,7 +116,6 @@ export type ActionKey =
   | 'skip'
   | 'skipNext'
   | 'rerun'
-  | 'reset'
   | 'confirm'
   | 'pick'
   | 'done'
@@ -135,7 +134,6 @@ export const ACTION_LABELS: Record<ActionKey, string> = {
   skip: 'Skip',
   skipNext: 'Skip → next',
   rerun: 'Re-run',
-  reset: 'Reset',
   confirm: 'Confirm',
   pick: 'Pick',
   done: 'Done',

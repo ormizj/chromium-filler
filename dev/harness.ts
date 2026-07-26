@@ -291,7 +291,6 @@ const MODAL_STATES: Record<string, Partial<ModalData>> = {
 function modalCallbacks(self: () => FillerModal | undefined): ModalCallbacks {
   return {
     onRerun: () => console.log('[harness] re-run'),
-    onReset: () => console.log('[harness] reset'),
     onApply: () => console.log('[harness] apply'),
     onConfirm: (f) => console.log('[harness] confirm', f),
     onPick: (f) => console.log('[harness] pick', f),

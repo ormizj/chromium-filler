@@ -599,9 +599,9 @@ export const CONCEPT_HELP: Record<ConceptKey, HelpEntry> = {
       + 'Apply is retired because pressing the site\'s Send button again would submit a '
       + 'second application to the same job. Skip is retired because skipping writes a '
       + 'status of its own, and writing “skipped” over “applied” would lose the record of '
-      + 'an application you actually sent. Re-run and Reset are still in the ⋯ menu if you '
-      + 'want to look at the form again — neither of them sends anything, and neither '
-      + 'changes the record. If the posting was recorded wrongly, change its status in '
+      + 'an application you actually sent. Re-run is still in the ⋯ menu if you want to '
+      + 'look at the form again — it does not send anything, and it does not '
+      + 'change the record. If the posting was recorded wrongly, change its status in '
       + 'Options → Queue and it goes back to being an ordinary posting.',
     when: 'You open a posting you applied to earlier, or one an application just went '
       + 'through on.',

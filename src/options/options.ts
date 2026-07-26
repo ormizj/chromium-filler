@@ -822,7 +822,7 @@ function describeScreen(vp: ModelledViewport): string {
 
 /** The preview modal is a mannequin: its buttons must not do anything real. */
 const PREVIEW_CALLBACKS: ModalCallbacks = {
-  onRerun: () => {}, onReset: () => {}, onApply: () => {},
+  onRerun: () => {}, onApply: () => {},
   onConfirm: () => {}, onPick: () => {}, onFollow: () => {},
   onFillAnyway: () => {}, onSkip: () => {}, onClose: () => {},
   onOpenSetup: () => {}, onOpenOptions: () => {},

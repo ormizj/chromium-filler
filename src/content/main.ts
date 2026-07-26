@@ -509,7 +509,6 @@ class Controller {
     if (!this.modal) {
       this.modal = new FillerModal({
         onRerun: () => this.run(),
-        onReset: () => this.reset(),
         onApply: () => void this.apply(),
         onConfirm: (field) => this.confirmField(field),
         onPick: (field) => this.pick(field),
@@ -1155,6 +1154,15 @@ class Controller {
     ).element;
   }
 
+  /**
+   * Blank every field we filled and throw the card away.
+   *
+   * Reached only through `MSG.RESET`, i.e. the popup's "Reset & Re-run". It used
+   * to sit in the review modal's `⋯` as well, which put an unconfirmed wipe of
+   * the whole fill — and of the report describing it — one tap from Site setup,
+   * on the surface whose entire job is showing what was filled. The popup is the
+   * right home for it: there, starting over is what the button is for.
+   */
   private reset(): void {
     this.cancelPicker?.();
     clearHighlights();

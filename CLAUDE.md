@@ -78,9 +78,14 @@ until the user presses something. A Shadow-DOM review modal reports every field 
 filled (green) / low-confidence (yellow) / unmatched (red), and its footer carries
 the two decisions: **Apply** (run any CV-confirmation steps, then press the site's
 own Send button) and **Skip** (record the posting as skipped, and close the tab if
-`settings.closeTabOnSkip`). Re-run and Reset live in the overflow behind them —
-the footer must never grow past two visible buttons plus `⋯`, because a third
-clipped the primary action off the right edge at 390px.
+`settings.closeTabOnSkip`). Re-run lives in the overflow behind them — the footer
+must never grow past two visible buttons plus `⋯`, because a third clipped the
+primary action off the right edge at 390px. **Reset is deliberately not there**:
+it blanks every field just filled and destroys the card holding the report, and
+an unconfirmed wipe with no undo does not belong one tap from Site setup on the
+surface whose whole job is showing what was filled. It stays on the popup
+("Reset & Re-run" → `MSG.RESET` → `Controller.reset()`), where starting over is
+what the button is for.
 
 The Send button is found by `shared/submitDetect.ts` — a saved
 `config.submitSelector` first, then a label heuristic that **vetoes** anything
@@ -155,16 +160,26 @@ column exists only on the tones that draw one, or `quiet` and `accent` would be
 indented by a mark that is not there.
 
 The footer's **overflow (`⋯`) carries the two ways out of a posting** —
-`Site setup` · `Options` — appended by `commonMenuItems()` to all three of the
+`Options` · `Site setup` — prepended by `commonMenuItems()` to all three of the
 footer's branches, so they are there whether the posting is quick-apply,
 two-step, or already sent. Without them the card was a dead end: a site that
 filled the wrong field could only be fixed by closing the modal (losing the
 report), opening the toolbar popup, and finding Site setup there. Setup is a
 **direct call**, not a message — the panel is in the same content script, and
 `openSetup` already folds the review card through `arbitrateSheets`.
-**Choosing any item closes the menu**: Re-run and Reset rebuild the card and took
-it with them, so this never showed, but both of these open another tab and leave
-this one exactly as it was.
+**Choosing any item closes the menu**: Re-run rebuilds the card and took it with
+it, so this never showed, but the two ways out open another tab and leave this
+one exactly as it was.
+
+**The order is decided by which end of the popover is near the hand, not by
+importance.** `.cf-more-menu` is anchored `bottom: calc(100% + …)`, so it opens
+*upward* and the item **last in DOM order sits against the `⋯` the thumb just
+pressed**. That cheapest position belongs to `Re-run`, so every branch reads
+`Options` · `Site setup` · (situational item) · `Re-run` top to bottom. The
+situational items — `Fill this page instead` on a two-step posting,
+`Open application` on an applied one — go *between*, which is what keeps both
+fixed ends true on every branch. Read top-down in source the list looks
+backwards; it is anchored to the toggle, not to the top of the card.
 
 `Add links` was a third, and is not: it is the one errand in the menu with
 nothing to do with the posting on screen, and the popup's Queue button already

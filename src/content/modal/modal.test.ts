@@ -15,7 +15,7 @@ const noop = () => {};
 
 function callbacks(over: Partial<ModalCallbacks> = {}): ModalCallbacks {
   return {
-    onRerun: noop, onReset: noop, onApply: noop, onConfirm: noop, onPick: noop,
+    onRerun: noop, onApply: noop, onConfirm: noop, onPick: noop,
     onFollow: noop, onFillAnyway: noop, onSkip: noop, onClose: noop,
     onOpenSetup: noop, onOpenOptions: noop,
     ...over,
@@ -317,12 +317,29 @@ describe('FillerModal — the footer offers Apply and Skip', () => {
   // The two that are on every branch: the card must not be a dead end. Before
   // them, a posting whose fields came out wrong could only be fixed by closing
   // the modal and finding Site setup in the toolbar popup.
-  const WAYS_OUT = ['Site setup', 'Options'];
+  //
+  // They lead the menu rather than trailing it because the popover opens
+  // *upward* — the last item in DOM order is the one under the thumb that has
+  // just pressed the `⋯`, and that place belongs to the item most likely to be
+  // wanted, not to the one that leaves the page.
+  const WAYS_OUT = ['Options', 'Site setup'];
 
   it('shows exactly Apply and Skip, with the rest behind the overflow', () => {
     const shadow = render(data([match()]));
     expect(labels(shadow)).toEqual(['Apply', 'Skip']);
-    expect(menu(shadow)).toEqual(['Re-run', 'Reset', ...WAYS_OUT]);
+    expect(menu(shadow)).toEqual([...WAYS_OUT, 'Re-run']);
+  });
+
+  /**
+   * Reset blanked every field the extension had just filled and destroyed the
+   * card with the report on it — an unconfirmed, unundoable wipe one tap from
+   * Site setup, on the one surface whose whole job is showing what was filled.
+   * The popup's "Reset & Re-run" still reaches `Controller.reset()`, from a
+   * surface where wiping the page is the point of pressing the button.
+   */
+  it('does not offer Reset', () => {
+    expect(menu(render(data([match()])))).not.toContain('Reset');
+    expect(menu(render(data([match()], { applied: true })))).not.toContain('Reset');
   });
 
   /**
@@ -346,8 +363,8 @@ describe('FillerModal — the footer offers Apply and Skip', () => {
     expect(onOpenOptions).toHaveBeenCalledOnce();
   });
 
-  // Re-run and Reset rebuild the whole card, so the menu went with them and this
-  // never showed. Both ways out open another tab and leave this one untouched —
+  // Re-run rebuilds the whole card, so the menu went with it and this never
+  // showed. Both ways out open another tab and leave this one untouched —
   // and a popover still hanging over the report when the user comes back has
   // outlived the choice it was opened to make.
   it('closes the menu when an item is chosen', () => {
@@ -367,7 +384,19 @@ describe('FillerModal — the footer offers Apply and Skip', () => {
   // wrong field, let me fix this site" is most likely to be the next thought.
   it('keeps them on an applied posting, where Apply itself has retired', () => {
     const shadow = render(data([match()], { applied: true }));
-    expect(menu(shadow)).toEqual(['Re-run', 'Reset', ...WAYS_OUT]);
+    expect(menu(shadow)).toEqual([...WAYS_OUT, 'Re-run']);
+  });
+
+  /**
+   * The situational item sits between them, so the two fixed rules hold on every
+   * branch: Options on top, Re-run nearest the `⋯`.
+   */
+  it('slots Open application between the ways out and Re-run', () => {
+    const shadow = render(data([match()], {
+      applied: true,
+      redirect: { host: 'jobs.acme.com', reason: 'apply link is cross-origin', followed: false },
+    }));
+    expect(menu(shadow)).toEqual([...WAYS_OUT, 'Open application', 'Re-run']);
   });
 
   it('presses the site’s Send button through onApply', () => {
@@ -413,7 +442,7 @@ describe('FillerModal — the footer offers Apply and Skip', () => {
       redirect: { host: 'jobs.acme.com', reason: 'apply link is cross-origin', followed: false },
     }));
     expect(labels(shadow)).toEqual(['Open application', 'Skip']);
-    expect(menu(shadow)).toEqual(['Fill this page instead', ...WAYS_OUT]);
+    expect(menu(shadow)).toEqual([...WAYS_OUT, 'Fill this page instead']);
   });
 });
 

@@ -35,7 +35,6 @@ import modalCss from './modal.css?inline';
 
 export interface ModalCallbacks extends SheetCallbacks {
   onRerun(): void;
-  onReset(): void;
   /** Run the CV-confirmation steps, then press the site's own Send button. */
   onApply(): void;
   onConfirm(field: FieldMatch['field']): void;
@@ -283,9 +282,9 @@ export class FillerModal extends Sheet<ModalData> {
 
   /**
    * Two decisions and nothing else: send this one, or move on. Everything that
-   * is about the *extension* rather than the posting — Re-run, Reset — goes
-   * behind the overflow, because at 390px a row of five buttons makes the two
-   * that matter no easier to hit than the three that do not.
+   * is about the *extension* rather than the posting — Re-run, and the two ways
+   * out — goes behind the overflow, because at 390px a row of five buttons makes
+   * the two that matter no easier to hit than the three that do not.
    */
   private footer(data: ModalData): HTMLElement {
     const footer = el('div', 'cf-footer');
@@ -325,13 +324,13 @@ export class FillerModal extends Sheet<ModalData> {
         done,
         skip,
         this.overflow([
+          ...this.commonMenuItems(),
           // Only when there is somewhere to go: an applied quick-apply posting has
           // no external application, and an item that opens nothing is worse than
-          // no item.
+          // no item. Between the ways out and Re-run, so the two fixed ends of the
+          // list hold on every branch.
           ...(data.redirect ? [btn(ACTION_LABELS.openApplication, () => this.cb.onFollow())] : []),
           btn(ACTION_LABELS.rerun, () => this.cb.onRerun()),
-          btn(ACTION_LABELS.reset, () => this.cb.onReset()),
-          ...this.commonMenuItems(),
         ]),
       );
       footer.append(actions);
@@ -347,8 +346,8 @@ export class FillerModal extends Sheet<ModalData> {
         btn(data.redirect.followed ? ACTION_LABELS.openApplicationAgain : ACTION_LABELS.openApplication, () => this.cb.onFollow(), true),
         skip,
         this.overflow([
-          btn(ACTION_LABELS.fillAnyway, () => this.cb.onFillAnyway()),
           ...this.commonMenuItems(),
+          btn(ACTION_LABELS.fillAnyway, () => this.cb.onFillAnyway()),
         ]),
       );
       footer.append(actions);
@@ -366,9 +365,8 @@ export class FillerModal extends Sheet<ModalData> {
       apply,
       skip,
       this.overflow([
-        btn(ACTION_LABELS.rerun, () => this.cb.onRerun()),
-        btn(ACTION_LABELS.reset, () => this.cb.onReset()),
         ...this.commonMenuItems(),
+        btn(ACTION_LABELS.rerun, () => this.cb.onRerun()),
       ]),
     );
 
@@ -655,10 +653,17 @@ export class FillerModal extends Sheet<ModalData> {
    * everything else lives.
    *
    * They belong in the menu and not in the footer because they are about the
-   * *extension*, not about this posting — the same rule that put Re-run and
-   * Reset here. Before this the card was a dead end: a posting whose fields came
-   * out wrong could only be fixed by closing the modal, opening the popup and
-   * pressing Site setup from there.
+   * *extension*, not about this posting — the same rule that put Re-run here.
+   * Before this the card was a dead end: a posting whose fields came out wrong
+   * could only be fixed by closing the modal, opening the popup and pressing
+   * Site setup from there.
+   *
+   * They *lead* every branch's menu, and that is a fact about which end of the
+   * popover is near the hand rather than about their importance. The menu opens
+   * upward (`.cf-more-menu` is anchored `bottom: 100%`), so the item last in DOM
+   * order is the one sitting against the `⋯` the thumb has just pressed — the
+   * cheapest place to reach, which belongs to Re-run rather than to the two
+   * items that navigate away from the posting entirely.
    *
    * "Add links" used to be a third. It is the one errand here that has nothing
    * to do with the posting on screen — you do not queue up more postings from
@@ -667,8 +672,8 @@ export class FillerModal extends Sheet<ModalData> {
    */
   private commonMenuItems(): HTMLButtonElement[] {
     return [
-      btn(ACTION_LABELS.siteSetup, () => this.cb.onOpenSetup()),
       btn(ACTION_LABELS.openOptions, () => this.cb.onOpenOptions()),
+      btn(ACTION_LABELS.siteSetup, () => this.cb.onOpenSetup()),
     ];
   }
 
@@ -706,11 +711,11 @@ export class FillerModal extends Sheet<ModalData> {
     };
     for (const item of items) {
       item.classList.add('btn-ghost');
-      // Choosing an item closes the menu. Re-run and Reset both rebuild the card
-      // and took it with them, so this never showed; the three ways out do not —
-      // two of them open another tab and leave this one exactly as it was, and a
-      // menu still hanging open over the report when the user comes back is the
-      // popover having outlived the choice it was opened to make.
+      // Choosing an item closes the menu. Re-run rebuilds the card and took it
+      // with it, so this never showed; the two ways out do not — they open
+      // another tab and leave this one exactly as it was, and a menu still
+      // hanging open over the report when the user comes back is the popover
+      // having outlived the choice it was opened to make.
       const choose = item.onclick!;
       item.onclick = (e) => { setOpen(false); choose.call(item, e); };
     }
