@@ -50,8 +50,6 @@ export interface ModalCallbacks extends SheetCallbacks {
   onOpenSetup(): void;
   /** Open the options page. */
   onOpenOptions(): void;
-  /** Open the options page at the URL importer, ready to paste. */
-  onAddLinks(): void;
   onClose(): void;
 }
 
@@ -387,18 +385,24 @@ export class FillerModal extends Sheet<ModalData> {
     }
 
     const text = el('div', 'cf-flow-text');
+    const titleLine = el('div', 'cf-flow-titleline');
     const title = el('b', 'cf-flow-title');
     title.textContent = flow.title;
+    titleLine.append(title);
     const detail = el('span', 'cf-flow-detail');
     detail.textContent = flow.detail;
-    text.append(title, detail);
+    text.append(titleLine, detail);
     head.append(text);
 
     // The long form stays behind a disclosure: the blocked states have a
     // paragraph's worth of explanation each, and rendering it inline filled the
     // card with prose before the user could reach the posting.
+    //
+    // It sits on the title's line rather than at the head's right edge: after a
+    // `flex: 1` text block the `?` ended up a card's width away from the words
+    // it explains, reading as a control belonging to the banner as a whole.
     if (flow.help) {
-      head.append(helpButton(flow.title, this.applyHelp, (open) => this.setApplyHelp(open)));
+      titleLine.append(helpButton(flow.title, this.applyHelp, (open) => this.setApplyHelp(open)));
     }
     box.append(head);
     if (flow.help && this.applyHelp) box.append(helpPanel(CONCEPT_HELP[flow.help]));
@@ -589,19 +593,23 @@ export class FillerModal extends Sheet<ModalData> {
   }
 
   /**
-   * The three that are on every branch: where to configure this site, where to
-   * add more postings, and where everything else lives.
+   * The two that are on every branch: where to configure this site, and where
+   * everything else lives.
    *
    * They belong in the menu and not in the footer because they are about the
    * *extension*, not about this posting — the same rule that put Re-run and
    * Reset here. Before this the card was a dead end: a posting whose fields came
    * out wrong could only be fixed by closing the modal, opening the popup and
    * pressing Site setup from there.
+   *
+   * "Add links" used to be a third. It is the one errand here that has nothing
+   * to do with the posting on screen — you do not queue up more postings from
+   * inside one you are reviewing — and the popup's Queue button already opens
+   * the importer from a surface you reach without a job page at all.
    */
   private commonMenuItems(): HTMLButtonElement[] {
     return [
       btn(ACTION_LABELS.siteSetup, () => this.cb.onOpenSetup()),
-      btn(ACTION_LABELS.addLinks, () => this.cb.onAddLinks()),
       btn(ACTION_LABELS.openOptions, () => this.cb.onOpenOptions()),
     ];
   }

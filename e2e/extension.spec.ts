@@ -496,6 +496,46 @@ test('Popup: opens at a usable width (no vw sliver) and renders cleanly', async 
   await page.close();
 });
 
+/**
+ * The three ways out share one row, and it has to stay a row: the labels are
+ * one or two words and `.links a` is `flex: 1 1 0` with no `flex-wrap`, so the
+ * failure mode is a silent column rather than an overflow. Measured rather than
+ * asserted on the DOM, because that is the only thing that can see it.
+ *
+ * The Queue button's destination is checked here too. It is the reason Queue is
+ * not a duplicate of Options — it opens the *importer*, a section three down the
+ * queue tab — and it is the only place that deep link is still reached from now
+ * that the modal's overflow no longer carries it.
+ */
+test('Popup: Site setup, Queue and Options share one row, and Queue opens the importer', async () => {
+  const page = await context.newPage();
+  await page.setViewportSize({ width: 360, height: 600 });
+  await page.goto(`chrome-extension://${extId}/src/popup/popup.html`);
+  await expect(page.locator('.links')).toBeVisible();
+
+  const tops: number[] = [];
+  for (const id of ['#reconfigure', '#open-queue', '#open-options']) {
+    const box = await page.locator(id).boundingBox();
+    expect(box, id).not.toBeNull();
+    tops.push(Math.round(box!.y));
+  }
+  expect(new Set(tops).size, 'the row wrapped into a column').toBe(1);
+
+  const importer = context.waitForEvent('page');
+  await page.locator('#open-queue').click();
+  const importPage = await importer;
+  await importPage.waitForLoadState();
+  await expect(importPage.locator('#tab-queue')).toHaveAttribute('aria-selected', 'true');
+  // Focused *and* on screen. The tab alone was never the destination: the
+  // importer is the third section of it. (Not asserted as a scroll distance — a
+  // tall enough window has the section in view without moving, and that is a
+  // correct outcome, not a missing one.)
+  await expect(importPage.locator('#urls-paste')).toBeFocused();
+  await expect(importPage.locator('#import-section')).toBeInViewport();
+  await importPage.close();
+  await page.close();
+});
+
 test('Auto-close: tab closes once the success selector appears', async () => {
   const page = await context.newPage();
   await page.goto(urlFor('slow-boards'));
@@ -1180,9 +1220,9 @@ test('Modal: dragging the card on a posting moves it for that page only', async 
  * The review modal used to be a dead end. Everything it offered acted on the
  * posting, so a site that filled the wrong field could only be fixed by closing
  * the card (losing the report), opening the toolbar popup and finding Site setup
- * there. The three ways out now ride in the overflow beside Re-run and Reset.
+ * there. The two ways out now ride in the overflow beside Re-run and Reset.
  */
-test('Modal: the overflow menu reaches setup, the importer and the options page', async () => {
+test('Modal: the overflow menu reaches setup and the options page', async () => {
   const page = await context.newPage();
   try {
     await page.goto(urlFor('quick-plain'));
@@ -1206,27 +1246,15 @@ test('Modal: the overflow menu reaches setup, the importer and the options page'
     await page.locator('.cf-pill[data-sheet="review"]').click();
     await expect(page.locator('.cf-card[data-sheet="review"]')).toBeVisible({ timeout: 10_000 });
 
-    // The other two exits. Both open the options page at a *place*, not merely on
-    // a tab — a tab is not where anything is, and both of these used to land on
-    // whatever tab happens to be the default one.
-
+    // The other exit. Queueing up more postings is not one of them: it is the one
+    // errand here with nothing to do with the posting on screen, and the popup's
+    // Queue button reaches the importer without a job page open at all.
     await openMenu();
-    const importer = context.waitForEvent('page');
-    await page.getByRole('button', { name: 'Add links', exact: true }).click();
-    const importPage = await importer;
-    await importPage.waitForLoadState();
-    await expect(importPage.locator('#tab-queue')).toHaveAttribute('aria-selected', 'true');
-    // Focused *and* on screen. The tab alone was never the destination: the
-    // importer is the third section of it. (Not asserted as a scroll distance —
-    // a tall enough window has the section in view without moving, and that is
-    // a correct outcome, not a missing one.)
-    await expect(importPage.locator('#urls-paste')).toBeFocused();
-    await expect(importPage.locator('#import-section')).toBeInViewport();
-    await importPage.close();
+    await expect(page.getByRole('button', { name: 'Add links', exact: true }))
+      .toHaveCount(0);
 
-    await openMenu();
     const opts = context.waitForEvent('page');
-    await page.getByRole('button', { name: 'Open options', exact: true }).click();
+    await page.getByRole('button', { name: 'Options', exact: true }).click();
     const optsPage = await opts;
     await optsPage.waitForLoadState();
     await expect(optsPage.locator('.topbar')).toBeVisible();
@@ -1421,15 +1449,17 @@ test('Setup: an edit re-renders the panel without losing your place in the wizar
     const setup = page.locator('.cf-card[data-sheet="setup"]');
     await expect(setup).toBeVisible({ timeout: 20_000 });
 
-    // Walk to "Before filling" — step 2 of 6 — whatever the panel opened on.
+    // Walk to "Page actions" — step 2 of 6 — whatever the panel opened on.
     await setup.locator('.cf-rail-node').nth(1).click();
     await expect(setup.locator('.cf-step-count')).toHaveText('Step 2 of 6');
 
     // A real edit: "+ Delay" writes a prep step to the site config and comes
-    // back through `refreshSetup`, rebuilding the card from scratch.
+    // back through `refreshSetup`, rebuilding the card from scratch. The step
+    // carries two prep lists, so this is the first list's add bar — the one that
+    // runs before filling.
     const steps = () => setup.locator('.cf-step-body .cf-row');
     const before = await steps().count();
-    await setup.getByRole('button', { name: '+ Delay' }).click();
+    await setup.getByRole('button', { name: '+ Delay' }).first().click();
     await expect(steps()).toHaveCount(before + 1);
 
     // Still on step 2. Before the step lived on the instance this would have

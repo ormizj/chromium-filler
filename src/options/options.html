@@ -209,27 +209,34 @@
           <p id="settings-status" class="status" role="status" aria-live="polite"></p>
 
           <h3>Two-step applications</h3>
-          <p class="hint" style="margin: 0 0 8px;">
+          <p class="hint">
             Postings that apply on the employer's own site are followed automatically,
             after any “before leaving” steps for that site (e.g. clicking its Save job
             button). Both the posting and the application it leads to are recorded.
           </p>
-          <!-- Stacked rather than side-by-side: the options are sentences, and a
-               select wide enough to read them does not fit beside its own label in
-               half a settings grid. Still a paper row on the body. -->
+          <!-- The same size of card as Behavior's, sitting beside its neighbour
+               in the same grid column — it was `stacked span`, which forced its
+               own full-width row and left a hole beside the switch card. Two
+               sections of settings whose rows are different shapes and sizes read
+               as two different kinds of thing.
+               Still `stacked`: this is the one control here too wide to sit beside
+               its own label in half a settings grid, and squeezed in beside it the
+               title wrapped to three lines and pushed its `?` onto a fourth. -->
           <div class="settings-list">
             <div class="setrow">
               <div class="setrow-text"><h5>Keep links in the browser</h5></div>
               <label class="switch"><input type="checkbox" id="keep-in-browser" class="switch-input" /><span class="switch-track" aria-hidden="true"><i></i></span></label>
             </div>
-            <div class="setrow stacked span">
+            <div class="setrow stacked">
               <label class="setrow-text" for="redirect-target">
                 <span class="setrow-title" id="redirect-target-label">When following an external application</span>
               </label>
+              <!-- Labels, not sentences: the full wording of each is behind the
+                   row's `?`, and a select is read at a glance. -->
               <select id="redirect-target">
-                <option value="newTabCloseSource">Open in a new tab, close the posting</option>
-                <option value="newTab">Open in a new tab, keep the posting</option>
-                <option value="sameTab">Open in the same tab</option>
+                <option value="newTabCloseSource">New tab, close posting</option>
+                <option value="newTab">New tab, keep posting</option>
+                <option value="sameTab">Same tab</option>
               </select>
             </div>
           </div>
@@ -244,7 +251,7 @@
               <label class="switch"><input type="checkbox" id="modal-fullscreen" class="switch-input" /><span class="switch-track" aria-hidden="true"><i></i></span></label>
             </div>
           </div>
-          <p class="hint" style="margin: 0 0 8px;">
+          <p class="hint">
             Drag the card to move it; drag its top-left corner to resize, or its left
             or top edge to resize one direction only. Edges snap to the screen edge
             and to the default gutter, and an edge that has run out of room lights up
@@ -252,7 +259,7 @@
             keyboard, focus the card and use the arrow keys (hold Shift for 10px);
             focus a handle to resize with them instead.
           </p>
-          <p class="hint" style="margin: 0 0 8px;">
+          <p class="hint">
             The frame below is your screen to scale — the display minus the space your
             browser's own tab strip, address bar and bookmarks bar take, measured when
             this page loaded — so what you set here is what the modal gets on a real
@@ -298,11 +305,11 @@
                came and went reflowed this block and shifted the buttons below it on
                every drag. -->
           <div id="sim-limits" class="sim-limits" aria-hidden="true"></div>
-          <div class="row" style="margin-top: 8px;">
+          <div class="row">
             <button id="sim-preview" class="btn">Preview at full size</button>
             <button id="sim-reset" class="btn">Restore default</button>
           </div>
-          <p class="hint" style="margin: 8px 0 0;">
+          <p class="hint hint-tail">
             The preview renders in <em>this</em> window, so if it is smaller than the
             screen above, the card is clamped to fit it.
           </p>
@@ -405,7 +412,7 @@
           <p id="sync-client-status" class="status" role="status" aria-live="polite"></p>
 
           <h3>Backup file</h3>
-          <p class="hint" style="margin: 0 0 8px;">
+          <p class="hint">
             The same database as a file you can move yourself. Importing combines it
             with what is here rather than replacing it, exactly as syncing does. This
             is not the applied-jobs export on the Queue tab, which is written for

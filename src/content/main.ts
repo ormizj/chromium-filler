@@ -464,15 +464,12 @@ class Controller {
         onFollow: () => { this.followed = false; void this.followRedirect(this.detection!); },
         onFillAnyway: () => this.fillHere(),
         onSkip: () => this.skipPosting(),
-        // The three ways out of a posting, from the overflow menu. Setup is a
+        // The two ways out of a posting, from the overflow menu. Setup is a
         // direct call and not a message: the panel lives in this same content
         // script, and `openSetup` already folds the modal to its pill through
         // `arbitrateSheets`.
         onOpenSetup: () => void this.openSetup(),
         onOpenOptions: () => chrome.runtime.sendMessage({ type: MSG.OPEN_OPTIONS }),
-        onAddLinks: () => chrome.runtime.sendMessage({
-          type: MSG.OPEN_OPTIONS, hash: 'queue', at: 'import-section', focus: '#urls-paste',
-        }),
         // Collapse to the pill rather than destroying the report: the fills stay
         // in place and the modal is one tap away, instead of only reachable
         // through a Reset & Re-run that would wipe them.

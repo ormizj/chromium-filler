@@ -266,12 +266,15 @@
   letter-spacing: 0.04em;
   text-transform: uppercase;
   color: var(--muted-2);
-  flex: 1;
+  flex: none;
   min-width: 0;
 }
 
+/* The chip takes the slack, not the count — that is what leaves the `?` sitting
+   against the words it explains while the status keeps the right edge. */
 .cf-step-todo {
   flex: none;
+  margin-left: auto;
 }
 
 .cf-step-title {

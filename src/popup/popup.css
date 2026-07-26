@@ -169,28 +169,27 @@ h1 {
   width: 100%;
 }
 
-/* The two action rows. `.actions` is what this page is *for* — fill this
-   posting, or go and see the run — so it takes the weight; `.links` is where you
-   go to change something. Both are fixed shares rather than content-sized: every
+/* The two action rows. `.actions` is what this page is *for* — fill the posting
+   in front of you — so it takes the whole width; `.links` is the three places you
+   go from here, in equal thirds. Fixed shares rather than content-sized: every
    control here is permanent now, so the row's proportions are a fact about the
    popup and not about the page it happens to be over.
 
-   No `flex-wrap`. Two items at a 3:1 or 1:1 share always fit a 360px popup, and
-   wrapping is how a row silently becomes a column. The labels are one or two
-   words for the same reason. */
+   No `flex-wrap`. Three items at an equal share fit a 360px popup with room to
+   spare — 336px of content less two 8px gaps is ~107px each against ~70px for
+   the widest label — and wrapping is how a row silently becomes a column. The
+   labels are one or two words for exactly that reason. */
 .actions,
 .links {
   margin-top: var(--space-5);
   display: flex;
   gap: var(--space-3);
 }
-/* 3 : 1 against the `flex: 1 1 0` below — Fill takes three quarters of the row. */
 .actions > #primary {
-  flex: 3;
+  flex: 1;
   min-width: 0;
 }
-.links a,
-.actions > a {
+.links a {
   flex: 1 1 0;
   white-space: nowrap;
   display: flex;
@@ -207,8 +206,7 @@ h1 {
   font-weight: 500;
   text-align: center;
 }
-.links a:hover,
-.actions > a:hover {
+.links a:hover {
   background: var(--surface);
   border-color: var(--border-strong);
 }

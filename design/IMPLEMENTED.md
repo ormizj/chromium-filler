@@ -116,9 +116,12 @@ only place that draws.
   button inside a bordered popover read as a stack of boxes. The selector list in
   primitives.css spells `button.cf-btn.btn-ghost` too, or the shadow vocabulary's
   own class wins on specificity.
-- **Popup secondary actions** are one- or two-word labels ("Site setup", "Queue",
-  "Options") instead of sentences with arrows, which wrapped inside 360px and made
-  the row ragged; `.links a` is `flex: 1 1 0` + `nowrap` so it cannot recur.
+- **Popup secondary actions** are all three in one row — "Site setup", "Queue",
+  "Options" — one- or two-word labels instead of sentences with arrows, which
+  wrapped inside 360px and made the row ragged; `.links a` is `flex: 1 1 0` +
+  `nowrap` so it cannot recur, and an E2E measures the three buttons' `y` to
+  prove the row has not become a column. Fill keeps a row to itself: it is the
+  only one of the four that acts on the page in front of you.
 - **The session strip has the reference's progress dots.** `shared/queue.progressDots`
   (pure, unit-tested) is literal up to a cap and proportional past it, always
   keeping one dot for the posting that is open.

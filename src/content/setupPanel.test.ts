@@ -35,7 +35,12 @@ function data(over: Partial<SetupData> = {}): SetupData {
     urlPattern: '*://acme.com/*',
     prep: [],
     containers: [{ key: 'jobTitle', label: 'Job title', status: 'high', note: 'auto · h1', hasSave: false }],
-    fields: [{ key: 'email', label: 'Email', status: 'high', note: 'auto · #email', hasSave: false }],
+    // The CV row is the only one the `fields` step counts, so a healthy fixture
+    // has to carry a matched one — without it the panel opens on step 5.
+    fields: [
+      { key: 'resume', label: 'CV / Résumé', status: 'high', note: 'auto · #cv', hasSave: false },
+      { key: 'email', label: 'Email', status: 'high', note: 'auto · #email', hasSave: false },
+    ],
     verdict: 'Quick-apply — a form was found here',
     redirect: [],
     beforeFollow: [],
@@ -143,6 +148,7 @@ describe('setup wizard steps', () => {
  */
 describe('an edit keeps the user where they were', () => {
   const fieldRows = [
+    { key: 'resume', label: 'CV / Résumé', status: 'high', note: 'auto · #cv', hasSave: false },
     { key: 'email', label: 'Email', status: 'high', note: 'auto · #email', hasSave: false },
     { key: 'city', label: 'City', status: 'none', note: 'not found', hasSave: false },
   ] as const;
@@ -217,12 +223,24 @@ describe('setup wizard rail', () => {
   // is called, and what it still needs.
   it('names each step and its outstanding work', () => {
     const shadow = render(data({
-      fields: [{ key: 'city', label: 'City', status: 'none', note: 'not found', hasSave: false }],
+      fields: [{ key: 'resume', label: 'CV / Résumé', status: 'none', note: 'not found', hasSave: false }],
     }));
     const label = [...shadow.querySelectorAll('.cf-rail-node')]
       .map((n) => n.getAttribute('aria-label'))
       .find((l) => l?.includes(SETUP_STEP_TITLES.fields));
     expect(label).toMatch(/Step 5/);
+    expect(label).toMatch(/no CV/i);
+  });
+
+  // The other half of the same rule, on a step that does count rows: the label
+  // has to carry the number, not just the fact that something is outstanding.
+  it('counts the work in the label where the step counts rows', () => {
+    const shadow = render(data({
+      containers: [{ key: 'jobTitle', label: 'Job title', status: 'none', note: 'not found', hasSave: false }],
+    }));
+    const label = [...shadow.querySelectorAll('.cf-rail-node')]
+      .map((n) => n.getAttribute('aria-label'))
+      .find((l) => l?.includes(SETUP_STEP_TITLES.info));
     expect(label).toMatch(/1 to do/);
   });
 
@@ -253,7 +271,7 @@ describe('setup wizard rail', () => {
    */
   it('keeps the status dot beside the mark', () => {
     const shadow = render(data({
-      fields: [{ key: 'city', label: 'City', status: 'none', note: 'not found', hasSave: false }],
+      fields: [{ key: 'resume', label: 'CV / Résumé', status: 'none', note: 'not found', hasSave: false }],
     }));
     const fields = shadow.querySelectorAll('.cf-rail-node')[4];
     expect(fields.querySelector('.cf-rail-icon')).not.toBeNull();
@@ -348,6 +366,70 @@ describe('setup wizard help', () => {
   });
 });
 
+describe('setup wizard step contents', () => {
+  const beforeFollow = [{ action: 'click', selector: '#save-job', resolves: true }] as const;
+
+  /**
+   * Both prep lists are the same thing — clicks and waits this site needs before
+   * the extension acts — and the "before leaving" one used to sit on the
+   * application-type step, under three redirect selectors it has nothing to do
+   * with. It was the last thing on a step about something else.
+   */
+  it('renders both prep lists on the page-actions step', () => {
+    const shadow = render(data({
+      prep: [{ action: 'waitFor', selector: '#form', ms: 5000, resolves: true }],
+      beforeFollow: [...beforeFollow],
+    }));
+    panel!.setStep('prep');
+    expect(shadow.textContent).toContain('before filling');
+    expect(shadow.textContent).toContain('Before leaving');
+    expect(shadow.querySelector('[data-k="prep:beforeFollow:0"]')).not.toBeNull();
+
+    panel!.setStep('kind');
+    expect(shadow.textContent).not.toContain('Before leaving');
+    expect(shadow.querySelector('[data-k="prep:beforeFollow:0"]')).toBeNull();
+  });
+
+  /**
+   * The external marker and the external apply link are one answer between them
+   * — "this posting applies elsewhere, and here is what to press" — so they are
+   * headed together, away from the marker that argues the opposite verdict.
+   */
+  it('groups the redirect rows under the verdict each argues for', () => {
+    const shadow = render(data({
+      redirect: [
+        { key: 'applySelector', label: 'External apply link', status: 'none', note: 'not set', hasSave: false },
+        { key: 'quickApplySelector', label: 'Quick-apply marker', status: 'none', note: 'not set', hasSave: false },
+        { key: 'markerSelector', label: 'External marker', status: 'none', note: 'not set', hasSave: false },
+      ],
+    }));
+    panel!.setStep('kind');
+
+    const order = [...shadow.querySelectorAll('.cf-section, .cf-row .cf-field b')]
+      .map((n) => n.textContent);
+    expect(order).toEqual([
+      'External — the application is on the employer’s site',
+      'External marker',
+      'External apply link',
+      'Quick apply — the form is on this page',
+      'Quick-apply marker',
+    ]);
+  });
+
+  // A group with no rows draws no heading, so a config that only ever sets the
+  // quick-apply marker does not get an empty "External" section above it.
+  it('drops a heading whose group is empty', () => {
+    const shadow = render(data({
+      redirect: [
+        { key: 'quickApplySelector', label: 'Quick-apply marker', status: 'none', note: 'not set', hasSave: false },
+      ],
+    }));
+    panel!.setStep('kind');
+    expect(shadow.textContent).not.toContain('the application is on the employer');
+    expect(shadow.textContent).toContain('the form is on this page');
+  });
+});
+
 describe('setup panel legend', () => {
   it('is open for a user who has not seen it', () => {
     const shadow = render(data({ helpSeen: false }));
@@ -365,6 +447,24 @@ describe('setup panel legend', () => {
   it('stays short enough to sit above the step', () => {
     const legend = render(data({ helpSeen: false })).querySelector('.cf-legend')!;
     expect(legend.textContent!.length).toBeLessThan(400);
+  });
+
+  /**
+   * The rail leads the body on every step. The legend and the intro render on
+   * step 1 only, so ahead of the rail they moved it ~200px between step 1 and
+   * step 2 — and moved it again whenever the `<details>` was opened, under the
+   * finger that had just opened it.
+   */
+  it('sits below the rail, which never moves', () => {
+    const shadow = render(data({ helpSeen: false }));
+    const kids = [...shadow.querySelector('.cf-body')!.children];
+    expect(kids[0].classList.contains('cf-rail')).toBe(true);
+    expect(kids.findIndex((k) => k.classList.contains('cf-legend')))
+      .toBeGreaterThan(0);
+
+    panel!.setStep('fields');
+    expect([...shadow.querySelector('.cf-body')!.children][0].classList.contains('cf-rail'))
+      .toBe(true);
   });
 
   it('is folded away once dismissed', () => {

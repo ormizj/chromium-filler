@@ -340,13 +340,15 @@ export const SETTINGS_HELP: Record<keyof Settings, HelpEntry> = {
 /**
  * The panel's step titles, so the `?` and the heading cannot disagree.
  *
- * `prep` is called "Before filling" and not "Setup steps": the wizard's own
- * units are steps now, and "Step 2 of 6: Setup steps" reads as a stutter. The
- * prep list is a list of *things to do first*, which is what the title says.
+ * `prep` is called "Page actions" and not "Setup steps": the wizard's own units
+ * are steps now, and "Step 2 of 6: Setup steps" reads as a stutter. It is not
+ * "Before filling" either any more — the step carries two lists, the one that
+ * runs before filling and the one that runs before leaving for an external
+ * application, and a title naming only the first hid the second.
  */
 export const SETUP_STEP_TITLES: Record<SetupStepKey, string> = {
   site: 'Site',
-  prep: 'Before filling',
+  prep: 'Page actions',
   kind: 'Application type',
   info: 'Job info',
   fields: 'Form fields',
@@ -377,11 +379,13 @@ export const SETUP_STEP_HELP: Record<SetupStepKey, GroupHelp> = {
     ],
   },
   prep: {
-    title: 'Things to do before filling',
-    body: 'Some forms are not on the page yet when it loads — they are behind an '
-      + '"Apply" button, or a tab, or they arrive a second late. These steps run '
-      + 'automatically, top to bottom, every time, before anything is filled.',
-    when: 'Leave this empty if the form is simply there on load.',
+    title: 'Clicks and waits this site needs',
+    body: 'Two lists of things the extension does on the page itself, each run '
+      + 'automatically, top to bottom, every time. The first runs before filling — for '
+      + 'a form that is behind an "Apply" button, or a tab, or that arrives a second '
+      + 'late. The second runs before leaving for an employer\'s own application, so '
+      + 'the board records the apply before the handoff.',
+    when: 'Leave both empty if the form is simply there on load.',
     rows: [
       { label: 'Click', body: PREP_HELP.click.body },
       { label: 'Wait for', body: PREP_HELP.waitFor.body },
@@ -393,8 +397,11 @@ export const SETUP_STEP_HELP: Record<SetupStepKey, GroupHelp> = {
       },
       {
         label: 'Run steps ▶',
-        body: 'Runs the list now so you can watch it work, without reloading the page.',
+        body: 'Runs the before-filling list now so you can watch it work, without '
+          + 'reloading the page. The before-leaving list has no button, because running '
+          + 'it ends by navigating away from the posting.',
       },
+      { label: 'Before leaving', body: REDIRECT_HELP.beforeFollow.body },
     ],
   },
   kind: {
@@ -405,11 +412,12 @@ export const SETUP_STEP_HELP: Record<SetupStepKey, GroupHelp> = {
       + 'guessed automatically. These selectors are only for correcting a wrong guess.',
     when: 'The verdict shown here is wrong. "Not set" everywhere is the normal, healthy '
       + 'state.',
+    // Grouped the way the step renders them: the marker and the link are one
+    // answer between them, the quick-apply marker is the other answer.
     rows: [
+      { label: 'External marker', body: REDIRECT_HELP.markerSelector.body },
       { label: 'External apply link', body: REDIRECT_HELP.applySelector.body },
       { label: 'Quick-apply marker', body: REDIRECT_HELP.quickApplySelector.body },
-      { label: 'External marker', body: REDIRECT_HELP.markerSelector.body },
-      { label: 'Before leaving', body: REDIRECT_HELP.beforeFollow.body },
     ],
   },
   info: {

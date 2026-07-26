@@ -131,17 +131,22 @@ leads at `--text-lg`, `.cf-title` drops to `.cf-title-sub`, the header carries a
 `Applied ✓` retires Apply. The site's own message is routinely below the fold or
 behind the card, so this is the only place the outcome is legible.
 
-The footer's **overflow (`⋯`) carries the three ways out of a posting** —
-`Site setup` · `Add links` · `Open options` — appended by `commonMenuItems()` to
-all three of the footer's branches, so they are there whether the posting is
-quick-apply, two-step, or already sent. Without them the card was a dead end: a
-site that filled the wrong field could only be fixed by closing the modal
-(losing the report), opening the toolbar popup, and finding Site setup there.
-Setup is a **direct call**, not a message — the panel is in the same content
-script, and `openSetup` already folds the review card through `arbitrateSheets`.
+The footer's **overflow (`⋯`) carries the two ways out of a posting** —
+`Site setup` · `Options` — appended by `commonMenuItems()` to all three of the
+footer's branches, so they are there whether the posting is quick-apply,
+two-step, or already sent. Without them the card was a dead end: a site that
+filled the wrong field could only be fixed by closing the modal (losing the
+report), opening the toolbar popup, and finding Site setup there. Setup is a
+**direct call**, not a message — the panel is in the same content script, and
+`openSetup` already folds the review card through `arbitrateSheets`.
 **Choosing any item closes the menu**: Re-run and Reset rebuild the card and took
-it with them, so this never showed, but two of the three open another tab and
-leave this one exactly as it was.
+it with them, so this never showed, but both of these open another tab and leave
+this one exactly as it was.
+
+`Add links` was a third, and is not: it is the one errand in the menu with
+nothing to do with the posting on screen, and the popup's Queue button already
+reaches the importer from a surface that needs no job page open. That deep link
+is now covered by the popup's E2E rather than the modal's.
 
 A **blocked primary de-fills rather than fading**
 (`button.cf-btn.primary[aria-disabled]` → `--surface`): the coral gradient at 45%
@@ -192,14 +197,19 @@ pure, unit-tested logic):
   tab on the first row no longer sits on the panel.
 
 The popup's actions are **two rows in fixed proportions, and nothing in them is
-ever hidden**: Fill (75%) · Queue (25%), then Site setup (50%) · Options (50%).
-Site setup used to hide on an unconfigured site and Queue whenever a session was
-running, so the popup was a different shape every time it opened — and the
-control you wanted was missing exactly when the page was in the state you wanted
-it for. Where a control is is half of knowing it exists. **Queue deep-links to
-the URL importer**, not to the options page's default tab: the queue *is* the
-links, and as a bare `OPEN_OPTIONS` it was indistinguishable from the Options
-button beside it.
+ever hidden**: Fill (100%), then Site setup · Queue · Options in equal thirds.
+The split is what each row *does*: Fill acts on the page in front of you, and the
+three below it open another surface — Queue sat beside Fill and read as a second
+thing to do here. Site setup used to hide on an unconfigured site and Queue
+whenever a session was running, so the popup was a different shape every time it
+opened — and the control you wanted was missing exactly when the page was in the
+state you wanted it for. Where a control is is half of knowing it exists.
+**Queue deep-links to the URL importer**, not to the options page's default tab:
+the queue *is* the links, and as a bare `OPEN_OPTIONS` it is indistinguishable
+from the Options button — which now sits two along from it, so this matters more
+than it did. Three buttons at `flex: 1 1 0` fit 360px with ~35px to spare and
+there is no `flex-wrap`, so the labels staying one or two words is what keeps the
+row a row; an E2E measures their `y`.
 
 Cross-context messaging goes through the typed `MSG` contract in
 `src/shared/messages.ts` (payloads must be structured-clone friendly).
@@ -382,13 +392,21 @@ inflated to 44px. Drawing the circle as part of the icon separates the glyph
 which is the whole fix. `helpButton` therefore sets **no text content**: its only
 name is the `aria-label`.
 
-Placement matters as much as the mark. It never goes *inside* a heading —
-`attachRowHelp` anchors it on the `.setrow` after the title and **before** the
-caption, so six rows do not put six buttons at six different x-positions and no
-control runs through the middle of a text block. The setup wizard's step header
-is a fixed order (`Step n of 6` `flex: 1` · count chip · `?`) above the title, so
-the `?` never sits inside the heading and lands in the same place on all six
-steps.
+Placement matters as much as the mark, and the rule is **immediately after the
+text it explains, never pushed to an edge**. Nothing in `primitives.css`
+positions it; a `?` at the right-hand edge of a row reads as belonging to the row
+rather than to a phrase in it, and on a full-width card it ends up a card's width
+from the words it is about. So `.setrow-text > .cf-help-btn` carries no
+`margin-left: auto` (it did, to land at the same x on every row — which works on
+a half-width card and is absurd on a wide one), the setup wizard's step meta line
+is `Step n of 6` · `?` … `N to do` with the *chip* taking the slack, and the
+modal's flow banner puts the `?` on a `.cf-flow-titleline` beside the title
+instead of after a `flex: 1` text block.
+
+It still never goes *inside* a heading: `attachRowHelp` anchors it on the
+`.setrow` after the title and **before** the caption, so no control runs through
+the middle of a text block, and the wizard's `?` stays on the meta line above the
+step title rather than in it.
 
 ### Data model & storage
 `src/shared/types.ts` is the source of truth: `Profile`, `SiteConfig`,
@@ -468,11 +486,18 @@ steps in the order the extension itself does things — `site` · `prep` · `kin
 has. It also owns `SetupRow`/`PrepRow`/`SetupSnapshot`, which `setupPanel.ts`
 re-exports so the controller and the harness keep one import path.
 
-Four counting rules, each with a test, and every one of them the same decision:
+Five counting rules, each with a test, and every one of them the same decision:
 **a healthy site must report no work**, or the chip is noise and the one step
 that really is unfinished goes unread with the rest.
 
-- `info` / `fields`: any row that is not a confident match.
+- `info`: any row that is not a confident match.
+- `fields`: **only the CV**. Detection runs over all fifteen text fields plus
+  `resume`, and a field the page does not ask for comes back `'none'` — so a
+  posting with four inputs had twelve unmatched rows and nothing wrong with it,
+  and this step said "12 to do" on every site in the world. An unmatched (or
+  merely `low`, or entirely absent) `resume` row still always counts: an
+  application sent without the document attached is the failure the whole surface
+  exists to prevent.
 - `kind`: **only** a *saved* selector that no longer resolves. "Not set" is the
   ordinary state of a quick-apply site; counting it labelled every site "2 to do".
 - `prep`: **never**. A `waitFor` whose target has not appeared yet is the normal
@@ -486,7 +511,26 @@ are what Apply depends on, and while they sat below sixteen field rows the
 confirmation element went unset on nearly every site — which is exactly what
 greys Apply out.
 
-Three rules the panel enforces:
+Two steps carry more than one list, and both groupings are the panel's doing
+rather than the model's:
+
+- **`prep` is "Page actions"** and holds *both* prep lists — "Run in order before
+  filling" and "Before leaving — run on the posting first". They are the same
+  thing (clicks and waits this site needs before the extension acts) and were a
+  step apart, the second buried under the redirect rows of a step about something
+  else. Only the first gets a `Run steps ▶`: running the second ends by
+  navigating away from the posting. The title is not "Before filling" any more
+  because that named one of the two, and not "Setup steps" because "Step 2 of 6:
+  Setup steps" stutters.
+- **`kind` groups its redirect rows by the verdict each argues for**
+  (`REDIRECT_GROUPS` in `setupPanel.ts`): External marker + External apply link
+  under one head, Quick-apply marker under the other. The first two are one
+  answer between them — "this posting applies elsewhere, and here is what to
+  press" — and neither is any use alone. The group's key order wins over
+  `REDIRECT_ROWS`', and a key in no group renders under a trailing "Other" head
+  rather than silently not rendering.
+
+Four rules the panel enforces:
 
 - **The step lives on the `SetupPanel` instance, never in `SetupData`.**
   `refreshSetup` re-renders after every Pick, prep edit and rename, so a step
@@ -501,7 +545,13 @@ Three rules the panel enforces:
   already existed and lived behind a `?` nobody pressed; with one step on screen
   there is finally room for it. The row-by-row `rows` stay behind the `?` — they
   are a reference, not an introduction. The intro sentence and the legend are
-  about the *panel*, so they lead step 1 above the rail, not inside it.
+  about the *panel* rather than about step 1, so they still lead the step's own
+  prose — they just no longer lead the card.
+- **The rail is the first thing in `.cf-body`, on every step.** The intro and the
+  legend render on step 1 only, so ahead of the rail they moved it ~200px between
+  step 1 and step 2, and moved it again whenever the legend's `<details>` was
+  opened — under the finger that had just opened it. The one element whose whole
+  job is to be in a fixed place cannot sit behind two that come and go.
 
 The rail carries **two marks per step**, because there are two questions. The
 step's own icon (`SETUP_STEP_ICONS`, `Record<SetupStepKey, string>` → an

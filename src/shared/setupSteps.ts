@@ -126,7 +126,7 @@ export interface StepState {
 
 type Part = Omit<StepState, 'key' | 'index'>;
 
-/** Rows are work whenever they are not a confident match — the info/fields rule. */
+/** Rows are work whenever they are not a confident match — the job-info rule. */
 function fromRows(rows: SetupRow[]): Part {
   if (!rows.length) return { tone: 'none', todo: 0, summary: 'nothing to set' };
   const todo = rows.filter((r) => r.status !== 'high').length;
@@ -167,6 +167,30 @@ function kind(s: SetupSnapshot): Part {
 }
 
 /**
+ * The one row list where an unmatched row is **not** work.
+ *
+ * `main.ts` runs detection over all fifteen text fields plus `resume`, and a
+ * field the page simply does not ask for comes back `'none'`. A posting with
+ * four inputs therefore has twelve unmatched rows and nothing wrong with it —
+ * counted the way `fromRows` counts, this step said "12 to do" on every site in
+ * the world, which is the cry-wolf failure every other rule here is written
+ * against.
+ *
+ * The CV is the exception, and the reason the step is worth a chip at all: an
+ * application sent without the document attached is the failure this whole
+ * surface exists to prevent. A `low` row counts too — found but not fillable is
+ * not found — and so does a page with no `resume` row, which is the same answer
+ * reached from the other side.
+ */
+function fields(s: SetupSnapshot): Part {
+  if (!s.fields.length) return { tone: 'none', todo: 0, summary: 'nothing to set' };
+  const cv = s.fields.find((r) => r.key === 'resume');
+  if (!cv || cv.status !== 'high') return { tone: 'warn', todo: 1, summary: 'no CV upload found' };
+  const matched = s.fields.filter((r) => r.status === 'high').length;
+  return { tone: 'ok', todo: 0, summary: `${matched} matched` };
+}
+
+/**
  * The two rows that decide whether Apply can run at all, which is why they are
  * their own step rather than the tail of a sixteen-row field list.
  *
@@ -188,7 +212,7 @@ const PARTS: Record<SetupStepKey, (s: SetupSnapshot) => Part> = {
   prep,
   kind,
   info: (s) => fromRows(s.containers),
-  fields: (s) => fromRows(s.fields),
+  fields,
   send,
 };
 

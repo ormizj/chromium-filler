@@ -157,6 +157,20 @@ describe('popup render', () => {
     await mountPopup(matched({ siteMatched: false, siteName: undefined }));
     expect(visible()).toHaveLength(4);
   });
+
+  /**
+   * Fill acts on the page in front of you; the other three open a different
+   * surface. Queue sat in the top row beside Fill, which read as a second thing
+   * to do *here* — and left the bottom row two buttons wide with a gap between
+   * the primary action and the rest of the extension.
+   */
+  it('puts the three ways out in one row, in order', async () => {
+    await mountPopup(matched());
+    expect([...document.querySelector('.links')!.children].map((el) => el.id))
+      .toEqual(['reconfigure', 'open-queue', 'open-options']);
+    expect([...document.querySelector('.actions')!.children].map((el) => el.id))
+      .toEqual(['primary']);
+  });
 });
 
 describe('queue session', () => {

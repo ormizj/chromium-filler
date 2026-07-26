@@ -771,7 +771,7 @@ const PREVIEW_CALLBACKS: ModalCallbacks = {
   onRerun: () => {}, onReset: () => {}, onApply: () => {},
   onConfirm: () => {}, onPick: () => {}, onFollow: () => {},
   onFillAnyway: () => {}, onSkip: () => {}, onClose: () => {},
-  onOpenSetup: () => {}, onOpenOptions: () => {}, onAddLinks: () => {},
+  onOpenSetup: () => {}, onOpenOptions: () => {},
 };
 
 function previewData(layout: ModalLayout): ModalData {

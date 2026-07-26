@@ -23,7 +23,9 @@ function snapshot(over: Partial<SetupSnapshot> = {}): SetupSnapshot {
     urlPattern: '*://acme.test/*',
     prep: [{ action: 'click', selector: '#apply', resolves: true }],
     containers: [row({ key: 'jobTitle' }), row({ key: 'jobDescription' })],
-    fields: [row({ key: 'email' }), row({ key: 'fullName' })],
+    // The CV row is always in this list — `main.ts` runs detection over every
+    // text field *plus* `resume` — and it is the only one the step counts.
+    fields: [row({ key: 'resume' }), row({ key: 'email' }), row({ key: 'fullName' })],
     verdict: 'Quick apply — a form was found here',
     redirect: [
       { key: 'applySelector', label: 'External apply link', status: 'none', note: 'not set', hasSave: false },
@@ -143,11 +145,11 @@ describe('application-type step', () => {
   });
 });
 
-describe('job-info and form-field steps', () => {
+describe('job-info step', () => {
   it('counts every row that is not a confident match', () => {
     const s = state(snapshot({
-      fields: [row(), row({ status: 'low' }), row({ status: 'none' })],
-    }), 'fields');
+      containers: [row(), row({ status: 'low' }), row({ status: 'none' })],
+    }), 'info');
     expect(s.todo).toBe(2);
     expect(s.tone).toBe('warn');
     expect(s.summary).toMatch(/2 to do/);
@@ -157,6 +159,60 @@ describe('job-info and form-field steps', () => {
     const s = state(snapshot(), 'info');
     expect(s.todo).toBe(0);
     expect(s.tone).toBe('ok');
+  });
+});
+
+describe('form-fields step', () => {
+  /**
+   * The one row list where an unmatched row is *not* work. A posting asks for
+   * four of the sixteen fields the extension knows how to fill; counting the
+   * twelve it does not ask for reported "12 to do" on a site with nothing wrong,
+   * which is exactly the cry-wolf failure every other rule here avoids.
+   */
+  it('ignores form fields the page does not ask for', () => {
+    const s = state(snapshot({
+      fields: [row({ key: 'resume' }), row({ key: 'city', status: 'none' }), row({ key: 'github', status: 'low' })],
+    }), 'fields');
+    expect(s.todo).toBe(0);
+    expect(s.tone).toBe('ok');
+  });
+
+  /**
+   * The CV is the exception, and the reason this step exists: an application
+   * sent without the document attached is the failure the whole surface is
+   * there to prevent, so an unmatched `resume` row is always work.
+   */
+  it('counts an unmatched CV upload', () => {
+    const s = state(snapshot({
+      fields: [row({ key: 'resume', status: 'none' }), row({ key: 'email' })],
+    }), 'fields');
+    expect(s.todo).toBe(1);
+    expect(s.tone).toBe('warn');
+    expect(s.summary).toMatch(/cv/i);
+  });
+
+  // Found but not fillable is not found: a `low` CV row cannot be relied on.
+  it('counts a CV upload that only weakly matched', () => {
+    const s = state(snapshot({
+      fields: [row({ key: 'resume', status: 'low' }), row({ key: 'email' })],
+    }), 'fields');
+    expect(s.todo).toBe(1);
+    expect(s.tone).toBe('warn');
+  });
+
+  // A page with no file input at all has no `resume` row to look at, and that is
+  // the same answer: nothing here can attach the CV.
+  it('counts a page with no CV row at all', () => {
+    const s = state(snapshot({ fields: [row({ key: 'email' })] }), 'fields');
+    expect(s.todo).toBe(1);
+    expect(s.tone).toBe('warn');
+  });
+
+  it('is untouched when no fields were detected', () => {
+    const s = state(snapshot({ fields: [] }), 'fields');
+    expect(s.todo).toBe(0);
+    expect(s.tone).toBe('none');
+    expect(s.summary).toMatch(/nothing/i);
   });
 });
 
@@ -206,7 +262,10 @@ describe('firstStepWithWork', () => {
   // What the panel opens on for a returning user: the work that is left, not a
   // walk through five steps that are already done.
   it('is the earliest step with something outstanding', () => {
-    const s = snapshot({ fields: [row({ status: 'none' })], success: row({ status: 'none' }) });
+    const s = snapshot({
+      fields: [row({ key: 'resume', status: 'none' })],
+      success: row({ status: 'none' }),
+    });
     expect(firstStepWithWork(stepStates(s))).toBe(SETUP_STEP_ORDER.indexOf('fields'));
   });
 

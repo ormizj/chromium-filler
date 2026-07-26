@@ -60,6 +60,12 @@ h3:has(> .cf-help-btn) {
   margin: 0 0 var(--space-5);
 }
 
+/* A hint that follows what it is about instead of introducing it, so its gap is
+   above rather than below. `.hint` is otherwise the same object. */
+.hint-tail {
+  margin: var(--space-5) 0 0;
+}
+
 /* ---------------- Tabs ---------------- */
 
 /**
@@ -206,13 +212,24 @@ select {
 .urls li select {
   background: var(--surface);
 }
+/**
+ * A file input is a button plus a filename, and those sit on the *first* line
+ * box of the `min-height: var(--tap)` every input on this page carries — i.e.
+ * hard against the top of a 44px box drawn around them.
+ *
+ * `display: flex; align-items: center` looked like the fix and did nothing:
+ * Blink lays a file input out with its own layout object and ignores `display`
+ * on it entirely, so the rule was inert on the only engine this ships to. What
+ * does work is giving the control one line box as tall as its own content area
+ * — a `line-height` of the 44px floor less the 1px borders — and the button
+ * inside it a `vertical-align` to ride on that line rather than its baseline.
+ */
 input[type='file'] {
-  padding: var(--space-2);
-  /* A file input is a button plus a filename, and as a block those sit on the
-     first line box of the `min-height: var(--tap)` every input here carries —
-     i.e. above centre, in a box drawn around them. */
-  display: flex;
-  align-items: center;
+  padding: 0 var(--space-2);
+  line-height: calc(var(--tap) - 2px);
+}
+input[type='file']::file-selector-button {
+  vertical-align: middle;
 }
 
 /* A stored document on one line: pick it, see what is held, remove it. The
@@ -415,17 +432,18 @@ label.check input {
 .setrow-text h5,
 .setrow-text .setrow-title {
   margin: 0;
+  min-width: 0;
   font-size: var(--text-md);
   font-weight: 600;
   display: flex;
   align-items: center;
   gap: var(--space-2);
 }
-/* The row's `?`, pushed to the end of the title line so it lands in the same
-   place on every row instead of trailing whatever the title happens to say. */
-.setrow-text > .cf-help-btn {
-  margin-left: auto;
-}
+/* The row's `?` trails its title, and nothing pushes it anywhere. It used to
+   carry `margin-left: auto` so it landed at the same x on every row — which
+   works on a half-width card and is absurd on a full-width one, where it flew to
+   the far edge with 600px of nothing between it and the title it explains. A `?`
+   is only legible as belonging to the words immediately before it. */
 .setrow-text p,
 .setrow-caption {
   flex: 1 0 100%;
@@ -464,9 +482,13 @@ label.check input {
    would shrink the control to its content instead of filling the row.
    The gap is every other row's, so a stacked card keeps the grid's rhythm: at
    `--space-3` it was visibly tighter than the switch card beside it, which is
-   half of what made it read as a different kind of object. Pair it with `.span`
-   — a column-shaped card in one half of the grid also stretches its neighbour,
-   because `.setrow` is `height: 100%`. */
+   half of what made it read as a different kind of object.
+   `.span` is a *separate* decision — pair the two only when the control needs
+   the whole width as well (the OAuth redirect URI does; a three-option select
+   does not). Stacked-and-spanning left a hole beside the switch card it should
+   have been sitting next to, and made a section of two settings read as two
+   unrelated kinds of thing. Either way a column-shaped card stretches its
+   neighbour, because `.setrow` is `height: 100%`. */
 .setrow.stacked {
   flex-direction: column;
   align-items: stretch;
@@ -1186,8 +1208,12 @@ label.fld.inline input {
  * gets tabular figures and room for two lines; the chips get a grid whose shape
  * depends only on the panel's width, and are hidden in place rather than removed.
  */
+/* The frame's own block spacing, matching the prose above it. At `--space-3` the
+   simulator sat 16px below the last settings row and 8px above everything that
+   explains it, so it read as pinned to the bottom of its own block — which is
+   what "the container has no room underneath" was. */
 .sim-readout {
-  margin: var(--space-3) 0 0;
+  margin: var(--space-5) 0 0;
   min-height: 2.6em;
   font-variant-numeric: tabular-nums;
 }

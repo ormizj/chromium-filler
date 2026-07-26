@@ -17,7 +17,7 @@ function callbacks(over: Partial<ModalCallbacks> = {}): ModalCallbacks {
   return {
     onRerun: noop, onReset: noop, onApply: noop, onConfirm: noop, onPick: noop,
     onFollow: noop, onFillAnyway: noop, onSkip: noop, onClose: noop,
-    onOpenSetup: noop, onOpenOptions: noop, onAddLinks: noop,
+    onOpenSetup: noop, onOpenOptions: noop,
     ...over,
   };
 }
@@ -314,10 +314,10 @@ describe('FillerModal — the footer offers Apply and Skip', () => {
   const menu = (shadow: ShadowRoot) =>
     [...shadow.querySelectorAll('.cf-more-menu button')].map((b) => b.textContent?.trim());
 
-  // The three that are on every branch: the card must not be a dead end. Before
+  // The two that are on every branch: the card must not be a dead end. Before
   // them, a posting whose fields came out wrong could only be fixed by closing
   // the modal and finding Site setup in the toolbar popup.
-  const WAYS_OUT = ['Site setup', 'Add links', 'Open options'];
+  const WAYS_OUT = ['Site setup', 'Options'];
 
   it('shows exactly Apply and Skip, with the rest behind the overflow', () => {
     const shadow = render(data([match()]));
@@ -325,25 +325,31 @@ describe('FillerModal — the footer offers Apply and Skip', () => {
     expect(menu(shadow)).toEqual(['Re-run', 'Reset', ...WAYS_OUT]);
   });
 
-  it('reaches the setup wizard, the importer and the options page from the menu', () => {
+  /**
+   * The menu is about the posting on screen and the site it is on. Queueing up
+   * more postings is neither, and the popup's Queue button reaches the importer
+   * from a surface that does not need a job page open at all.
+   */
+  it('does not offer the URL importer', () => {
+    expect(menu(render(data([match()])))).not.toContain('Add links');
+  });
+
+  it('reaches the setup wizard and the options page from the menu', () => {
     const onOpenSetup = vi.fn();
-    const onAddLinks = vi.fn();
     const onOpenOptions = vi.fn();
-    const shadow = render(data([match()]), callbacks({ onOpenSetup, onAddLinks, onOpenOptions }));
+    const shadow = render(data([match()]), callbacks({ onOpenSetup, onOpenOptions }));
     const item = (label: string) => [...shadow.querySelectorAll<HTMLButtonElement>('.cf-more-menu button')]
       .find((b) => b.textContent?.trim() === label)!;
     item('Site setup').click();
-    item('Add links').click();
-    item('Open options').click();
+    item('Options').click();
     expect(onOpenSetup).toHaveBeenCalledOnce();
-    expect(onAddLinks).toHaveBeenCalledOnce();
     expect(onOpenOptions).toHaveBeenCalledOnce();
   });
 
   // Re-run and Reset rebuild the whole card, so the menu went with them and this
-  // never showed. Two of the three ways out open another tab and leave this one
-  // untouched — and a popover still hanging over the report when the user comes
-  // back has outlived the choice it was opened to make.
+  // never showed. Both ways out open another tab and leave this one untouched —
+  // and a popover still hanging over the report when the user comes back has
+  // outlived the choice it was opened to make.
   it('closes the menu when an item is chosen', () => {
     const shadow = render(data([match()]));
     const toggle = shadow.querySelector<HTMLButtonElement>('.cf-more > .cf-btn')!;
@@ -352,7 +358,7 @@ describe('FillerModal — the footer offers Apply and Skip', () => {
     expect(menu.hidden).toBe(false);
     expect(toggle.getAttribute('aria-expanded')).toBe('true');
 
-    [...menu.querySelectorAll('button')].find((b) => b.textContent === 'Open options')!.click();
+    [...menu.querySelectorAll('button')].find((b) => b.textContent === 'Options')!.click();
     expect(menu.hidden).toBe(true);
     expect(toggle.getAttribute('aria-expanded')).toBe('false');
   });

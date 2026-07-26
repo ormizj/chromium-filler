@@ -86,6 +86,21 @@ const PREP_LABEL: Record<PrepAction, string> = {
   delay: 'Delay',
 };
 
+/**
+ * The two verdicts the `kind` step decides between, and the rows that argue for
+ * each. See `appendRedirectRows` for why this is a grouping and not a list.
+ */
+const REDIRECT_GROUPS: ReadonlyArray<{ head: string; keys: readonly string[] }> = [
+  {
+    head: 'External — the application is on the employer’s site',
+    keys: ['markerSelector', 'applySelector'],
+  },
+  {
+    head: 'Quick apply — the form is on this page',
+    keys: ['quickApplySelector'],
+  },
+];
+
 export class SetupPanel extends Sheet<SetupData> {
   private cb: SetupCallbacks;
   /**
@@ -194,17 +209,21 @@ export class SetupPanel extends Sheet<SetupData> {
     const current = states[this.step];
 
     const body = el('div', 'cf-body');
-    // Orientation, then position, then the step. The intro and the legend are
-    // about the *panel*, not about step 1, so they lead — rendered after the
-    // step's own prose they read as an afterthought wedged between two
-    // explanations, which is how the first cut of this had them.
+    // The rail leads on every step, so it sits at the same y on all six. It used
+    // to come *after* the intro and the legend — which only render on step 1 —
+    // so walking off step 1 jumped the rail ~200px up the card, and opening the
+    // legend's `<details>` moved it again under the user's finger. The intro and
+    // the legend are still about the panel rather than about step 1, so they
+    // stay ahead of the step's own prose; they just no longer displace the one
+    // element whose whole job is to be in a fixed place.
+    body.append(this.rail(states));
     if (current.key === 'site') {
       const intro = el('p', 'cf-intro');
       intro.textContent = 'Teach the extension how to read and fill this site. '
         + 'It sends nothing until you press Apply.';
       body.append(intro, this.legend(data));
     }
-    body.append(this.rail(states), this.stepHead(current), this.stepBody(current.key, data));
+    body.append(this.stepHead(current), this.stepBody(current.key, data));
 
     // Two buttons, on every step, with exactly one primary — the same rule the
     // review modal's footer follows, and for the same 390px reason.
@@ -273,15 +292,13 @@ export class SetupPanel extends Sheet<SetupData> {
   private stepHead(s: StepState): HTMLElement {
     const head = el('div', 'cf-step-head');
 
+    // `Step n of 6` · `?` … `N to do`. The `?` trails the text it belongs to
+    // rather than being pushed to the far edge; the chip keeps the right edge,
+    // because it is a status and reads as one only where nothing else is.
     const meta = el('div', 'cf-step-meta');
     const count = el('span', 'cf-step-count');
     count.textContent = `Step ${s.index + 1} of ${SETUP_STEP_ORDER.length}`;
     meta.append(count);
-    if (s.todo > 0) {
-      const chip = el('span', 'chip warn cf-step-todo');
-      chip.textContent = `${s.todo} to do`;
-      meta.append(chip);
-    }
 
     const help = SETUP_STEP_HELP[s.key];
     const open = this.openHelp.has(s.key);
@@ -290,6 +307,12 @@ export class SetupPanel extends Sheet<SetupData> {
       else this.openHelp.delete(s.key);
       this.repaint();
     }));
+
+    if (s.todo > 0) {
+      const chip = el('span', 'chip warn cf-step-todo');
+      chip.textContent = `${s.todo} to do`;
+      meta.append(chip);
+    }
     head.append(meta);
 
     const title = el('h2', 'cf-step-title');
@@ -328,9 +351,18 @@ export class SetupPanel extends Sheet<SetupData> {
     if (key === 'prep') {
       const head = el('div', 'cf-section-row');
       head.append(sectionHead('Run in order before filling'));
+      // Only the first list has a Run button: `onRunPrep` replays the pre-fill
+      // steps against the page you are looking at, and "before leaving" ends by
+      // navigating away from it.
       head.append(btn('Run steps ▶', () => this.cb.onRunPrep()));
       body.append(head);
       this.appendPrepList(body, data.prep, 'prep');
+
+      // Both lists are the same thing — clicks and waits this site needs before
+      // the extension acts — and they were a step apart, with the second one
+      // buried under the redirect rows of a step about something else entirely.
+      body.append(sectionHead('Before leaving — run on the posting first, e.g. “Save job”'));
+      this.appendPrepList(body, data.beforeFollow, 'beforeFollow');
     }
 
     if (key === 'kind') {
@@ -338,13 +370,7 @@ export class SetupPanel extends Sheet<SetupData> {
       verdict.textContent = data.verdict;
       verdict.title = data.verdict;
       body.append(verdict);
-      for (const row of data.redirect) {
-        body.append(this.row('redirect', row,
-          () => this.cb.onPickRedirect(row.key),
-          () => this.cb.onClearRedirect(row.key)));
-      }
-      body.append(sectionHead('Before leaving — run on the posting first, e.g. “Save job”'));
-      this.appendPrepList(body, data.beforeFollow, 'beforeFollow');
+      this.appendRedirectRows(body, data.redirect);
     }
 
     if (key === 'info') {
@@ -435,6 +461,44 @@ export class SetupPanel extends Sheet<SetupData> {
 
     details.append(body);
     return details;
+  }
+
+  /**
+   * The redirect rows, under the verdict each one argues for.
+   *
+   * Flat, the three read as three unrelated selectors. They are not: the
+   * external marker says "this posting applies elsewhere" and the apply link
+   * says "and here is what to press" — neither is any use without the other, and
+   * a user who sets one and not the other has configured nothing. The
+   * quick-apply marker answers the opposite question and belongs on its own.
+   *
+   * Driven by a table rather than by `REDIRECT_ROWS`' order, and with a trailing
+   * catch-all group, so a new `RedirectSelectorKey` shows up unfiled instead of
+   * silently not showing up at all.
+   */
+  private appendRedirectRows(body: HTMLElement, rows: SetupRow[]): void {
+    const grouped = new Set<string>();
+    const emit = (head: string, group: SetupRow[]) => {
+      if (!group.length) return;
+      body.append(sectionHead(head));
+      for (const row of group) {
+        body.append(this.row('redirect', row,
+          () => this.cb.onPickRedirect(row.key),
+          () => this.cb.onClearRedirect(row.key)));
+      }
+    };
+
+    for (const { head, keys } of REDIRECT_GROUPS) {
+      // Ordered by the group, not by the order the rows arrived in: the marker
+      // ("this posting applies elsewhere") has to be read before the link that
+      // says where, and `REDIRECT_ROWS` lists them the other way round.
+      const group = keys
+        .map((k) => rows.find((r) => r.key === k))
+        .filter((r): r is SetupRow => !!r);
+      for (const r of group) grouped.add(r.key);
+      emit(head, group);
+    }
+    emit('Other', rows.filter((r) => !grouped.has(r.key)));
   }
 
   /** A step list plus its "+ step" bar; all three prep lists render identically. */

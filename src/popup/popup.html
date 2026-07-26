@@ -37,18 +37,22 @@
            setup only on a configured site, Queue only when something was waiting —
            so the popup was a different shape every time it opened and the one
            control that never moved, Options, was left as a small button adrift
-           under a full-width Fill. Where a thing is is half of knowing it exists. -->
+           under a full-width Fill. Where a thing is is half of knowing it exists.
+
+           The one thing this popup does to the page in front of you gets a row to
+           itself; the three that open another surface share the one below it. -->
       <div class="actions">
         <button id="primary" class="btn btn-primary" disabled>Fill</button>
-        <a id="open-queue" href="#">Queue</a>
       </div>
 
       <div class="links">
         <!-- Short labels, and no arrow: these are button-shaped, and the reference's
-             secondary row is two one-word verbs (Reset / Queue). As sentences they
-             wrapped onto a second line in a 360px popup and left the row ragged.
+             secondary row is one-word verbs. As sentences they wrapped onto a second
+             line in a 360px popup and left the row ragged — which matters more now
+             that there are three of them sharing 336px.
              The arrow stays on `.nudge`, which is a prompt rather than a button. -->
         <a id="reconfigure" href="#">Site setup</a>
+        <a id="open-queue" href="#">Queue</a>
         <a id="open-options" href="#">Options</a>
       </div>
       <div id="build" class="build"></div>

@@ -108,7 +108,6 @@ export type ActionKey =
   | 'pick'
   | 'done'
   | 'openOptions'
-  | 'addLinks'
   | 'more'
   | 'openApplication'
   | 'openApplicationAgain'
@@ -127,11 +126,10 @@ export const ACTION_LABELS: Record<ActionKey, string> = {
   confirm: 'Confirm',
   pick: 'Pick',
   done: 'Done',
-  openOptions: 'Open options',
-  // Two words, and named for what you do there rather than for the tab it
-  // lands on: the popup's Queue button and the review modal's menu item both
-  // arrive at the same paste box.
-  addLinks: 'Add links',
+  // One word, like every other secondary action. "Open options" named the verb
+  // as well as the destination, which nothing else in the menu does — every item
+  // in it opens something.
+  openOptions: 'Options',
   more: '⋯',
   openApplication: 'Open application',
   openApplicationAgain: 'Open again',
