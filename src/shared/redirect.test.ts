@@ -2,6 +2,7 @@ import { describe, it, expect } from 'vitest';
 import { isExternalUrl, looksLikeExternalApply, resolveHref } from './redirect';
 
 const PAGE = 'https://jobs.example.com/postings/123';
+const ATS = 'https://boards.greenhouse.io/acme/jobs/7';
 
 describe('isExternalUrl', () => {
   it('is true for a different host', () => {
@@ -50,6 +51,37 @@ describe('resolveHref', () => {
     expect(resolveHref(PAGE, undefined)).toBeUndefined();
     expect(resolveHref(PAGE, 'javascript:void(0)')).toBeUndefined();
     expect(resolveHref(PAGE, '#')).toBeUndefined();
+  });
+
+  it('refuses an app-handoff scheme by default — the browser is where we can fill', () => {
+    expect(resolveHref(PAGE, 'linkedin://jobs/7')).toBeUndefined();
+    expect(resolveHref(PAGE, 'market://details?id=com.x')).toBeUndefined();
+  });
+
+  it('rewrites an intent: apply link to the web URL it carries', () => {
+    const href = `intent://acme.com/jobs/7#Intent;package=com.acme;S.browser_fallback_url=${encodeURIComponent(ATS)};end`;
+    expect(resolveHref(PAGE, href)).toBe(ATS);
+  });
+
+  it('lets an app scheme through when keepInBrowser is off', () => {
+    expect(resolveHref(PAGE, 'linkedin://jobs/7', false)).toBe('linkedin://jobs/7');
+    // Still not a navigation, setting or no setting.
+    expect(resolveHref(PAGE, 'mailto:jobs@acme.com', false)).toBeUndefined();
+  });
+});
+
+describe('isExternalUrl with app-handoff links', () => {
+  it('judges an intent: link on the host its fallback really reaches', () => {
+    // The intent URL's own host is the *app's* deep-link host, which is not what
+    // the browser would load — comparing on it would classify wrongly either way.
+    const sameHost = `intent://app.example/x#Intent;package=com.acme;S.browser_fallback_url=${encodeURIComponent('https://jobs.example.com/apply/1')};end`;
+    expect(isExternalUrl(PAGE, sameHost)).toBe(false);
+    const crossHost = `intent://app.example/x#Intent;package=com.acme;S.browser_fallback_url=${encodeURIComponent(ATS)};end`;
+    expect(isExternalUrl(PAGE, crossHost)).toBe(true);
+  });
+
+  it('is false for an app link with no web form, so it is never a candidate', () => {
+    expect(isExternalUrl(PAGE, 'linkedin://jobs/7')).toBe(false);
   });
 });
 

@@ -25,6 +25,31 @@ describe('flowBanner', () => {
       expect(flowBanner({ ...base, applied: true, applyState }).key).toBe('applied');
     }
     expect(flowBanner({ ...base, applied: true, redirect: { followed: true } }).key).toBe('applied');
+    expect(flowBanner({ ...base, applied: true, appLink: true }).key).toBe('applied');
+  });
+
+  it('explains an apply control that opens an app', () => {
+    const b = flowBanner({ ...base, appLink: true });
+    expect(b.key).toBe('appLink');
+    expect(b.tone).toBe('warn');
+    expect(b.help).toBe('appLink');
+    expect(b.title).toMatch(/app/i);
+  });
+
+  it('an app link outranks the redirect states — nothing was opened', () => {
+    // A configured two-step site whose apply link turns out to be an app link is
+    // both at once, and "Opening the employer's application" would be a lie.
+    for (const followed of [false, true]) {
+      const b = flowBanner({ ...base, appLink: true, redirect: { host: 'ats.acme.test', followed } });
+      expect(b.key).toBe('appLink');
+    }
+  });
+
+  it('an app link outranks a blocked Apply and an empty page', () => {
+    // Same reason `noButton` beats `empty`: the narrower explanation is the useful
+    // one. An app-link posting has no Send button *because* the form is elsewhere.
+    expect(flowBanner({ ...base, appLink: true, applyState: 'noButton' }).key).toBe('appLink');
+    expect(flowBanner({ ...base, appLink: true, applyState: 'noButton', total: 0 }).key).toBe('appLink');
   });
 
   it('names the destination of a two-step posting', () => {

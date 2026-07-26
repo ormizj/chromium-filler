@@ -21,6 +21,7 @@ import type { SessionState } from '../shared/messages';
 import { getJobUrls, getSettings, mutateJobUrls } from '../shared/storage';
 import { applyStatus, recordStatus } from '../shared/jobUrls';
 import { nextBatch, queueProgress } from '../shared/queue';
+import { navigableUrl } from '../shared/appLink';
 
 const LOG = '[chromium-filler:session]';
 
@@ -87,6 +88,26 @@ function serialize(fn: () => Promise<void>): Promise<void> {
   return chain;
 }
 
+/**
+ * Open one queued posting, or nothing when its URL would leave the browser.
+ *
+ * The check is here rather than in `urlImport.ts` on purpose: the job database is
+ * data and `keepInBrowser` is behaviour, so filtering on the way in would destroy
+ * a URL that turning the setting off ought to bring back. An `intent://` entry
+ * that carries a web address is opened at that address.
+ */
+async function openJobTab(url: string, keepInBrowser: boolean): Promise<chrome.tabs.Tab | undefined> {
+  const target = navigableUrl(url, undefined, keepInBrowser);
+  if (!target) {
+    console.warn(LOG, 'not opening a posting that hands off to an app —', url);
+    return undefined;
+  }
+  return chrome.tabs.create({ url: target, active: false }).catch((e) => {
+    console.warn(LOG, 'could not open', url, e);
+    return undefined;
+  });
+}
+
 /** Open enough waiting postings to bring the window back up to `batchSize`. */
 async function topUp(): Promise<void> {
   const record = await getRecord();
@@ -110,11 +131,9 @@ async function topUp(): Promise<void> {
   // failed to open leaves the queue with nothing to close and nothing to top up
   // from — the posting would silently never be applied to.
   const opened: string[] = [];
+  const { keepInBrowser } = await getSettings();
   for (const url of urls) {
-    const tab = await chrome.tabs.create({ url, active: false }).catch((e) => {
-      console.warn(LOG, 'could not open', url, e);
-      return undefined;
-    });
+    const tab = await openJobTab(url, keepInBrowser);
     if (tab?.id != null) {
       next[String(tab.id)] = url;
       opened.push(url);
@@ -223,11 +242,9 @@ export async function sessionState(): Promise<SessionState> {
  */
 export async function openUrls(urls: string[]): Promise<void> {
   const opened: string[] = [];
+  const { keepInBrowser } = await getSettings();
   for (const url of urls) {
-    const tab = await chrome.tabs.create({ url, active: false }).catch((e) => {
-      console.warn(LOG, 'could not open', url, e);
-      return undefined;
-    });
+    const tab = await openJobTab(url, keepInBrowser);
     if (tab) opened.push(url); // a posting with no tab is still waiting
     await delay(STAGGER_MS);
   }

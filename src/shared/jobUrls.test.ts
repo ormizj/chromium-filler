@@ -1,9 +1,24 @@
 import { describe, it, expect } from 'vitest';
 import {
-  addUrls, applyStatus, applyStatusChain, deleteUrl, jobUrlStats, linkRedirect, normalizeEntry,
-  pruneTombstones, recordStatus, removeUrl, TOMBSTONE_TTL_MS, visibleUrls,
+  ALL_JOB_STATUSES, addUrls, applyStatus, applyStatusChain, deleteUrl, jobUrlStats, linkRedirect,
+  normalizeEntry, pruneTombstones, recordStatus, removeUrl, TOMBSTONE_TTL_MS, visibleUrls,
 } from './jobUrls';
 import type { JobUrlEntry } from './types';
+
+describe('ALL_JOB_STATUSES', () => {
+  /**
+   * Derived from STATUS_RANK rather than typed out again, so a new status cannot
+   * be added to the model without appearing everywhere it is offered as a choice
+   * — the queue filters and the archive's status checkboxes both render from it.
+   */
+  it('is every status a posting can be in, in flow order', () => {
+    expect(ALL_JOB_STATUSES).toEqual(['new', 'opened', 'redirected', 'skipped', 'applied']);
+  });
+
+  it('leaves out the tombstone, which is not a state a posting is shown in', () => {
+    expect(ALL_JOB_STATUSES).not.toContain('deleted');
+  });
+});
 
 describe('addUrls — unique by URL', () => {
   it('adds new urls with new status and history', () => {

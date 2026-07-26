@@ -2,7 +2,7 @@ import { describe, it, expect } from 'vitest';
 import type { SiteConfig } from './types';
 import {
   CONCEPT_HELP, CONFIG_HELP, DOT_LEGEND, PREP_HELP, REDIRECT_HELP, SETTINGS_HELP,
-  SETUP_GROUP_HELP, describeConfig, type HelpEntry,
+  SETUP_STEP_HELP, describeConfig, type HelpEntry,
 } from './help';
 
 /** Every catalog, flattened, so the shape rules are asserted once for all of them. */
@@ -11,7 +11,7 @@ const ALL: Array<[string, HelpEntry]> = [
   ...Object.entries(REDIRECT_HELP),
   ...Object.entries(SETTINGS_HELP),
   ...Object.entries(PREP_HELP),
-  ...Object.entries(SETUP_GROUP_HELP),
+  ...Object.entries(SETUP_STEP_HELP),
   ...Object.entries(CONCEPT_HELP),
 ];
 
@@ -32,8 +32,8 @@ describe('help catalog', () => {
     }
   });
 
-  it('documents every row of every setup group', () => {
-    for (const [key, group] of Object.entries(SETUP_GROUP_HELP)) {
+  it('documents every row of every setup step', () => {
+    for (const [key, group] of Object.entries(SETUP_STEP_HELP)) {
       for (const row of group.rows ?? []) {
         expect(row.label.trim(), `${key} row label`).not.toBe('');
         expect(row.body.trim(), `${key}.${row.label}`).not.toBe('');

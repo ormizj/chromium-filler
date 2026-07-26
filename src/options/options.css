@@ -264,9 +264,23 @@ button:not(.primary, .tab, .filter, .chip, .sim-handle, .sim-grip):hover {
   background: var(--surface-2);
   border-color: var(--border-strong);
 }
+/* Unavailable, not absent. A blanket `opacity: .45` faded the border along with
+   the label, so Connect / Sync now / Disconnect — the Sync tab's resting state
+   until a client is entered — read as three lines of grey text rather than three
+   buttons. Same decision as the modal's blocked primary, which de-fills instead of
+   fading: keep the shape, drop the emphasis. */
 button:disabled {
-  opacity: 0.45;
   cursor: not-allowed;
+}
+/* Same exclusions as the hover rule above: a tab, a filter and a chip are not
+   this shape of button and must not be repainted as one. */
+button:not(.tab, .filter, .chip, .sim-handle, .sim-grip):disabled {
+  background: var(--surface);
+  border-color: var(--border);
+  color: var(--muted-2);
+}
+button.primary:disabled {
+  box-shadow: none;
 }
 
 .status {
@@ -276,6 +290,24 @@ button:disabled {
 .status.ok {
   color: var(--ok);
 }
+/**
+ * An error the user has to act on is a block, not a red sentence floating between
+ * a card and a button row — which is how "Sync needs a Google OAuth client" read,
+ * and that is the Sync tab's resting state until a client is entered. The same
+ * shape as `.cf-help`: a bordered panel with a coloured left edge.
+ *
+ * Only the paragraph form. Half the `.status` elements are an inline `<span>`
+ * sitting in a row of buttons, where a padded box would break the row — and
+ * `:not(:empty)` keeps the box from appearing when there is no message.
+ */
+p.status.err:not(:empty) {
+  padding: var(--space-3) var(--space-4);
+  border: 1px solid var(--border);
+  border-left: 3px solid var(--err);
+  border-radius: var(--radius-md);
+  background: var(--err-weak);
+}
+
 .status.err {
   color: var(--err);
 }
@@ -316,7 +348,14 @@ label.check input {
 /* A paper object standing on the recessed body — the reference's `.setrow`. */
 .setrow {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
+  /* Lines sit at the top of the card, rather than being centred in whatever
+     height the grid row ended up at. The cards in a row are equal-height
+     (`height: 100%`), so a row whose disclosure is open makes its neighbour tall
+     — and centred, that neighbour's one line floated in the middle of an empty
+     card. `align-items` still centres the control against its title within a line. */
+  align-content: flex-start;
   gap: var(--space-5);
   background: var(--bg);
   border: 1px solid var(--border);
@@ -358,6 +397,14 @@ label.check input {
   line-height: 1.5;
 }
 
+/* The row's own disclosure, on a line of its own beneath both the text block and
+   the control. It is a child of the `.setrow` rather than its next sibling
+   because the row sits in a grid — see `attachHelp` in options.ts. */
+.setrow-help {
+  flex: 1 0 100%;
+  margin: var(--space-3) 0 0;
+}
+
 /* A value control on the right of its row, sized to its content rather than
    stretching across it — `input` is 100% wide by default on this page. */
 .setrow-value {
@@ -374,10 +421,13 @@ label.check input {
   grid-column: 1 / -1;
 }
 
-/* The label above a control too wide to sit beside it. */
+/* The label above a control too wide to sit beside it. Its cross axis is the
+   horizontal one, so it wants the default distribution back — `flex-start` there
+   would shrink the control to its content instead of filling the row. */
 .setrow.stacked {
   flex-direction: column;
   align-items: stretch;
+  align-content: stretch;
   gap: var(--space-3);
 }
 
@@ -1249,6 +1299,34 @@ label.fld.inline input {
   font-weight: 600;
 }
 
+.reference > summary::-webkit-details-marker {
+  display: none;
+}
+
+/* `display: flex` drops the native marker, and nothing replaced it — so both of
+   these ("What to export", "What every setting means") rendered as a bordered box
+   with a line of text in it and read as an empty input. The same drawn chevron the
+   setup panel's legend uses: one mark for a disclosure across the whole app. */
+.reference > summary::after {
+  content: '';
+  flex: none;
+  margin-left: auto;
+  width: 16px;
+  height: 16px;
+  background: currentcolor;
+  -webkit-mask: var(--icon-chevron) center / contain no-repeat;
+  mask: var(--icon-chevron) center / contain no-repeat;
+  transition: transform 120ms ease;
+}
+.reference[open] > summary::after {
+  transform: rotate(180deg);
+}
+@media (prefers-reduced-motion: reduce) {
+  .reference > summary::after {
+    transition: none;
+  }
+}
+
 .reference-body {
   padding: var(--space-5);
   display: flex;
@@ -1308,6 +1386,54 @@ label.fld.inline input {
    (primitives.css) with its accent left border; only the bottom gap is added. */
 #configs-explain {
   margin-bottom: var(--space-5);
+}
+
+/* ---------------- Archive: what to export ---------------- */
+
+/* A group of ticks with a title. The fieldset's own border would be a second box
+   inside the disclosure, so only the legend is kept. */
+.checkgroup {
+  border: none;
+  padding: 0;
+  margin: 0;
+}
+
+.checkgroup > legend {
+  padding: 0 0 var(--space-3);
+  font-size: var(--text-md);
+  font-weight: 600;
+  color: var(--fg);
+}
+
+/* Fourteen columns as one list is a scroll; as auto-fill columns it is a glance.
+   140px rather than a comfortable 190 so that a 390px phone still gets *two*
+   columns — the grid is 298px wide there, and at one column this group alone is
+   a screen and a half. */
+.checks {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+  gap: var(--space-1) var(--space-4);
+}
+
+/* The whole row is the label, so the tap target is the text and not the 16px box
+   beside it — the same reason every button here is `--tap` tall. */
+.check {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  min-height: var(--tap);
+  font-size: var(--text-md);
+  cursor: pointer;
+}
+
+.check input {
+  width: auto;
+  flex: none;
+  margin: 0;
+}
+
+#export-summary {
+  margin: var(--space-3) 0 0;
 }
 
 /* A chip that is also a control — the config picker. */

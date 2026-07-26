@@ -124,8 +124,8 @@ async function readJobDetails(): Promise<JobDetailsMap> {
  * would have downloaded, by intercepting the object URL rather than letting
  * Chromium write to disk.
  */
-async function exportedJobs(): Promise<ExportedJob[]> {
-  const json = await onExtensionPage((page) => page.evaluate(async () => {
+async function exportedText(page: Page): Promise<string> {
+  return page.evaluate(async () => {
     let blob: Blob | null = null;
     const realCreate = URL.createObjectURL;
     const realClick = HTMLAnchorElement.prototype.click;
@@ -139,7 +139,11 @@ async function exportedJobs(): Promise<ExportedJob[]> {
       URL.createObjectURL = realCreate;
       HTMLAnchorElement.prototype.click = realClick;
     }
-  }));
+  });
+}
+
+async function exportedJobs(): Promise<ExportedJob[]> {
+  const json = await onExtensionPage(exportedText);
   return json ? (JSON.parse(json) as ExportedJob[]) : [];
 }
 
@@ -667,6 +671,50 @@ test('MixedBoard: a tracker chain records where it LANDED, not the hop it starte
   await board.close();
 });
 
+test('MixedBoard: an intent:// apply link is followed at the web address it carries', async () => {
+  test.setTimeout(90_000);
+  await patchSettings({ redirectTarget: 'newTab', closeTabOnSubmit: false });
+
+  const boardUrl = urlFor('mixed-applink');
+  const { board, dest } = await followHandoff(boardUrl);
+
+  // The whole point: the tab went to the fallback URL, over http, and not to the
+  // `intent://acme.example/…` the link actually said. The posting carries no
+  // `scheme=`, so nothing but the fallback could have produced this.
+  expect(dest.url()).toBe(`${ALT}/sites/ats-form.html?src=applink`);
+  await expect(dest.locator('#ats-first')).toHaveValue('Ada', { timeout: 30_000 });
+
+  // And it is an ordinary handoff from there on — both ends linked, as recorded
+  // for any two-step posting.
+  const source = await waitForJobUrl(boardUrl, (e) => e.status === 'redirected');
+  expect(source.redirectUrl).toBe(dest.url());
+
+  await dest.close();
+  await board.close();
+});
+
+test('MixedBoard: a linkedin:// apply link opens nothing and says why', async () => {
+  const board = await context.newPage();
+  // Armed after our own tab exists, so only a handoff would register here.
+  let newTabs = 0;
+  const countTab = () => { newTabs++; };
+  context.on('page', countTab);
+
+  await board.goto(urlFor('mixed-appscheme'));
+
+  // No web address to reach, so the extension stays put. This is the assertion
+  // that matters: nothing was ever handed to the browser that could leave it.
+  await expect(board.locator('.cf-card')).toBeVisible({ timeout: 20_000 });
+  await expect(board.locator('.cf-flow')).toContainText('applies in an app');
+  expect(newTabs, 'an app-scheme apply link must never open a tab').toBe(0);
+
+  // Still on the board: the same-tab variant of the leak would show up here.
+  expect(board.url()).toBe(urlFor('mixed-appscheme'));
+
+  context.off('page', countTab);
+  await board.close();
+});
+
 test('QuickBoard: the decoy "Apply on company website" link is not followed', async () => {
   const page = await context.newPage();
   // Armed after our own tab exists, so only a handoff would register here.
@@ -838,6 +886,82 @@ test('Session: holds the batch size and opens the next posting as one closes', a
   }
 });
 
+/* ---------------- The archive ---------------- */
+
+test('Options: the archive exports what was ticked, and the ticks survive a reload', async () => {
+  // The whole feature in one pass: the checkboxes drive the file, and the choice
+  // is a *setting* rather than page state — a selection that lasted only as long
+  // as the tab was open would have to be re-made before every export.
+  const saved = await onExtensionPage((p) => p.evaluate(
+    () => chrome.storage.local.get(['jobUrls', 'jobDetails', 'settings']),
+  ));
+  const applied = 'https://board.test/kept';
+  const skipped = 'https://board.test/passed';
+  const page = await context.newPage();
+  try {
+    // Seeded from this page and then reloaded, deliberately: an options page
+    // collects captures whose posting has gone (`pruneDetails`) once per load,
+    // reading the URL list *before* this evaluate could set it. Writing the two
+    // together and reloading is what keeps the seed self-consistent.
+    await page.goto(`chrome-extension://${extId}/src/options/options.html`);
+    await page.evaluate(async ([a, s]) => {
+      const now = Date.now();
+      const entry = (id: string, url: string, status: string) => ({
+        id, url, status, addedAt: now, updatedAt: now, history: [{ status, at: now }],
+        ...(status === 'applied' ? { appliedAt: now } : {}),
+      });
+      const details = (url: string, title: string) => ({
+        url, title, description: [{ kind: 'para', text: 'Body text' }],
+        requirements: [], meta: { company: 'Acme' }, capturedAt: now,
+      });
+      await chrome.storage.local.set({
+        jobUrls: [entry('k1', a, 'applied'), entry('k2', s, 'skipped')],
+        jobDetails: { [a]: details(a, 'Engineer, Senior'), [s]: details(s, 'Passed over') },
+        settings: {
+          ...(await chrome.storage.local.get('settings')).settings,
+          exportOptions: {},
+        },
+      });
+    }, [applied, skipped]);
+    await page.reload();
+    const openPanel = async () => {
+      if (!await page.locator('#export-options').evaluate((d: HTMLDetailsElement) => d.open)) {
+        await page.locator('#export-options > summary').click();
+      }
+    };
+    await openPanel();
+
+    // Everything off except the two columns wanted, plus the skipped postings
+    // and CSV. Each tick is its own storage write, which is why they are
+    // serialized — twelve of them in a row used to be where a lost update hid.
+    for (const field of [
+      'url', 'site', 'company', 'location', 'employmentType', 'addedAt', 'appliedAt',
+      'capturedAt', 'sourceUrl', 'redirectUrl', 'description', 'requirements',
+    ]) {
+      await page.locator(`#export-field-${field}`).uncheck();
+    }
+    await page.locator('#export-status-skipped').check();
+    await page.locator('#export-format-csv').check();
+
+    await page.reload();
+    await openPanel();
+    await expect(page.locator('#export-field-title')).toBeChecked();
+    await expect(page.locator('#export-field-description')).not.toBeChecked();
+    await expect(page.locator('#export-status-skipped')).toBeChecked();
+    await expect(page.locator('#export-format-csv')).toBeChecked();
+
+    const csv = await exportedText(page);
+    const lines = csv.replace(/^﻿/, '').split('\r\n');
+    // The header is the chosen columns, in the catalog's order — and a title
+    // holding a comma is quoted, or every row after it shifts by a column.
+    expect(lines[0]).toBe('title,status');
+    expect(lines.slice(1).sort()).toEqual(['"Engineer, Senior",applied', 'Passed over,skipped']);
+  } finally {
+    await page.close();
+    await onExtensionPage((p) => p.evaluate((prev) => chrome.storage.local.set(prev), saved));
+  }
+});
+
 /* ---------------- Getting-started checklist ---------------- */
 
 test('Options: a checklist “Go →” lands on the section it names, not just its tab', async () => {
@@ -911,7 +1035,16 @@ test('Options: resizing the window leaves the configured layout and its ratios a
     await page.setViewportSize({ width: 1440, height: 900 });
     await page.goto(`chrome-extension://${extId}/src/options/options.html`);
     await page.locator('#tab-settings').click();
-    await expect(page.locator('#sim-card')).toBeVisible();
+    // A visible card is not a measured frame. `paint` runs at the initial
+    // `scale = 1`, so the card carries a full-size inline box — and passes
+    // `toBeVisible()` — while `measure` has still not given the frame a height:
+    // it bails on a hidden panel, and the ResizeObserver that re-runs it lands a
+    // frame after the tab is shown. Sampling the baseline in that gap reads `#sim`
+    // as its two border pixels, i.e. a "ratio" of 640/2, which every later
+    // measurement then fails to match.
+    await expect
+      .poll(() => page.evaluate(() => document.getElementById('sim')!.getBoundingClientRect().height))
+      .toBeGreaterThan(100);
 
     const shape = () => page.evaluate(() => {
       const f = document.getElementById('sim')!.getBoundingClientRect();
@@ -1131,6 +1264,93 @@ test('Sheets: only one is expanded at a time, and both open in the same place', 
   }
 });
 
+/**
+ * The wizard's one load-bearing piece of state, tested against the real thing.
+ *
+ * `refreshSetup` re-renders the whole panel after every edit — a Pick, a prep
+ * change, a rename — and the step lives on the `SetupPanel` instance rather than
+ * in the data precisely so that survives. A unit test can assert two `render`
+ * calls in a row; only this can assert it across a genuine storage round-trip
+ * through the background, which is the path a real edit actually takes.
+ */
+test('Setup: an edit re-renders the panel without losing your place in the wizard', async () => {
+  const page = await context.newPage();
+  try {
+    await page.setViewportSize({ width: 390, height: 780 });
+    await page.goto(urlFor('quick-plain'));
+    await expect(page.locator('.cf-card[data-sheet="review"]')).toBeVisible({ timeout: 20_000 });
+
+    await openSetupPanel(page);
+    const setup = page.locator('.cf-card[data-sheet="setup"]');
+    await expect(setup).toBeVisible({ timeout: 20_000 });
+
+    // Walk to "Before filling" — step 2 of 6 — whatever the panel opened on.
+    await setup.locator('.cf-rail-node').nth(1).click();
+    await expect(setup.locator('.cf-step-count')).toHaveText('Step 2 of 6');
+
+    // A real edit: "+ Delay" writes a prep step to the site config and comes
+    // back through `refreshSetup`, rebuilding the card from scratch.
+    const steps = () => setup.locator('.cf-step-body .cf-row');
+    const before = await steps().count();
+    await setup.getByRole('button', { name: '+ Delay' }).click();
+    await expect(steps()).toHaveCount(before + 1);
+
+    // Still on step 2. Before the step lived on the instance this would have
+    // been step 1, and every Pick would have thrown the user back to the start.
+    await expect(setup.locator('.cf-step-count')).toHaveText('Step 2 of 6');
+  } finally {
+    await page.close();
+  }
+});
+
+/**
+ * The rest of "an edit does not start fresh", and the half only a real browser
+ * can see: jsdom does no layout, so `scrollTop` there never leaves 0.
+ *
+ * Two things destroy it and both happen on one Pick. `paint` replaces the whole
+ * `.cf-card`, and the picker sets the host to `display: none` to keep itself
+ * from picking the panel — which throws the layout box away with the scroll
+ * offset in it. So picking the last of a dozen field rows used to land you back
+ * at the first one, every single time, on the step where the list is longest.
+ */
+test('Setup: picking a field leaves you where you were in the list', async () => {
+  const page = await context.newPage();
+  try {
+    await page.setViewportSize({ width: 390, height: 780 });
+    await page.goto(urlFor('quick-plain'));
+    await expect(page.locator('.cf-card[data-sheet="review"]')).toBeVisible({ timeout: 20_000 });
+
+    await openSetupPanel(page);
+    const setup = page.locator('.cf-card[data-sheet="setup"]');
+    await expect(setup).toBeVisible({ timeout: 20_000 });
+
+    // "Form fields" — the long step, and the reason this matters at all.
+    await setup.locator('.cf-rail-node').nth(4).click();
+    await expect(setup.locator('.cf-step-count')).toHaveText('Step 5 of 6');
+
+    const body = setup.locator('.cf-body');
+    await body.evaluate((el) => { el.scrollTop = el.scrollHeight; });
+    const before = await body.evaluate((el) => el.scrollTop);
+    // A step with nothing to scroll would pass this test without testing it.
+    expect(before).toBeGreaterThan(0);
+
+    // A real edit through the picker: the panel hides, the page is clicked, the
+    // selector is saved, and the panel comes back rebuilt from storage.
+    const lastPick = setup.locator('.cf-step-body .cf-row [data-k^="field:"]').last();
+    await lastPick.click();
+    await page.locator('input').first().click();
+    await expect(setup).toBeVisible();
+    await expect(setup.locator('.cf-step-count')).toHaveText('Step 5 of 6');
+
+    // Same place in the list. Allow a row of slack: the picked row gains a
+    // "Clear" button, which can change the content height slightly.
+    const after = await body.evaluate((el) => el.scrollTop);
+    expect(Math.abs(after - before)).toBeLessThan(60);
+  } finally {
+    await page.close();
+  }
+});
+
 test('Sheets: the setup panel is a bottom sheet on a phone, like the modal', async () => {
   // The regression that hid in the cascade: `setupPanel.css` is inlined after
   // `primitives.css` at equal specificity, so its own `.cf-card { top; width }`
@@ -1151,6 +1371,59 @@ test('Sheets: the setup panel is a bottom sheet on a phone, like the modal', asy
     expect(box.width, 'full width').toBeCloseTo(390, 0);
     expect(box.x, 'flush left').toBeCloseTo(0, 0);
     expect(box.y + box.height, 'anchored to the bottom, not hanging from the top').toBeCloseTo(780, 0);
+  } finally {
+    await page.close();
+  }
+});
+
+test('Options: the `?` is a circle on a mouse, not a 28×44 pill', async () => {
+  // `options.css` styles every `button` on the page as a secondary button,
+  // `min-height: var(--tap)` included — and `min-height` beats `height`, so
+  // `.cf-help-btn`'s 28×28 came out **28×44**: a tall rounded rectangle wherever
+  // the disc paints (hover, and while its panel is open).
+  //
+  // Nothing could catch it but a browser at a fine pointer. jsdom evaluates
+  // neither the cascade nor `@media (pointer: coarse)`, the shadow surfaces have
+  // no bare `button` rule so they were always correct, and on a coarse pointer the
+  // button grows to 44×44 and is square again — so the mobile pass was clean too.
+  const page = await context.newPage();
+  try {
+    await page.setViewportSize({ width: 1100, height: 900 });
+    await page.goto(`chrome-extension://${extId}/src/options/options.html#settings`);
+    const help = page.locator('#panel-settings .cf-help-btn');
+    await expect(help.first()).toBeVisible({ timeout: 20_000 });
+
+    for (let i = 0; i < await help.count(); i++) {
+      const box = (await help.nth(i).boundingBox())!;
+      expect(box.height, `help button ${i} is square`).toBeCloseTo(box.width, 0);
+    }
+  } finally {
+    await page.close();
+  }
+});
+
+test('Modal: the two view segments are the same width, at one tap size', async () => {
+  // Content-sized segments measured Job 45px against Fields 74px, so the white
+  // active pill changed size as you switched — and the control resized whenever
+  // the Fields dot appeared or cleared, moving the header under a re-render.
+  // Both are layout facts, so only a real browser can see either.
+  const page = await context.newPage();
+  try {
+    await page.setViewportSize({ width: 1280, height: 900 });
+    await page.goto(urlFor('quick-plain'));
+    await expect(page.locator('.cf-card')).toBeVisible({ timeout: 20_000 });
+
+    const views = page.locator('.cf-view');
+    const job = (await views.nth(0).boundingBox())!;
+    const fields = (await views.nth(1).boundingBox())!;
+    expect(fields.width, 'equal segments').toBeCloseTo(job.width, 0);
+
+    // `--tap` on every pointer, like every other button — these two and the
+    // header's icon buttons kept the pre-reskin 32/26px on a mouse.
+    for (const sel of ['.cf-view', '.cf-fullscreen', '.cf-close']) {
+      const box = (await page.locator(sel).first().boundingBox())!;
+      expect(box.height, `${sel} is one tap tall`).toBeGreaterThanOrEqual(44);
+    }
   } finally {
     await page.close();
   }

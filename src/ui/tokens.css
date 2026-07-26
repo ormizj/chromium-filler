@@ -91,6 +91,23 @@
      fullscreen toggle: this is an 18px icon, not a 14px status dot. */
   --icon-help: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2.4' stroke-linecap='round' stroke-linejoin='round'><circle cx='12' cy='12' r='9'/><path d='M9.4 9.3a2.7 2.7 0 1 1 3.4 2.7c-.7.2-1 .7-1 1.4v.5'/><path d='M11.9 17.1h.02'/></svg>");
 
+  /* The setup wizard's six step marks, one per `SETUP_STEP_ORDER` key. They say
+     *which* step a rail node is; the `.cf-dot` beneath each one keeps saying how
+     that step is doing, which is why these are a separate mark rather than a
+     glyph swapped into the dot — status is never colour alone, and the dot's
+     check/alert/dash is the shape half of that signal.
+     Chosen for contrasting silhouettes, not for literal accuracy: six marks in a
+     row at 18px are told apart by outline first (round · diagonal · Y · portrait
+     sheet · stacked bars · swept triangle), and a set that is all rectangles is
+     the same failure as six identical dots. Same 2.4 stroke as the other 18px
+     icons; `--icon-check` and friends are heavier because they are 14px. */
+  --icon-step-site: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2.4' stroke-linecap='round' stroke-linejoin='round'><circle cx='12' cy='12' r='9'/><path d='M3.3 9.4h17.4M3.3 14.6h17.4'/><path d='M12 3c2.7 2.8 2.7 15.2 0 18M12 3c-2.7 2.8-2.7 15.2 0 18'/></svg>");
+  --icon-step-prep: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2.4' stroke-linecap='round' stroke-linejoin='round'><path d='M7 3.8l11 7.4-4.7 1.1 2.2 5-2.5 1.1-2.2-5L7 16.6z'/></svg>");
+  --icon-step-kind: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2.4' stroke-linecap='round' stroke-linejoin='round'><path d='M12 21v-7'/><path d='M12 14L5.5 7.5'/><path d='M12 14l6.5-6.5'/><path d='M5.5 11.5V7.5H9.5'/><path d='M18.5 11.5V7.5H14.5'/></svg>");
+  --icon-step-info: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2.4' stroke-linecap='round' stroke-linejoin='round'><path d='M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z'/><path d='M14 3v5h5'/><path d='M8.5 13h7M8.5 16.5h4.5'/></svg>");
+  --icon-step-fields: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2.4' stroke-linecap='round' stroke-linejoin='round'><rect x='3' y='4.5' width='18' height='6' rx='2'/><rect x='3' y='13.5' width='18' height='6' rx='2'/><path d='M6.8 15.4v2.2'/></svg>");
+  --icon-step-send: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2.4' stroke-linecap='round' stroke-linejoin='round'><path d='M21 3l-6.4 18-4-8.6-8.6-4z'/><path d='M21 3l-10.4 9.4'/></svg>");
+
   /* The collapsible-section chevron, drawn rather than typeset. As the text glyph
      `▾` it inherited the summary's 13px and read as a speck beside the help icon
      — two small marks at the end of every section header, neither of which

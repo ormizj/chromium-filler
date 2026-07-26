@@ -16,12 +16,19 @@ export const DEFAULT_SETTINGS: Settings = {
   closeTabOnSkip: true,
   closeTabDelayMs: 1500,
   redirectTarget: 'newTabCloseSource',
+  // On: filling and recording are both impossible inside a phone app, so this is
+  // the only setting under which the extension can finish what it starts.
+  keepInBrowser: true,
   sessionBatchSize: 5,
   modalLayout: DEFAULT_MODAL_LAYOUT,
   modalFullscreen: false,
   helpSeen: false,
   // Off until asked for: everything else here happens on-device.
   syncEnabled: false,
+  // Empty means "no decisions taken yet", which resolves to every column, the
+  // applied postings, as JSON — see `resolveExport`. Spelling those out here
+  // instead would freeze today's schema into every fresh install.
+  exportOptions: {},
 };
 
 /**

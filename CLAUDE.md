@@ -35,11 +35,12 @@ driving a real site. `?page=modal&session=1` shows the queue strip and the
 footer overflow menu.
 
 `&state=…` picks which **flow** the surface is showing — modal: `long`, `redirect`,
-`redirect-followed`, `landed`, `empty`, `failed-fill`, `apply-unset`,
+`redirect-followed`, `app-link`, `landed`, `empty`, `failed-fill`, `apply-unset`,
 `apply-unverified`, `applied`, `flush`, `fullscreen`; setup: `external`, `help`,
 `cv-steps`, `submit-unset`, `success-unset`; options: `fresh`, which seeds an
 empty store so the getting-started checklist is reachable at all (the normal seed
-ticks four of its five steps off). A two-step posting
+ticks four of its five steps off), and `export`, which opens the archive's
+"What to export" disclosure. A two-step posting
 renders a different modal body entirely (notice + "Fill this page instead", no
 report), so it needs its own state rather than being inferred from the default
 data. Add a state here whenever a flow gains a distinct rendering — **and link it
@@ -50,6 +51,12 @@ link to them, which is most of why the confirmed state went unexamined.
 whole job, and a three-line description proves nothing about it.
 `setup&state=help` is the first-run panel with the legend open, which is
 otherwise reachable exactly once per profile: dismissing it persists.
+
+`&step=site|prep|kind|info|fields|send` opens one of the setup wizard's six
+steps. Only one is ever on screen, so without this the other five are reachable
+only by pressing Next — which a screenshot cannot do. Pair a state with the step
+that shows it (`state=success-unset&step=send`); with no `step` the panel opens
+where a real posting would put it, on the first step with work outstanding.
 
 `&view=job|fields` picks which of the modal's two views is open, and `&note=apply`
 opens the explanation behind the greyed-out Apply button (pair it with
@@ -88,8 +95,8 @@ actions from the user.
 ### The flow banner
 `src/shared/flowState.ts` (pure) is the one place that decides **where a posting
 is in the flow**, and `labels.FLOW_TEXT` is where each state is worded.
-`flowBanner()` returns `{ key, tone, title, detail, help? }` for one of seven
-states: `applied` · `external` / `externalOpened` · `noButton` /
+`flowBanner()` returns `{ key, tone, title, detail, help? }` for one of eight
+states: `applied` · `appLink` · `external` / `externalOpened` · `noButton` /
 `noConfirmation` · `empty` · `ready`.
 
 It exists because the modal used to say none of this. Three unrelated renderings
@@ -98,9 +105,15 @@ Apply that only appeared *after* the user pressed it — between them still left
 the commonest case silent: a posting filled and waiting showed a job advert and a
 coral button with nothing connecting them.
 
-Three rules the branch order encodes, each with a test:
+Four rules the branch order encodes, each with a test:
 - **`applied` outranks everything**, including a two-step posting and a blocked
   Apply — neither can still be the answer once something went through.
+- **`appLink` outranks the redirect states.** A *configured* two-step site whose
+  apply link turns out to be an app link is both at once, and "Opening the
+  employer's application" would be a lie — nothing was opened. `main.ts` enforces
+  the same thing from the other end by not setting `redirect` at all when
+  `detection.appLink` is present: the footer's redirect branch leads with "Open
+  application", and there is nothing here to open.
 - **Blocked outranks `empty`.** A listing page has no fields *and* no Send
   button, and its greyed Apply still provokes "why can't I apply?"; answering
   "nothing to fill here" leaves a dead control unexplained. So `empty` is the
@@ -121,6 +134,13 @@ A **blocked primary de-fills rather than fading**
 opacity is a muddy brown block that reads as broken, not unavailable, and the
 state it marks is entirely ordinary. Same shape of override as `.cf-applied-btn`
 — `--btn-primary` stays the one primary fill and these two states opt out of it.
+
+**`:disabled` follows the same rule**: keep the border, drop the emphasis
+(`--surface` fill, `--muted-2` label), never fade the whole control. A blanket
+`opacity` took the outline with it, which turned the Sync tab's resting state —
+Connect / Sync now / Disconnect, all disabled until an OAuth client is entered —
+into three lines of grey text, and the setup panel's first `↑` and last `↓` into
+ghosts. Unavailable is a state a control is *in*, not a control that half exists.
 
 The modal has **two views behind a header toggle**, and Job is the default: once
 the form is filled the user's question is "do I want this job?", not "which of
@@ -243,6 +263,21 @@ if a second primary fill appears, if a status is missing its colour/icon/word, o
 if `palette.ts` drifts from the tokens it mirrors. It reads the sources off disk
 because Vite hands vitest an *empty* string for a `.css?inline` import.
 
+**A control drawn as a fixed square must pin `min-width`/`min-height` too**, and
+that test enforces it (a rule is "a control" if it says `cursor: pointer`). The
+light-DOM pages carry bare element rules — `options.css` styles every `button` as
+a secondary button, `min-height: var(--tap)` included — and `min-height` beats
+`height`. `.cf-help-btn` lost that fight silently: it asked for 28×28 and rendered
+**28×44**, so every `?` on the options page was a tall rounded rectangle wherever
+the disc paints. Nothing could see it — the shadow surfaces have no bare `button`
+rule, and on a coarse pointer the button grows to 44×44 and comes out square
+anyway, so the mobile-first pass was clean as well. `input[type=checkbox]` and the
+simulator's handles already carried the same line.
+
+Geometry is otherwise invisible to vitest — jsdom evaluates neither the cascade
+nor layout — so the rest is measured in the E2E: the `?` is square on a *fine*
+pointer, and the two `.cf-view` segments are equal at one tap size.
+
 Mobile is the priority target (Kiwi). `--tap: 44px` is the height of every
 button on *every* pointer (the reskin matched `design/reference-updated/` and
 dropped the old denser 32px desktop button — buttons are one comfortable size
@@ -270,8 +305,8 @@ setup row.
 
 ### In-app help
 `src/shared/help.ts` is the **only** place the extension explains itself. Every
-surface that answers "what is this?" renders from it: the setup panel's
-per-section `?` and legend, the options Settings `?` toggles, the Sites-tab key
+surface that answers "what is this?" renders from it: the setup wizard's
+per-step lead and `?`, the options Settings `?` toggles, the Sites-tab key
 reference, the Help tab, and the review modal's dot key. Copy written into a
 surface instead of the catalog is a bug — the setup panel and the page
 documenting it have to say the same thing.
@@ -282,10 +317,16 @@ The `Record<keyof …>` types are load-bearing. `CONFIG_HELP`, `REDIRECT_HELP`,
 until it has an explanation**. That is what stops this going stale the way the
 `types.ts` doc comments did: they were correct, and no user could read them.
 
+`SETUP_STEP_TITLES` and `SETUP_STEP_HELP` are keyed off `SetupStepKey`, so a
+seventh wizard step cannot ship unnamed or unexplained. `prep` is titled "Before
+filling" and not "Setup steps": the wizard's own units are steps now, and "Step 2
+of 6: Setup steps" reads as a stutter.
+
 `HelpEntry.short` is the one-line form, for places that are a *key* rather than
 an explanation. The setup panel's legend uses it and the full `body` stays behind
-that section's `?`; rendering the bodies there filled a whole 390px screen with
-prose before the user could reach a single row. The options settings rows render
+that step's `?`; rendering all five bodies at once filled a whole 390px screen
+with prose before the user could reach a single row — which is why the wizard
+shows exactly one of them, the current step's. The options settings rows render
 their caption from it too (`attachRowHelp`), so the line under a switch and the
 panel behind its `?` cannot drift — those captions were written into
 `options.html` and had already started to disagree. `DOT_LEGEND` shows the real
@@ -312,11 +353,10 @@ name is the `aria-label`.
 Placement matters as much as the mark. It never goes *inside* a heading —
 `attachRowHelp` anchors it on the `.setrow` after the title and **before** the
 caption, so six rows do not put six buttons at six different x-positions and no
-control runs through the middle of a text block. The setup panel's section header
-is a fixed order (title `flex: 1` · count chip · `?` · chevron), replacing a pair
-of `:has()` rules that shuffled an auto margin between the chip and the button.
-The chevron is drawn from `--icon-chevron` for the same reason the `?` is: as the
-text glyph `▾` at the summary's 13px it was a speck beside it.
+control runs through the middle of a text block. The setup wizard's step header
+is a fixed order (`Step n of 6` `flex: 1` · count chip · `?`) above the title, so
+the `?` never sits inside the heading and lands in the same place on all six
+steps.
 
 ### Data model & storage
 `src/shared/types.ts` is the source of truth: `Profile`, `SiteConfig`,
@@ -359,11 +399,99 @@ not a `draggedLayout`-style page-lifetime override: a drag is a nudge, this is a
 preference, and it holds until it is pressed again. Dragging is disabled while it
 is on, or the card would move out from under the flag.
 
+### The setup wizard
+"Set up this site" is a **linear wizard**: one step on screen at a time, a
+progress rail, and Back / Next. It used to stack five `<details>` sections in one
+scroll and auto-open every one holding unresolved rows, so a fresh site opened
+onto ~25 rows reading `auto · #first_name` with no ordering and nothing saying
+which of them mattered. On a 390px phone that was unreadable.
+
+`src/shared/setupSteps.ts` (pure) owns the model: `SETUP_STEP_ORDER` is the six
+steps in the order the extension itself does things — `site` · `prep` · `kind` ·
+`info` · `fields` · **`send`** — and `stepStates` says how much work each still
+has. It also owns `SetupRow`/`PrepRow`/`SetupSnapshot`, which `setupPanel.ts`
+re-exports so the controller and the harness keep one import path.
+
+Four counting rules, each with a test, and every one of them the same decision:
+**a healthy site must report no work**, or the chip is noise and the one step
+that really is unfinished goes unread with the rest.
+
+- `info` / `fields`: any row that is not a confident match.
+- `kind`: **only** a *saved* selector that no longer resolves. "Not set" is the
+  ordinary state of a quick-apply site; counting it labelled every site "2 to do".
+- `prep`: **never**. A `waitFor` whose target has not appeared yet is the normal
+  state of a page whose form is behind a click — that is what the step is for.
+- `send`: a Send button found by its *label* is healthy, so only "none found"
+  counts; a missing confirmation element **always** counts, because without it
+  nothing here can ever be recorded as applied and Apply refuses to send.
+
+`send` is its own step and not the tail of `fields` on purpose. Those three rows
+are what Apply depends on, and while they sat below sixteen field rows the
+confirmation element went unset on nearly every site — which is exactly what
+greys Apply out.
+
+Three rules the panel enforces:
+
+- **The step lives on the `SetupPanel` instance, never in `SetupData`.**
+  `refreshSetup` re-renders after every Pick, prep edit and rename, so a step
+  derived from the data would throw the user back to step 1 each time they picked
+  a single field. An E2E asserts it across a real storage round-trip.
+- **Where it opens is decided once** (`placed`), never re-derived: a first-time
+  user (`!helpSeen`) walks from step 1 with the legend; anyone else lands on
+  `firstStepWithWork`, which is what the old auto-opening sections were reaching
+  for. Re-deriving it would teleport the user mid-task as they resolved the last
+  row of a step.
+- **Each step leads with its own `SETUP_STEP_HELP[key].body`, shown.** That prose
+  already existed and lived behind a `?` nobody pressed; with one step on screen
+  there is finally room for it. The row-by-row `rows` stay behind the `?` — they
+  are a reference, not an introduction. The intro sentence and the legend are
+  about the *panel*, so they lead step 1 above the rail, not inside it.
+
+The rail carries **two marks per step**, because there are two questions. The
+step's own icon (`SETUP_STEP_ICONS`, `Record<SetupStepKey, string>` → an
+`--icon-step-*` token) says *which* step it is; the `.cf-dot` under it says how
+that step is doing. The icon cannot be swapped *into* the dot — the dot's
+check/alert/dash is the shape half of "status is never colour alone" — so it goes
+above, and `--rail-dot-center` is what keeps the connector running through the
+dots rather than through the middle of a now two-element node. Icons are picked
+for contrasting *silhouettes* (round · diagonal · Y · sheet · bars · plane): six
+marks at 18px are told apart by outline first, and a set that is all rectangles
+is the same failure as the six identical dots this replaced.
+`designSystem.test.ts` fails the build if a step's token does not exist or two
+steps share one; the `Record<>` already fails `npm run typecheck` if a seventh
+step ships unmarked. The icon is `aria-hidden`: each node is a button whose
+`aria-label` already names the step and its outstanding work. There is no
+separate index screen, so the rail is also how someone who opened the panel to
+re-pick one field gets there without six taps of Next.
+
 ### One slot, two sheets
 `src/content/sheet.ts` (`abstract class Sheet<D extends SheetData>`) is the shell
 behind **both** shadow surfaces: `FillerModal` and `SetupPanel` subclass it and
 supply only `buildCard`/`buildPill`/`repaint`. Mount, `applyLayout`, drag, the
 three resize grips, fullscreen, collapse-to-pill and `destroy` all live there once.
+
+**A repaint must not lose the user's place.** `paint` replaces the whole
+`.cf-card`, which is how these surfaces show any change at all — so without
+`captureUserPlace`/`applyUserPlace` every edit also scrolled to the top, dropped
+focus and wiped anything typed but not committed. Picking the 14th of sixteen
+field rows put you back at the first one. Four rules, each with a test:
+
+- **Identity is `data-k`, stamped by the subclass** on what a control *is*
+  (`field:email`, `prep:prep:2:ms`), never on where it sits — position is exactly
+  what a rebuild changes. A key that no longer resolves restores nothing and is
+  not an error: the edit being rendered may have deleted that row.
+- **Scroll is restored after `applyLayout()`**, never before. The card is sized
+  there, and a `scrollTop` written to an element with no height yet clamps to 0.
+- **`setHidden` captures and restores too.** `display: none` destroys the layout
+  box and the scroll offset with it, and the picker's sequence is hide → pick →
+  show → `refreshSetup` — only the hide happens early enough to read the real
+  number. A capture while hidden is skipped, or it would overwrite a good one
+  with zeroes.
+- **Uncommitted text comes back for the focused control only.** These inputs
+  commit on `change`, i.e. on blur. Writing a remembered value into an *unfocused*
+  field would be the opposite bug — stale data beating the fresh config read that
+  `refreshSetup` exists to make. (`selectionStart` throws on `type="number"`,
+  which the prep timeouts are; the caret is a nicety and must not cost the value.)
 
 Before it they were two unrelated products sharing a stylesheet: the panel
 hardcoded `top: 16px; width: 400px`, its drag floored at 0 without capping (so it
@@ -389,7 +517,9 @@ Two rules the controller enforces, both in `Controller.arbitrateSheets`:
   hence the controller-supplied `--pill-slot`.
 
 The setup panel's two exits now mean different things, matching the modal: header
-`×` **minimizes**, footer **Done** destroys (`closeSetup`). `nudgeLayout` moved from
+`×` **minimizes**, footer **Done** destroys (`closeSetup`) — and Done is now the
+*last step's* Next, because finishing the wizard and finishing with the site are
+the same act. `nudgeLayout` moved from
 `options.ts` into `shared/modalLayout.ts` so the sheets and the simulator — a scale
 drawing of the same rectangle — cannot disagree about which way a handle goes.
 
@@ -573,8 +703,35 @@ still moves the database by hand.
 so a posting became unreadable the moment its tab closed. `jobDetails.ts` (pure)
 keeps it: `Controller.captureJob` writes what the page said — title, description,
 requirements, chips — for **every** posting the extension reads, applied or
-skipped, and Options → Queue → **Archive** exports the applied ones as one JSON
-file (`jobExport.ts`).
+skipped, and Options → Queue → **Archive** exports them as one file
+(`jobExport.ts`).
+
+**What goes in that file is ticked, not fixed** — the columns, the statuses and
+JSON vs CSV, in the Archive panel's "What to export". Two rules make that
+survive the schema growing, and both are the same decision:
+
+- **The choice is stored as sparse *overrides*, never as the list of what to
+  include** (`ExportSelection` → `resolveExport`). A stored list of columns would
+  silently omit any column a later build adds, for everyone who had ever opened
+  the panel; a map of decisions lets an unmentioned key take its coded default
+  (a column is on, a status is off unless it is `applied`). Same forward
+  compatibility as `normalizeEntry`, and an unknown key is ignored rather than
+  validated away.
+- **The checkboxes are rendered from the model, never written into
+  `options.html`**: the columns walk `EXPORT_FIELD_LABELS`
+  (`Record<ExportField, string>`, and `ExportField` is `keyof ExportedJob`, so a
+  new field fails `npm run typecheck` until it is named — and naming it is all it
+  takes to get a checkbox), the statuses walk `ALL_JOB_STATUSES`, which is
+  *derived* from `STATUS_RANK` for the same reason. `EXPORT_FIELD_LABELS` is also
+  the column **order**, so there is one list rather than two.
+
+The edits are serialized through a promise chain (`session.ts`'s trick): each
+tick is a read-modify-write of one settings object, and ticking columns off is
+exactly the gesture people repeat quickly. A selection with no columns — or no
+statuses — disables Export and says which tick is missing, rather than
+downloading a file of empty objects. `?page=options&state=export` in the dev
+harness opens the panel, which is otherwise behind a closed `<details>` and so
+invisible to a screenshot.
 
 Kept under its **own storage key**, not as fields on `JobUrlEntry`: the job-URL
 list is read and rewritten whole on every status change, session tick and queue
@@ -637,6 +794,22 @@ needs no `downloads` permission, and an MV3 service worker has no
 - **The submit heuristic must fail closed.** `findSubmitControl` returns `none`
   rather than a best guess, and its veto list beats any positive match. Never
   "improve" it by falling back to the highest-scoring button.
+- **Only ever hand `http(s)` to the browser.** `shared/appLink.ts` is an
+  **allowlist** and `navigableUrl` is the one place `settings.keepInBrowser` is
+  read; `resolveHref`, `followRedirect` and `session.ts`'s two opens all go
+  through it. Never re-widen it to a blocklist: an `intent://` or `linkedin://`
+  apply link is a valid URL with a host, so under the old blocklist it read as
+  cross-origin, was nominated as the page's one external apply link, and was
+  handed to `chrome.tabs.create` — which on Android launches the app. That is
+  always a dead end (no form to fill, no `successSelector` to watch), so the watch
+  expired and the posting stayed `opened` for ever. An `intent://` link is
+  rewritten to its `browser_fallback_url` — re-checked through `webOnly`, never
+  trusted because of the key it arrived under — and one with no web form sets
+  `detection.appLink`, which blocks the follow and words the banner. Two handoffs
+  are out of reach and belong in `CONCEPT_HELP.appLink`, not in code: an `https`
+  link an installed app has claimed (Android resolves it first) and a page that
+  navigates itself from the main world. `declarativeNetRequest` cannot help —
+  it matches http/https/ws only — so do not add it or `webNavigation`.
 - **Never read a job container with `textContent`.** It welds every heading,
   paragraph and bullet into one string and preserves the HTML source's own
   indentation, which is what made the description unreadable. `shared/jobText.ts`

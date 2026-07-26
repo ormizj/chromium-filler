@@ -35,8 +35,15 @@
  * the header is read at a glance between taps. A rounded rectangle (not a pill),
  * on the recessed `--surface` track, matching the reference toggle.
  */
+/* Equal segments, sized to the wider of the two. Content-sized ones measured
+   Job 45px against Fields 74px, so the white active pill changed size as you
+   switched and the whole control resized whenever the Fields dot appeared or
+   cleared — a header that moves under a re-render. The control's overall width is
+   still content-driven; only the split inside it is fixed. */
 .cf-views {
-  display: flex;
+  display: grid;
+  grid-auto-flow: column;
+  grid-auto-columns: 1fr;
   flex: none;
   gap: 2px;
   padding: var(--space-1);
@@ -47,6 +54,7 @@
 button.cf-view {
   display: inline-flex;
   align-items: center;
+  justify-content: center;
   gap: var(--space-1);
   font: 500 var(--text-sm) / 1 var(--font);
   color: var(--muted);
@@ -54,7 +62,9 @@ button.cf-view {
   border: none;
   border-radius: var(--radius-md);
   padding: var(--space-2) var(--space-4);
-  min-height: 26px;
+  /* `--tap` on every pointer, like every other button — switching views is the
+     most-used action in the modal and it was a 26px sliver on a mouse. */
+  min-height: var(--tap);
   cursor: pointer;
   white-space: nowrap;
 }
@@ -73,12 +83,10 @@ button.cf-view .cf-dot {
   font-size: 8px;
 }
 
-/* The floor is the floor: primitives.css gives every coarse-pointer control
-   `--tap`, and a segmented control is not an exception to that — switching views
-   is the most-used action in the modal on a phone. */
+/* Only the breathing room is coarse-pointer specific now; the height floor above
+   already applies everywhere. */
 @media (pointer: coarse) {
   button.cf-view {
-    min-height: var(--tap);
     padding-inline: var(--space-5);
   }
 }
@@ -292,6 +300,23 @@ button.cf-view .cf-dot {
 /* The outcome on the header strip, which never scrolls away. */
 .cf-sent-chip {
   flex: none;
+}
+
+/**
+ * Narrow, and sent: the site name goes rather than being sliced. The header runs
+ * name · Sent · Job/Fields · fullscreen · close, and at 390px the name is what
+ * gave way — "Acme Careers" came out as "Acme C…", which names nothing. It is not
+ * lost: the confirmation banner leading the body says "Acme Careers confirmed it".
+ * The chip then holds the left, so the toggle and the icon buttons stay where they
+ * are on every other state of the card.
+ */
+@media (max-width: 640px) {
+  .cf-header:has(> .cf-sent-chip) > .cf-site {
+    display: none;
+  }
+  .cf-header:has(> .cf-sent-chip) > .cf-sent-chip {
+    margin-right: auto;
+  }
 }
 
 /* Disclosed explanation, inside the banner it belongs to rather than floating in

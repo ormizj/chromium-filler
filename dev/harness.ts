@@ -24,6 +24,7 @@ import type { JobBlock } from '../src/shared/jobText';
 import { DEFAULT_MODAL_LAYOUT } from '../src/shared/modalLayout';
 import { FillerModal, type ModalData, type ModalView } from '../src/content/modal/modal';
 import { SetupPanel, type SetupData } from '../src/content/setupPanel';
+import { SETUP_STEP_ORDER, type SetupStepKey } from '../src/shared/setupSteps';
 
 type Page = 'popup' | 'options' | 'modal' | 'setup';
 /** Which flow the surface is rendering — see `MODAL_STATES` / `SETUP_STATES`. */
@@ -55,6 +56,13 @@ async function bootPage(name: 'popup' | 'options'): Promise<void> {
   document.body.innerHTML = doc.body.innerHTML;
 
   await import(/* @vite-ignore */ `${base}/${name}.ts`);
+
+  // A closed <details> is a state a screenshot cannot reach: opening the archive
+  // panel takes a click, and the whole point of the harness is that it does not.
+  if (state === 'export') {
+    const panel = document.getElementById('export-options') as HTMLDetailsElement | null;
+    if (panel) panel.open = true;
+  }
 }
 
 /* ---------------- Shadow-DOM surfaces ---------------- */
@@ -189,6 +197,16 @@ const MODAL_STATES: Record<string, Partial<ModalData>> = {
     siteName: 'MixedBoard',
     matches: [],
     redirect: { host: 'ats.acme.test', reason: 'configured external apply link', followed: true },
+  },
+  // The apply control is an app link (`linkedin://…`) with no web address inside
+  // it, so nothing was followed and nothing can be. Deliberately *not* a
+  // `redirect` state: the footer's redirect branch leads with "Open application"
+  // and there is nothing here to open. The fields are the ones that were on the
+  // board page, which are still filled — the banner has to say both halves.
+  'app-link': {
+    siteName: 'MixedBoard',
+    appLink: true,
+    applyState: 'noButton',
   },
   landed: { siteName: 'ats.acme.test', via: 'boards.example' },
   // Dragged into the right-hand edge, and tall enough that `clampLayout` pins it
@@ -437,6 +455,16 @@ function bootSetup(): void {
   };
 
   panel.render({ ...BASE_SETUP, ...(SETUP_STATES[state] ?? {}) });
+
+  // `&step=…` opens one of the six wizard steps. Each is a distinct rendering
+  // and only one is on screen at a time, so without this five of them are
+  // reachable only by clicking Next — which a screenshot cannot do. The panel
+  // otherwise opens on the first step with work outstanding, exactly as it does
+  // on a real posting.
+  const step = params.get('step');
+  if (step && (SETUP_STEP_ORDER as readonly string[]).includes(step)) {
+    panel.setStep(step as SetupStepKey);
+  }
 
   // Both sheets folded, so their pills stack in the rail. The one arrangement
   // that cannot be reached by rendering a single surface — and the one that goes

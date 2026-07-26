@@ -22,6 +22,22 @@ export const STATUS_RANK: Record<JobUrlStatus | 'deleted', number> = {
   new: 0, opened: 1, redirected: 2, skipped: 3, applied: 4, deleted: 5,
 };
 
+/**
+ * Every status a posting can be *in*, in flow order — derived from the rank
+ * table rather than written out a second time.
+ *
+ * Everything that offers the statuses as a choice renders from this: the queue
+ * filters and the archive's status checkboxes. Deriving it is what makes a new
+ * status show up in both places, since it cannot be added to the model without
+ * joining `STATUS_RANK` first. The tombstone is not one of them — a deleted
+ * posting is not shown, let alone filtered for.
+ */
+export const ALL_JOB_STATUSES: JobUrlStatus[] = (
+  Object.keys(STATUS_RANK) as Array<JobUrlStatus | 'deleted'>
+)
+  .filter((s): s is JobUrlStatus => s !== 'deleted')
+  .sort((a, b) => STATUS_RANK[a] - STATUS_RANK[b]);
+
 export function statusRank(status: JobLogStatus): number {
   return STATUS_RANK[status as JobUrlStatus] ?? -1;
 }

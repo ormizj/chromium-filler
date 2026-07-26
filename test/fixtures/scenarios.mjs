@@ -128,6 +128,22 @@ export const SCENARIOS = [
     expect: '302 → interstitial hop → ATS; the FINAL url is what gets recorded',
   },
   {
+    id: 'mixed-applink',
+    flow: 'two-step',
+    title: 'MixedBoard — an intent:// apply link that carries a web address',
+    url: site(HOSTS.board, 'redirect-board', '?job=applink'),
+    config: 'redirect-board',
+    expect: 'follows the browser_fallback_url instead of the app, lands on the ATS, links both URLs',
+  },
+  {
+    id: 'mixed-appscheme',
+    flow: 'two-step',
+    title: 'MixedBoard — a linkedin:// apply link with no web address at all',
+    url: site(HOSTS.board, 'redirect-board', '?job=appscheme'),
+    config: 'redirect-board',
+    expect: 'opens no tab and follows nothing; the modal says the posting applies in an app',
+  },
+  {
     id: 'external-link',
     flow: 'two-step',
     title: 'ExternalBoard — every posting hands off (configured apply link)',

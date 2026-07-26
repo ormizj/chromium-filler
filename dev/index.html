@@ -67,6 +67,9 @@
       </div>
       <div class="panel phone">
         <h2>Options · phone (390px)</h2>
+        <div class="states">
+          <a href="./frame.html?page=options&amp;state=export">archive: what to export</a>
+        </div>
         <iframe src="./frame.html?page=options" title="Options harness, phone width"></iframe>
       </div>
       <div class="panel phone">
@@ -80,6 +83,10 @@
           <a href="./frame.html?page=modal&amp;state=long&amp;view=fields">fields view</a>
           <a href="./frame.html?page=modal&amp;state=redirect">hands off</a>
           <a href="./frame.html?page=modal&amp;state=redirect-followed">handing off</a>
+          <!-- An apply link that opens a phone app, which is the one handoff the
+               extension refuses: no tab, no report to follow, and the banner is
+               the only thing that says why the button was left alone. -->
+          <a href="./frame.html?page=modal&amp;state=app-link">applies in an app</a>
           <a href="./frame.html?page=modal&amp;state=landed">landed (via)</a>
           <a href="./frame.html?page=modal&amp;state=empty">nothing found</a>
           <!-- The three flow-banner states. Each is a distinct rendering of the
@@ -95,14 +102,28 @@
         <iframe src="./frame.html?page=modal&amp;session=1" title="Review modal harness, phone width"></iframe>
       </div>
       <div class="panel phone">
-        <h2>Setup panel · phone <small>(<a href="./frame.html?page=setup">open alone</a>)</small></h2>
+        <h2>Setup wizard · phone <small>(<a href="./frame.html?page=setup">open alone</a>)</small></h2>
+        <!-- Six steps, one on screen at a time, so five of them are otherwise
+             reachable only by pressing Next — which a screenshot cannot do.
+             `&step=` opens each directly. -->
+        <div class="states">
+          <a href="./frame.html?page=setup&amp;step=site">1 · Site</a>
+          <a href="./frame.html?page=setup&amp;step=prep">2 · Before filling</a>
+          <a href="./frame.html?page=setup&amp;step=kind">3 · Application type</a>
+          <a href="./frame.html?page=setup&amp;step=info">4 · Job info</a>
+          <a href="./frame.html?page=setup&amp;step=fields">5 · Form fields</a>
+          <a href="./frame.html?page=setup&amp;step=send">6 · Sending</a>
+        </div>
         <!-- The panel shares the review modal's slot, so it has the modal's
              geometry states too — and `pills` is the arrangement neither surface
              can show alone: both folded, stacked in the rail. -->
         <div class="states">
-          <a href="./frame.html?page=setup">quick apply</a>
+          <a href="./frame.html?page=setup">quick apply (opens on the work left)</a>
           <a href="./frame.html?page=setup&amp;state=help">first run (legend)</a>
-          <a href="./frame.html?page=setup&amp;state=external">external posting</a>
+          <a href="./frame.html?page=setup&amp;state=external&amp;step=kind">external posting</a>
+          <a href="./frame.html?page=setup&amp;state=cv-steps&amp;step=send">CV needs confirming</a>
+          <a href="./frame.html?page=setup&amp;state=submit-unset&amp;step=send">no Send button</a>
+          <a href="./frame.html?page=setup&amp;state=success-unset&amp;step=send">no confirmation</a>
           <a href="./frame.html?page=setup&amp;state=fullscreen">fullscreen</a>
           <!-- Open this one in a wide tab: it is a desktop-only rendering. -->
           <a href="./frame.html?page=setup&amp;state=flush">flush to the edge</a>
@@ -117,6 +138,9 @@
              this page would race to seed it. -->
         <div class="states">
           <a href="./frame.html?page=options&amp;state=fresh">first run (getting-started checklist)</a>
+          <!-- The archive's column/status/format ticks, which are otherwise
+               behind a closed disclosure and so invisible to a screenshot. -->
+          <a href="./frame.html?page=options&amp;state=export">archive: what to export</a>
         </div>
         <iframe src="./frame.html?page=options" title="Options harness"></iframe>
       </div>

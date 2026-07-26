@@ -3,6 +3,7 @@
  */
 
 import type { ModalLayout } from './modalLayout';
+import type { ExportSelection } from './jobExport';
 
 /** Every user-profile field the filler knows how to place. `resume` is the CV file. */
 export type FieldKey =
@@ -214,6 +215,7 @@ export type RedirectTarget = 'newTabCloseSource' | 'newTab' | 'sameTab';
 
 /** Re-exported so `types.ts` stays the one import for the data model. */
 export type { ModalLayout } from './modalLayout';
+export type { ExportSelection } from './jobExport';
 
 export interface Settings {
   /** Auto-run the full flow when a matching page finishes loading. */
@@ -238,6 +240,25 @@ export interface Settings {
    * it, or in place.
    */
   redirectTarget: RedirectTarget;
+  /**
+   * Only ever open a link as a web page — never let one hand off to a phone app.
+   *
+   * An "Apply" control is sometimes an `intent://` or `linkedin://` link, which
+   * Android resolves by launching the app. That is always a dead end here: the
+   * extension cannot fill a form or watch for a `successSelector` inside an app,
+   * so the redirect watch expires and the posting stays `opened` for ever. Same
+   * reasoning as Apply requiring `successSelector` — if the outcome cannot be read
+   * back, do not go.
+   *
+   * On, an `intent://` link is rewritten to the `browser_fallback_url` it carries,
+   * so the ATS form opens and fills as normal; one with no web form at all is left
+   * alone and the modal says so. Off hands the link over as the page wrote it, for
+   * someone who would rather finish in the app by hand.
+   *
+   * Read in exactly one place — `navigableUrl` in `shared/appLink.ts`. Everything
+   * downstream consumes its result, which is why no other file tests this flag.
+   */
+  keepInBrowser: boolean;
   /**
    * How many job tabs a queue session keeps open at once. The session refills
    * back up to this number as you finish each one, so a 60-link import never
@@ -293,6 +314,18 @@ export interface Settings {
    * user asked for.
    */
   syncEnabled: boolean;
+  /**
+   * What the Queue tab's Archive button writes out: which columns, which
+   * posting statuses, and JSON or CSV. Device state, like everything else here —
+   * it is a preference about a download, not part of the job database, so it is
+   * never in the sync snapshot.
+   *
+   * Stored as *sparse overrides* (`shared/jobExport.ts`), not as the resolved
+   * lists: a key this build has never heard of is ignored, and a column added by
+   * a later build takes its own default instead of being silently missing from
+   * every selection saved before it existed.
+   */
+  exportOptions: ExportSelection;
 }
 
 /** Everything persisted in chrome.storage.local (the CV bytes are stored separately, also in chrome.storage.local). */

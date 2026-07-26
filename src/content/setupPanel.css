@@ -153,65 +153,141 @@
   margin-top: var(--space-4);
 }
 
-/* ---------------- Collapsible groups ---------------- */
+/* ---------------- The wizard: rail + step head ---------------- */
 
 /**
- * The panel carries seven stacked sections; on a phone that is an unreadable
- * wall. Each group collapses, and the controller opens the ones that still
- * have unresolved rows — so it opens on exactly the work left to do.
+ * Two marks per step, joined by a hairline: the step's own icon above a
+ * `.cf-dot`. The panel used to stack five sections in one scroll — ~25 rows on a
+ * fresh site, with no ordering and nothing saying which mattered. Now one step
+ * shows at a time and this is the whole map of it, so it has to survive six
+ * nodes at 390px: the marks are the only fixed cost and the connectors take
+ * whatever is left.
+ *
+ * The icon says *which* step, the dot says how that step is doing. Both are
+ * needed, and they cannot be the same element — the dot's check/alert/dash is
+ * the shape half of "status is never colour alone", so a step glyph cannot take
+ * its place. Stacked rather than side by side because six pairs at 390px is
+ * ~59px a column, and two 18px marks abreast do not fit with a connector.
  */
-.cf-group {
-  border: 1px solid var(--border);
-  border-radius: var(--radius-card);
-  margin-bottom: var(--space-3);
-  overflow: hidden;
-}
-
-.cf-group > summary {
+.cf-rail {
   display: flex;
   align-items: center;
-  gap: var(--space-3);
-  padding: var(--space-3) var(--space-4);
+  gap: 0;
+  margin-bottom: var(--space-4);
+}
+
+.cf-rail-node {
+  /* Where the dot's centre sits, measured up from the node's bottom edge: the
+     padding below it plus half its 14px. The connector is anchored off this
+     rather than off the node's own middle, which the icon above the dot moved. */
+  --rail-dot-center: 13px;
+
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  /* Bottom-aligned so `--rail-dot-center` holds whatever the node's height ends
+     up being — six connectors that agree matter more than 3px of slack on top. */
+  justify-content: flex-end;
+  gap: 5px;
+  /* A full `--tap` target around a 37px stack: the marks are what you read, the
+     button is what a thumb has to hit, and those are not the same size. */
   min-height: var(--tap);
-  background: var(--surface);
+  padding: 0 0 6px;
+  border: 0;
+  background: none;
   cursor: pointer;
-  list-style: none;
-  font-size: var(--text-md);
-  font-weight: 600;
-  color: var(--fg);
+  position: relative;
 }
 
-.cf-group > summary::-webkit-details-marker {
-  display: none;
+/* The connector, drawn behind the dot rather than as its own element — six
+   nodes and five separators would otherwise be eleven boxes to align. */
+.cf-rail-node::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: var(--rail-dot-center);
+  height: 1px;
+  background: var(--border);
+}
+.cf-rail-node:first-child::before {
+  left: 50%;
+}
+.cf-rail-node:last-child::before {
+  right: 50%;
 }
 
-/* The title takes the slack, so everything after it lands in the same column on
-   every section — with or without a count chip. This replaces a pair of
-   `:has()` rules that moved the auto margin between the chip and the `?`
-   depending on which came first; the order is fixed, so the layout can be too. */
-.cf-group > summary > span:first-child {
+/* Which step this is. Masked like every other icon in the system, so it takes
+   `currentcolor`-style tinting from one property; `--i` is set inline per node
+   from `SETUP_STEP_ICONS`, the same mechanism `.cf-dot` uses per status. */
+.cf-rail-icon {
+  width: 18px;
+  height: 18px;
+  flex: none;
+  background: var(--muted-2);
+  -webkit-mask: var(--i) center / contain no-repeat;
+  mask: var(--i) center / contain no-repeat;
+}
+
+.cf-rail-node .cf-dot {
+  position: relative;
+  /* The rail's own background, so the dot punches a hole in the connector. */
+  box-shadow: 0 0 0 3px var(--bg);
+}
+
+/* Where you are, said twice: the icon takes the accent and the dot takes a ring.
+   A ring rather than a size change — the dots are a row of equal marks, and
+   growing one shifts every connector beside it. */
+.cf-rail-node.current .cf-rail-icon {
+  background: var(--accent);
+}
+.cf-rail-node.current .cf-dot {
+  box-shadow: 0 0 0 3px var(--bg), 0 0 0 5px var(--accent);
+}
+
+.cf-step-head {
+  margin-bottom: var(--space-4);
+}
+
+.cf-step-meta {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  margin-bottom: var(--space-1);
+}
+
+.cf-step-count {
+  font-size: var(--text-xs);
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--muted-2);
   flex: 1;
   min-width: 0;
 }
 
-/* Chevron, rotated when open — drawn, not typeset. As `▾` at the summary's own
-   13px it was a speck sitting beside the help icon. */
-.cf-group > summary::after {
-  content: '';
+.cf-step-todo {
   flex: none;
-  width: 16px;
-  height: 16px;
-  background: var(--muted);
-  -webkit-mask: var(--icon-chevron) center / contain no-repeat;
-  mask: var(--icon-chevron) center / contain no-repeat;
-  transition: transform 120ms ease;
-}
-.cf-group[open] > summary::after {
-  transform: rotate(180deg);
 }
 
-.cf-group-body {
-  padding: var(--space-4);
+.cf-step-title {
+  margin: 0 0 var(--space-1);
+  font-size: var(--text-lg);
+  font-weight: 600;
+  color: var(--fg);
+}
+
+/* The explanation, shown rather than hidden behind the `?`. This is the copy
+   that already existed in help.ts and that nobody ever opened. */
+.cf-step-lead {
+  margin: 0;
+  font-size: var(--text-md);
+  line-height: 1.5;
+  color: var(--muted);
+}
+
+.cf-step-lead b {
+  color: var(--fg);
 }
 
 .cf-section-row {
@@ -251,11 +327,11 @@
   background: var(--surface);
   color: var(--fg);
   font: var(--text-sm) var(--font);
-  min-height: 32px;
-}
-
-@media (pointer: coarse) {
-  .cf-ms {
-    min-height: var(--tap);
-  }
+  /* The one size, on every pointer — it sits in a row of `--tap` buttons and a
+     32px box beside them reads as a control that failed to render. */
+  min-height: var(--tap);
+  /* Holds the left of the wrapped action line. A Delay row has no labelled action
+     to flex, so without this its timeout hugged the right and sat 126px away from
+     where the Wait-for row above put the same control. */
+  margin-right: auto;
 }

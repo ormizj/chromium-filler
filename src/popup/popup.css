@@ -165,7 +165,7 @@ h1 {
 }
 
 /* The navigational actions as secondary buttons, wrapping two-up like the
-   reference's Reset/Queue row — a lone visible one takes the full width. */
+   reference's Reset/Queue row. */
 .links {
   margin-top: var(--space-5);
   display: flex;
@@ -173,10 +173,11 @@ h1 {
   gap: var(--space-3);
 }
 .links a {
-  /* Equal shares of the row, and never a label broken across two lines — a
-     wrapped verb makes one button taller than its neighbour, and the grid then
-     stretches both. */
-  flex: 1 1 0;
+  /* Natural width by default, so the fresh-install case — Site setup and Queue
+     both hidden, Options alone — is a button and not a second full-width CTA
+     under Fill, which is what it read as. Equal shares come back below as soon as
+     there are two of them to share between. */
+  flex: 0 1 auto;
   white-space: nowrap;
   display: flex;
   align-items: center;
@@ -194,6 +195,14 @@ h1 {
 }
 .links a[hidden] {
   display: none;
+}
+
+/* Two or more visible: equal shares, and never a label broken across two lines —
+   a wrapped verb makes one button taller than its neighbour and the row then
+   stretches both. `:has` is what counts them; the hidden ones are still children,
+   so `:only-child` cannot. */
+.links:has(a:not([hidden]) ~ a:not([hidden])) a {
+  flex: 1 1 0;
 }
 .links a:hover {
   background: var(--surface);

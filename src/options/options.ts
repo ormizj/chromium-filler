@@ -30,7 +30,9 @@ import { FillerModal, type ModalCallbacks, type ModalData } from '../content/mod
 import { TEXT_FIELDS, FIELD_LABELS } from '../shared/fieldKeys';
 import { configTemplate } from '../shared/configTemplate';
 import { extractUrls } from '../shared/urlImport';
-import { addUrls, applyStatus, deleteUrl, jobUrlStats, visibleUrls } from '../shared/jobUrls';
+import {
+  ALL_JOB_STATUSES, addUrls, applyStatus, deleteUrl, jobUrlStats, visibleUrls,
+} from '../shared/jobUrls';
 import { hostOf } from '../shared/url';
 import { MSG } from '../shared/messages';
 import {
@@ -39,7 +41,11 @@ import {
   getJobDetails, saveJobDetails, mutateJobDetails,
 } from '../shared/storage';
 import { pruneDetails } from '../shared/jobDetails';
-import { buildExport, exportFilename } from '../shared/jobExport';
+import {
+  EXPORT_FIELD_ORDER, buildExport, exportFilename, resolveExport, toCsv,
+  type ExportFormat, type ExportSelection,
+} from '../shared/jobExport';
+import { EXPORT_FIELD_LABELS, JOB_STATUS_LABELS } from '../shared/labels';
 import {
   buildSnapshot, mergeIntoLocal, parseSnapshot, snapshotFilename,
 } from '../shared/syncSnapshot';
@@ -53,8 +59,6 @@ import { helpButton, helpPanel, richText } from '../ui/help';
 import { setLimitAttrs } from '../ui/limits';
 
 const $ = <T extends HTMLElement = HTMLElement>(id: string) => document.getElementById(id) as T;
-
-const ALL_STATUSES: JobUrlStatus[] = ['new', 'opened', 'redirected', 'applied', 'skipped'];
 
 /** How many rows to render before "Show more". A 500-URL import must not build 500 rows. */
 const PAGE_SIZE = 50;
@@ -218,14 +222,25 @@ async function initCv(): Promise<void> {
  * Attaches a `?` to a control's label, disclosing that setting's explanation
  * directly beneath it. The catalog is the copy; this only decides where it goes.
  */
-function attachHelp(anchor: HTMLElement, entry: HelpEntry, insertAfter: HTMLElement = anchor): void {
+function attachHelp(
+  anchor: HTMLElement,
+  entry: HelpEntry,
+  /**
+   * Where the panel goes. A sibling of the anchor by default — but a `.setrow`
+   * lives in a `repeat(auto-fit, …)` grid, and a panel inserted *after* one is a
+   * new grid item: pressing a `?` on the first setting shunted every following
+   * row into a different column. Those callers place it inside the row instead,
+   * so the row grows and nothing else moves.
+   */
+  place: (panel: HTMLElement) => void = (panel) => anchor.after(panel),
+): void {
   let panel: HTMLElement | undefined;
   anchor.append(helpButton(entry.title, false, (open) => {
     panel?.remove();
     panel = undefined;
     if (open) {
       panel = helpPanel(entry);
-      insertAfter.after(panel);
+      place(panel);
     }
   }));
 }
@@ -247,7 +262,10 @@ function attachRowHelp(control: HTMLElement, entry: HelpEntry): void {
   // line and the caption still wraps whole beneath both. Anchoring it inside the
   // `h5` — which is what this did — put it at a different x on every row (the
   // title's own width) and drove a control through the middle of a text block.
-  attachHelp(text, entry, row);
+  attachHelp(text, entry, (panel) => {
+    panel.classList.add('setrow-help');
+    row.append(panel);
+  });
   if (entry.short) {
     // A span, not a <p>: half of these text blocks are the control's own <label>,
     // which takes phrasing content only.
@@ -373,6 +391,7 @@ async function initSettings(): Promise<void> {
   const closeOnSubmit = $<HTMLInputElement>('close-on-submit');
   const closeOnSkip = $<HTMLInputElement>('close-on-skip');
   const closeDelay = $<HTMLInputElement>('close-delay');
+  const keepInBrowser = $<HTMLInputElement>('keep-in-browser');
   const redirectTarget = $<HTMLSelectElement>('redirect-target');
   const modalFullscreen = $<HTMLInputElement>('modal-fullscreen');
 
@@ -381,6 +400,7 @@ async function initSettings(): Promise<void> {
   closeOnSubmit.checked = settings.closeTabOnSubmit;
   closeOnSkip.checked = settings.closeTabOnSkip;
   closeDelay.value = String(settings.closeTabDelayMs);
+  keepInBrowser.checked = settings.keepInBrowser;
   redirectTarget.value = settings.redirectTarget;
   modalFullscreen.checked = settings.modalFullscreen;
 
@@ -392,6 +412,7 @@ async function initSettings(): Promise<void> {
       closeTabOnSubmit: closeOnSubmit.checked,
       closeTabOnSkip: closeOnSkip.checked,
       closeTabDelayMs: Math.max(0, Number(closeDelay.value) || 0),
+      keepInBrowser: keepInBrowser.checked,
       redirectTarget: redirectTarget.value as RedirectTarget,
       modalFullscreen: modalFullscreen.checked,
     });
@@ -402,6 +423,7 @@ async function initSettings(): Promise<void> {
   closeOnSubmit.addEventListener('change', persist);
   closeOnSkip.addEventListener('change', persist);
   closeDelay.addEventListener('change', persist);
+  keepInBrowser.addEventListener('change', persist);
   redirectTarget.addEventListener('change', persist);
   modalFullscreen.addEventListener('change', persist);
 
@@ -409,6 +431,7 @@ async function initSettings(): Promise<void> {
   attachRowHelp(closeOnSubmit, SETTINGS_HELP.closeTabOnSubmit);
   attachRowHelp(closeOnSkip, SETTINGS_HELP.closeTabOnSkip);
   attachRowHelp(closeDelay, SETTINGS_HELP.closeTabDelayMs);
+  attachRowHelp(keepInBrowser, SETTINGS_HELP.keepInBrowser);
   attachRowHelp(redirectTarget, SETTINGS_HELP.redirectTarget);
   attachRowHelp(modalFullscreen, SETTINGS_HELP.modalFullscreen);
 
@@ -896,7 +919,7 @@ function renderFilters(list: JobUrlEntry[]): void {
   const stats = jobUrlStats(list);
   const counts: Record<string, number> = { all: stats.total, ...stats };
   const box = $('url-filters');
-  box.replaceChildren(...(['all', ...ALL_STATUSES] as const).map((key) => {
+  box.replaceChildren(...(['all', ...ALL_JOB_STATUSES] as const).map((key) => {
     const b = document.createElement('button');
     b.className = 'filter';
     b.type = 'button';
@@ -1005,7 +1028,7 @@ function inlineActions(entry: JobUrlEntry): HTMLElement {
 
   const status = document.createElement('select');
   status.setAttribute('aria-label', `Status for ${shortUrl(entry.url)}`);
-  for (const s of ALL_STATUSES) {
+  for (const s of ALL_JOB_STATUSES) {
     const opt = document.createElement('option');
     opt.value = s;
     opt.textContent = s;
@@ -1036,7 +1059,7 @@ function rowMenu(entry: JobUrlEntry): HTMLElement {
   menu.className = 'rowmenu-list';
   menu.hidden = true;
 
-  for (const s of ALL_STATUSES) {
+  for (const s of ALL_JOB_STATUSES) {
     const b = document.createElement('button');
     b.textContent = s === entry.status ? `✓ ${s}` : `Mark ${s}`;
     b.addEventListener('click', () => setEntryStatus(entry.url, s));
@@ -1236,8 +1259,9 @@ async function initUrls(): Promise<void> {
     setStatus($('queue-status'), 'Queue cleared', 'ok');
   });
 
-  $('export-jobs').addEventListener('click', () => void exportApplied());
+  $('export-jobs').addEventListener('click', () => void exportJobs());
   attachHelp($('archive-heading'), CONCEPT_HELP.exportJobs);
+  await renderExportOptions();
 
   document.addEventListener('click', () => closeAllMenus());
 
@@ -1250,31 +1274,145 @@ async function initUrls(): Promise<void> {
   await renderQueue();
 }
 
+/* ---------------- What to export ---------------- */
+
+/** One checkbox or radio, at a full tap target, labelled from the catalog. */
+function checkRow(
+  id: string,
+  label: string,
+  on: boolean,
+  onChange: (on: boolean) => void,
+  radio?: string,
+): HTMLLabelElement {
+  const wrap = document.createElement('label');
+  wrap.className = 'check';
+  const box = document.createElement('input');
+  box.type = radio ? 'radio' : 'checkbox';
+  if (radio) box.name = radio;
+  box.id = id;
+  box.checked = on;
+  box.addEventListener('change', () => onChange(box.checked));
+  const text = document.createElement('span');
+  text.textContent = label;
+  wrap.append(box, text);
+  return wrap;
+}
+
 /**
- * Write the applied postings out as one JSON file.
+ * The Archive panel: one checkbox per column, one per posting status, and the
+ * two formats.
+ *
+ * Both lists are walked from the model — `EXPORT_FIELD_LABELS` and
+ * `ALL_JOB_STATUSES` — rather than written into options.html, which is what
+ * makes a new column or a new status arrive here as a checkbox by itself. A
+ * change saves immediately, like every other control on this page; only the
+ * summary is re-rendered afterwards, because rebuilding the grid would take the
+ * focus out from under the box just ticked.
+ */
+async function renderExportOptions(): Promise<void> {
+  const chosen = resolveExport((await getSettings()).exportOptions);
+  const fields = new Set(chosen.fields);
+  const statuses = new Set(chosen.statuses);
+
+  $('export-fields').replaceChildren(...EXPORT_FIELD_ORDER.map((f) => checkRow(
+    `export-field-${f}`, EXPORT_FIELD_LABELS[f], fields.has(f),
+    (on) => void patchExport((sel) => ({ ...sel, fields: { ...sel.fields, [f]: on } })),
+  )));
+
+  $('export-statuses').replaceChildren(...ALL_JOB_STATUSES.map((s) => checkRow(
+    `export-status-${s}`, JOB_STATUS_LABELS[s], statuses.has(s),
+    (on) => void patchExport((sel) => ({ ...sel, statuses: { ...sel.statuses, [s]: on } })),
+  )));
+
+  const formats: Array<[ExportFormat, string]> = [['json', 'JSON'], ['csv', 'CSV (spreadsheet)']];
+  $('export-format').replaceChildren(...formats.map(([value, label]) => checkRow(
+    `export-format-${value}`, label, chosen.format === value,
+    () => void patchExport((sel) => ({ ...sel, format: value })),
+    'export-format-choice',
+  )));
+
+  await refreshExportSummary();
+}
+
+/**
+ * Serialized through a promise chain, like `session.ts` and `sync.ts`: each edit
+ * is a read-modify-write of one settings object, so two ticks in quick
+ * succession would otherwise both read the same snapshot and the second would
+ * erase the first. Ticking a column off is exactly the gesture people repeat.
+ */
+let exportWrites: Promise<void> = Promise.resolve();
+
+async function patchExport(edit: (sel: ExportSelection) => ExportSelection): Promise<void> {
+  exportWrites = exportWrites.then(async () => {
+    const settings = await getSettings();
+    await saveSettings({ ...settings, exportOptions: edit(settings.exportOptions ?? {}) });
+  });
+  await exportWrites;
+  await refreshExportSummary();
+}
+
+/**
+ * What pressing Export would produce, in one line — and the only place the
+ * empty selection is caught. Nothing here can be "fixed" for the user: a file
+ * with no columns is a file of empty objects, so the button goes dead and says
+ * which tick is missing.
+ */
+async function refreshExportSummary(): Promise<void> {
+  const chosen = resolveExport((await getSettings()).exportOptions);
+  const button = $<HTMLButtonElement>('export-jobs');
+  const summary = $('export-summary');
+  button.disabled = chosen.fields.length === 0 || chosen.statuses.length === 0;
+
+  if (chosen.fields.length === 0) {
+    summary.textContent = 'Pick at least one column to export.';
+    return;
+  }
+  if (chosen.statuses.length === 0) {
+    summary.textContent = 'Pick at least one kind of posting to export.';
+    return;
+  }
+
+  const count = buildExport(await getJobUrls(), {}, {
+    statuses: chosen.statuses, fields: ['url'],
+  }).length;
+  const kinds = chosen.statuses.map((s) => JOB_STATUS_LABELS[s].toLowerCase()).join(', ');
+  summary.textContent =
+    `${count} posting(s) — ${kinds} — with ${chosen.fields.length} of `
+    + `${EXPORT_FIELD_ORDER.length} columns, as ${chosen.format.toUpperCase()}.`;
+}
+
+/**
+ * Write the chosen postings out as one file.
  *
  * A plain anchor download, deliberately: the options page is an extension page,
  * so this needs no `downloads` permission, and the background could not do it
  * anyway — an MV3 service worker has no `URL.createObjectURL`.
  */
-async function exportApplied(): Promise<void> {
+async function exportJobs(): Promise<void> {
   const status = $('export-status');
+  const chosen = resolveExport((await getSettings()).exportOptions);
   const [list, details] = await Promise.all([getJobUrls(), getJobDetails()]);
-  const jobs = buildExport(list, details);
+  const jobs = buildExport(list, details, { statuses: chosen.statuses, fields: chosen.fields });
   if (jobs.length === 0) {
-    setStatus(status, 'No applied postings to export yet', 'err');
+    setStatus(status, 'Nothing matches what you chose to export', 'err');
     return;
   }
 
-  const blob = new Blob([JSON.stringify(jobs, null, 2)], { type: 'application/json' });
-  const href = URL.createObjectURL(blob);
+  // The BOM is what makes a spreadsheet read this as UTF-8 rather than as the
+  // local codepage, which is where an accented company name goes wrong.
+  const [text, type] = chosen.format === 'csv'
+    ? [`﻿${toCsv(jobs, chosen.fields)}`, 'text/csv;charset=utf-8']
+    : [JSON.stringify(jobs, null, 2), 'application/json'];
+  const href = URL.createObjectURL(new Blob([text], { type }));
   const a = document.createElement('a');
   a.href = href;
-  a.download = exportFilename(new Date());
+  a.download = exportFilename(new Date(), chosen);
   a.click();
   URL.revokeObjectURL(href);
 
-  const missing = jobs.filter((j) => j.description.length === 0).length;
+  // Only worth saying when the text was part of what was asked for.
+  const wanted = chosen.fields.includes('description');
+  const missing = wanted ? jobs.filter((j) => (j.description ?? []).length === 0).length : 0;
   setStatus(
     status,
     missing === 0

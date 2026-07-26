@@ -83,6 +83,12 @@ export interface ModalData extends SheetData {
   /** The site's own confirmation appeared — this posting really was sent. */
   applied?: boolean;
   redirect?: RedirectNotice;
+  /**
+   * This page's apply control hands off to a phone app and was left alone. Never
+   * set together with `redirect`: there is nothing here to open, so the footer
+   * must not offer to.
+   */
+  appLink?: boolean;
   /** Host of the board posting this page was reached from. */
   via?: string;
   /** Queue progress, when a session is running. Drives the strip and Skip action. */
@@ -347,6 +353,7 @@ export class FillerModal extends Sheet<ModalData> {
       applyState: data.applyState,
       applied: data.applied,
       redirect: data.redirect,
+      appLink: data.appLink,
       filled: data.matches.filter((m) => m.filled).length,
       total: data.matches.length,
       siteName: data.siteName,

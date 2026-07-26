@@ -3,7 +3,10 @@ import type { JobUrlEntry, JobUrlStatus } from './types';
 import type { JobBlock } from './jobText';
 import { makeEntry } from './jobUrls';
 import type { JobDetails, JobDetailsMap } from './jobDetails';
-import { buildExport, exportFilename, flattenBlocks } from './jobExport';
+import {
+  EXPORT_FIELD_ORDER, buildExport, exportFilename, flattenBlocks, resolveExport, toCsv,
+  type ExportField,
+} from './jobExport';
 
 const T0 = Date.UTC(2026, 6, 20, 9, 0, 0); // 2026-07-20T09:00:00.000Z
 
@@ -162,8 +165,132 @@ describe('buildExport', () => {
   });
 });
 
+describe('resolveExport', () => {
+  it('exports every column, applied only, as JSON when nothing has been chosen', () => {
+    expect(resolveExport()).toEqual({
+      fields: EXPORT_FIELD_ORDER,
+      statuses: ['applied'],
+      format: 'json',
+    });
+  });
+
+  it('drops only the columns turned off, and keeps the canonical order', () => {
+    const { fields } = resolveExport({ fields: { description: false, requirements: false } });
+    expect(fields).toEqual(EXPORT_FIELD_ORDER.filter((f) => f !== 'description' && f !== 'requirements'));
+  });
+
+  /**
+   * The forward-compatibility rule, and the reason the selection is stored as a
+   * sparse map of *decisions* rather than a list of included keys. A list saved
+   * by today's build would silently omit a column added tomorrow, for everyone
+   * who had ever opened the panel.
+   */
+  it('gives a key the stored selection never mentions its built-in default', () => {
+    const stored = { fields: { title: false }, statuses: { skipped: true } };
+    const { fields, statuses } = resolveExport(stored);
+    // Unmentioned column: on. Unmentioned status: off — except `applied`.
+    expect(fields).toContain('company');
+    expect(fields).not.toContain('title');
+    expect(statuses).toEqual(['skipped', 'applied']);
+  });
+
+  it('ignores a key it has never heard of, rather than failing on it', () => {
+    const stored = JSON.parse('{"fields":{"salary":true},"statuses":{"archived":true}}');
+    expect(resolveExport(stored)).toEqual(resolveExport());
+  });
+
+  it('orders the statuses by how far through the flow they are', () => {
+    const all = resolveExport({ statuses: { new: true, opened: true, redirected: true, skipped: true } });
+    expect(all.statuses).toEqual(['new', 'opened', 'redirected', 'skipped', 'applied']);
+  });
+
+  it('takes the format it is given and falls back to JSON for anything else', () => {
+    expect(resolveExport({ format: 'csv' }).format).toBe('csv');
+    expect(resolveExport(JSON.parse('{"format":"xlsx"}')).format).toBe('json');
+  });
+});
+
+describe('buildExport — chosen columns', () => {
+  it('exports only the columns asked for', () => {
+    const e = entry('https://jobs.example.com/1');
+    const fields: ExportField[] = ['url', 'title', 'requirements'];
+    const [job] = buildExport([e], map(details(e.url, {
+      requirements: [{ kind: 'list', items: ['5+ years React'] }],
+    })), { fields });
+    expect(job).toEqual({
+      url: 'https://jobs.example.com/1',
+      title: 'Senior Frontend Engineer',
+      requirements: [{ type: 'bullet', text: '5+ years React' }],
+    });
+  });
+
+  it('still leaves out a chosen column the posting has nothing for', () => {
+    // Chosen means "include it when there is one", not "write null".
+    const [job] = buildExport([entry('a')], map(details('a', { meta: {} })),
+      { fields: ['url', 'company'] });
+    expect(job).toEqual({ url: 'a' });
+  });
+
+  it('collapses a two-step chain the same way whatever the columns are', () => {
+    const board = entry('board', { redirectUrl: 'ats' });
+    const ats = entry('ats', { sourceUrl: 'board' });
+    const jobs = buildExport([board, ats], map(details('board', { title: 'Board copy' })),
+      { fields: ['url', 'title'] });
+    expect(jobs).toEqual([{ url: 'ats', title: 'Board copy' }]);
+  });
+});
+
+describe('toCsv', () => {
+  const job = (over: Record<string, unknown> = {}) => ({
+    url: 'https://jobs.example.com/1',
+    title: 'Senior Frontend Engineer',
+    status: 'applied' as JobUrlStatus,
+    addedAt: '2026-07-20T09:00:00.000Z',
+    description: [
+      { type: 'heading' as const, text: 'About the role' },
+      { type: 'bullet' as const, text: 'Ship things' },
+    ],
+    requirements: [],
+    ...over,
+  });
+
+  it('heads the file with the chosen columns, in the chosen order', () => {
+    const [head] = toCsv([job()], ['title', 'url']).split('\r\n');
+    expect(head).toBe('title,url');
+  });
+
+  it('flattens a description into one cell, a block per line', () => {
+    const [, row] = toCsv([job()], ['description']).split('\r\n');
+    expect(row).toBe('"About the role\n- Ship things"');
+  });
+
+  it('quotes a cell holding a comma, a quote or a newline', () => {
+    const [, row] = toCsv([job({ title: 'Engineer, "Senior"' })], ['title']).split('\r\n');
+    expect(row).toBe('"Engineer, ""Senior"""');
+  });
+
+  it('leaves a cell empty for a column this posting has nothing for', () => {
+    expect(toCsv([job()], ['url', 'company']).split('\r\n')[1])
+      .toBe('https://jobs.example.com/1,');
+  });
+
+  it('writes the header even when there is nothing to export', () => {
+    expect(toCsv([], ['url'])).toBe('url');
+  });
+});
+
 describe('exportFilename', () => {
   it('names the file for the day it was written, so downloads sort and do not collide', () => {
     expect(exportFilename(new Date(T0))).toBe('applied-jobs-2026-07-20.json');
+  });
+
+  it('takes its extension from the format', () => {
+    expect(exportFilename(new Date(T0), { format: 'csv', statuses: ['applied'] }))
+      .toBe('applied-jobs-2026-07-20.csv');
+  });
+
+  it('stops claiming “applied” once the file holds anything else', () => {
+    expect(exportFilename(new Date(T0), { format: 'json', statuses: ['applied', 'skipped'] }))
+      .toBe('jobs-2026-07-20.json');
   });
 });

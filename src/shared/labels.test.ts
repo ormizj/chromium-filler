@@ -7,9 +7,13 @@
  * this file exists to stop.
  */
 import { describe, it, expect } from 'vitest';
-import { ACTION_LABELS, STATUS_TEXT, type ActionKey } from './labels';
+import {
+  ACTION_LABELS, EXPORT_FIELD_LABELS, JOB_STATUS_LABELS, STATUS_TEXT, type ActionKey,
+} from './labels';
 import { STATUS_LABELS } from './fieldStatus';
 import { DOT_LEGEND } from './help';
+import { ALL_JOB_STATUSES } from './jobUrls';
+import { EXPORT_FIELD_ORDER } from './jobExport';
 import type { MatchConfidence } from './types';
 
 const STATUSES: MatchConfidence[] = ['high', 'low', 'none'];
@@ -40,5 +44,19 @@ describe('labels — the wording catalog', () => {
     for (const row of DOT_LEGEND) expect(STATUS_TEXT[row.status]).toBeDefined();
     // Every outcome the catalog words has a legend entry, and vice versa.
     expect(new Set(DOT_LEGEND.map((r) => r.status))).toEqual(new Set(STATUSES));
+  });
+
+  /**
+   * The archive's checkboxes are rendered by walking these two records, so a
+   * column or a posting status with no words here is a control that cannot be
+   * drawn. The `Record<>` types already fail the build for a missing key; these
+   * catch the other half — a key present but left blank.
+   */
+  it('names every column the archive can export', () => {
+    for (const f of EXPORT_FIELD_ORDER) expect(EXPORT_FIELD_LABELS[f].trim(), f).not.toBe('');
+  });
+
+  it('names every status a posting can be exported in', () => {
+    for (const s of ALL_JOB_STATUSES) expect(JOB_STATUS_LABELS[s].trim(), s).not.toBe('');
   });
 });

@@ -4,86 +4,45 @@
  * containers and every profile form field (+ CV upload) directly on the page,
  * showing a live preview of what each saved selector currently resolves to.
  *
+ * It is a **linear wizard**: one step on screen at a time, in the order the
+ * extension itself does things (`SETUP_STEP_ORDER`), with a progress rail and
+ * Back / Next. It used to render all five sections stacked in one scroll, and
+ * auto-opened every section that had unresolved rows — so a fresh site opened
+ * onto ~25 rows of `auto · #first_name` with no ordering and nothing saying
+ * which of them mattered. On a 390px phone that was unusable.
+ *
  * The panel is a dumb renderer: the Controller computes previews/`found` from
  * the DOM and supplies callbacks, mirroring the review modal's design.
  */
 
 import type { FieldKey, PrepAction } from '../shared/types';
 import {
-  CONCEPT_HELP, DOT_LEGEND, SETUP_GROUP_HELP, SETUP_GROUP_TITLES, type SetupGroupKey,
+  CONCEPT_HELP, DOT_LEGEND, SETUP_STEP_HELP, SETUP_STEP_TITLES,
 } from '../shared/help';
+import {
+  SETUP_STEP_ICONS, SETUP_STEP_ORDER, firstStepWithWork, stepStates,
+  type ContainerKey, type PrepListKey, type PrepRow, type RowStatus, type SetupRow,
+  type SetupSnapshot, type SetupStepKey, type StepState,
+} from '../shared/setupSteps';
 import { ACTION_LABELS } from '../shared/labels';
 import { helpButton, helpPanel, richText } from '../ui/help';
 import { Sheet, type SheetCallbacks, type SheetData } from './sheet';
 import setupCss from './setupPanel.css?inline';
 
-export type ContainerKey = 'jobTitle' | 'jobDescription' | 'jobRequirements';
-
-/**
- * Which step list a prep row belongs to: pre-fill steps, pre-handoff steps, or
- * the CV-confirmation steps the review modal's Apply runs before sending.
- */
-export type PrepListKey = 'prep' | 'beforeFollow' | 'submitCv';
-
-/** Dot colour: high = matched (green), low = weak match (yellow), none = nothing (grey). */
-export type RowStatus = 'high' | 'low' | 'none';
-
-export interface SetupRow {
-  /** ContainerKey for job-info rows, FieldKey for form-field rows. */
-  key: string;
-  label: string;
-  status: RowStatus;
-  /** Detail line, e.g. "auto · #email" or "saved · h1.title" or "not found". */
-  note: string;
-  /** Whether an explicit selector is saved for this row (enables Clear + "Re-pick"). */
-  hasSave: boolean;
-}
+// Re-exported so the Controller, the dev harness and the E2E keep one import
+// path for the row shapes, while the pure step model owns their definitions.
+export type {
+  ContainerKey, PrepListKey, PrepRow, RowStatus, SetupRow, SetupStepKey,
+} from '../shared/setupSteps';
 
 const DOT: Record<RowStatus, string> = { high: 'ok', low: 'warn', none: 'none' };
 
-/** One prerequisite step, in run order. */
-export interface PrepRow {
-  action: PrepAction;
-  selector?: string;
-  ms?: number;
-  /** Whether the step's target currently resolves on the page (for the status dot). */
-  resolves?: boolean;
-}
-
-export interface SetupData extends SheetData {
-  name: string;
-  urlPattern: string;
-  prep: PrepRow[];
-  containers: SetupRow[];
-  fields: SetupRow[];
-  /** Live quick-apply vs. external-redirect verdict for the page being set up. */
-  verdict: string;
-  /** Redirect-classification selectors (apply link, quick-apply / external markers). */
-  redirect: SetupRow[];
-  /** Steps run on the posting before following an external apply link. */
-  beforeFollow: PrepRow[];
-  /**
-   * Steps the review modal's Apply runs before pressing Send, for sites where
-   * attaching the file is a separate dialog that has to be confirmed. Empty is
-   * the normal state: most sites take the CV the moment it is attached.
-   */
-  submitCv: PrepRow[];
-  /**
-   * The site's Send button — the control the review modal's Apply presses. Grey
-   * means none was found, which is what greys Apply out, so this row is the one
-   * place a user can do something about it.
-   */
-  submit: SetupRow;
-  /**
-   * The site's confirmation element. Grey means the posting can never be
-   * recorded as applied — and, because nothing unverifiable is sent, that Apply
-   * is greyed out too. It is the one row that has to be filled in per site.
-   */
-  success: SetupRow;
+export interface SetupData extends SheetData, SetupSnapshot {
   /**
    * Whether the user has already dismissed the legend. False opens it, so a
    * first-time user is told what the dots and the `auto ·` prefixes mean before
-   * being asked to act on them.
+   * being asked to act on them — and lands on step 1 rather than being dropped
+   * into the middle of a wizard they have never seen.
    */
   helpSeen: boolean;
 }
@@ -129,10 +88,17 @@ const PREP_LABEL: Record<PrepAction, string> = {
 
 export class SetupPanel extends Sheet<SetupData> {
   private cb: SetupCallbacks;
-  /** Groups the user opened by hand; re-renders must not fold them back up. */
-  private openGroups = new Set<string>();
-  /** Same for the `?` explanations — a re-scan mid-read must not close one. */
-  private openHelp = new Set<SetupGroupKey>();
+  /**
+   * Which step is on screen. **On the instance, never in `SetupData`.** The
+   * Controller re-renders on every Pick, prep edit and rename (`refreshSetup`),
+   * so a step derived from the data would throw the user back to the start every
+   * time they picked a field — the one regression that would make this unusable.
+   */
+  private step = 0;
+  /** Whether the opening step has been chosen; it is picked once, not per render. */
+  private placed = false;
+  /** The `?` explanations the user opened — a re-scan mid-read must not close one. */
+  private openHelp = new Set<SetupStepKey>();
   /** The legend, once dismissed, stays folded for the rest of this page too. */
   private legendDismissed = false;
 
@@ -143,7 +109,32 @@ export class SetupPanel extends Sheet<SetupData> {
 
   render(data: SetupData): void {
     this.data = data;
+    // Where to open, decided once. A first-time user walks from step 1, legend
+    // and all; anyone else lands on the earliest step that still needs them,
+    // which is what the old auto-opening sections were reaching for.
+    if (!this.placed) {
+      this.placed = true;
+      const work = firstStepWithWork(stepStates(data));
+      this.step = data.helpSeen && work >= 0 ? work : 0;
+    }
     this.paint();
+  }
+
+  /** Jump to a step by key. Used by the dev harness, so each step is screenshottable. */
+  setStep(key: SetupStepKey): void {
+    const i = SETUP_STEP_ORDER.indexOf(key);
+    if (i < 0) return;
+    this.placed = true;
+    this.step = i;
+    this.repaint();
+  }
+
+  /** Move by one, clamped. The rail and the footer both come through here. */
+  private goTo(index: number): void {
+    const next = Math.max(0, Math.min(SETUP_STEP_ORDER.length - 1, index));
+    if (next === this.step) return;
+    this.step = next;
+    this.repaint();
   }
 
   /** Re-render from the last data — what `Sheet` calls after a fold or a resize. */
@@ -199,116 +190,201 @@ export class SetupPanel extends Sheet<SetupData> {
     header.append(title, full, close);
     this.makeDraggable(card, header);
 
+    const states = stepStates(data);
+    const current = states[this.step];
+
     const body = el('div', 'cf-body');
-
-    // One sentence answering "what am I looking at", above everything. The
-    // panel used to open straight onto five jargon headings.
-    const intro = el('p', 'cf-intro');
-    intro.textContent = 'Teach the extension how to read and fill this site. '
-      + 'It sends nothing until you press Apply.';
-    body.append(intro, this.legend(data));
-
-    // Identity
-    const identity = el('div', 'cf-identity');
-    const nameInput = input('Name', data.name);
-    const patternInput = input('URL pattern', data.urlPattern);
-    const persistMeta = () => this.cb.onRename(nameInput.value.trim(), patternInput.value.trim());
-    nameInput.onchange = persistMeta;
-    patternInput.onchange = persistMeta;
-    identity.append(field('Name', nameInput), field('URL pattern', patternInput));
-
-    // Every section stacked open is a wall on a phone. Each one collapses, and
-    // the ones still holding unresolved rows open themselves — so the panel
-    // opens on exactly the work that is left.
-    const jobInfoTodo = countTodo(data.containers);
-    // The Send button counts with the fields, but only when nothing was found:
-    // a greyed Apply is real work. A button found by its label is the ordinary
-    // healthy state, and counting that labelled every site "1 to do" — the same
-    // mistake the redirect selectors below are careful not to make.
-    const fieldsTodo = countTodo(data.fields)
-      + (data.submit.status === 'none' ? 1 : 0)
-      // Always work when unset: without it nothing on this site can ever be
-      // recorded as applied, and Apply refuses to send. There is no healthy
-      // "not set" for this one, unlike the redirect selectors.
-      + (data.success.status === 'none' ? 1 : 0);
-    // Redirect selectors are optional overrides — "not set" is the ordinary
-    // state for a quick-apply site, so only a saved selector that no longer
-    // resolves counts as work. Counting them like the other groups labelled
-    // every healthy site "2 to do".
-    const redirectTodo = data.redirect.filter((r) => r.status === 'low').length;
-    const nothingTodo = jobInfoTodo + fieldsTodo + redirectTodo === 0;
-
-    const site = this.group('site', 0, false);
-    site.body.append(identity);
-
-    const steps = this.group('steps', 0, false);
-    const prepHead = el('div', 'cf-section-row');
-    prepHead.append(sectionHead('Run in order before filling'));
-    prepHead.append(btn('Run steps ▶', () => this.cb.onRunPrep()));
-    steps.body.append(prepHead);
-    this.appendPrepList(steps.body, data.prep, 'prep');
-
-    // Application type: does this posting apply here, or on the employer's site?
-    const kind = this.group('kind', redirectTodo, redirectTodo > 0);
-    const verdict = el('div', 'cf-verdict');
-    verdict.textContent = data.verdict;
-    verdict.title = data.verdict;
-    kind.body.append(verdict);
-    for (const row of data.redirect) {
-      kind.body.append(this.row(row,
-        () => this.cb.onPickRedirect(row.key),
-        () => this.cb.onClearRedirect(row.key)));
+    // Orientation, then position, then the step. The intro and the legend are
+    // about the *panel*, not about step 1, so they lead — rendered after the
+    // step's own prose they read as an afterthought wedged between two
+    // explanations, which is how the first cut of this had them.
+    if (current.key === 'site') {
+      const intro = el('p', 'cf-intro');
+      intro.textContent = 'Teach the extension how to read and fill this site. '
+        + 'It sends nothing until you press Apply.';
+      body.append(intro, this.legend(data));
     }
-    kind.body.append(sectionHead('Before leaving — run on the posting first, e.g. “Save job”'));
-    this.appendPrepList(kind.body, data.beforeFollow, 'beforeFollow');
+    body.append(this.rail(states), this.stepHead(current), this.stepBody(current.key, data));
 
-    // Job info containers
-    const info = this.group('info', jobInfoTodo, jobInfoTodo > 0);
-    for (const row of data.containers) {
-      info.body.append(this.row(row,
-        () => this.cb.onPickContainer(row.key as ContainerKey),
-        () => this.cb.onClearContainer(row.key as ContainerKey)));
-    }
-
-    // Form fields
-    const fields = this.group('fields', fieldsTodo, fieldsTodo > 0 || nothingTodo);
-    fields.body.append(sectionHead('Pick only what stays grey'));
-    for (const row of data.fields) {
-      fields.body.append(this.row(row,
-        () => this.cb.onPickField(row.key as FieldKey),
-        () => this.cb.onClearField(row.key as FieldKey)));
-    }
-    // Sits under the CV row it is about: a few sites only register the file once
-    // a dialog is confirmed, and these are the clicks that do it.
-    fields.body.append(sectionHead('After attaching the CV — extra clicks this site needs'));
-    this.appendPrepList(fields.body, data.submitCv, 'submitCv');
-
-    // Last, in the order they happen: press this, then look for that.
-    fields.body.append(sectionHead('The button Apply presses'));
-    fields.body.append(this.row(data.submit,
-      () => this.cb.onPickSubmit(),
-      () => this.cb.onClearSubmit()));
-    // Pick this one *after* sending, when the confirmation is on screen — which
-    // is the only moment it exists. The note on the row says so.
-    // The instruction lives in the heading rather than the row's note: the note
-    // truncates to one line, and "pick this once a confirmation is on screen" is
-    // the whole trick — it does not exist on the page you are looking at.
-    fields.body.append(sectionHead('How this site says it worked — pick it with a confirmation on screen'));
-    fields.body.append(this.row(data.success,
-      () => this.cb.onPickSuccess(),
-      () => this.cb.onClearSuccess()));
-
-    body.append(site.el, steps.el, kind.el, info.el, fields.el);
-
-    // Footer
+    // Two buttons, on every step, with exactly one primary — the same rule the
+    // review modal's footer follows, and for the same 390px reason.
     const footer = el('div', 'cf-footer');
-    footer.append(
-      btn('Advanced (JSON)', () => this.cb.onOpenOptions()),
-      btn(ACTION_LABELS.done, () => this.cb.onClose(), true),
-    );
+    const back = btn('‹ Back', () => this.goTo(this.step - 1));
+    if (this.step === 0) back.setAttribute('disabled', 'true');
+    const last = this.step === SETUP_STEP_ORDER.length - 1;
+    // The wizard ends where the old footer's Done did: finishing the last step
+    // and finishing with the site are the same act, so they are one button.
+    footer.append(back, last
+      ? btn(ACTION_LABELS.done, () => this.cb.onClose(), true)
+      : btn('Next ›', () => this.goTo(this.step + 1), true));
 
     card.append(header, body, footer);
     return card;
+  }
+
+  /**
+   * The progress rail: per step, the step's own mark above a `.cf-dot`, the
+   * current node ringed. Each node is a button — there is no separate index
+   * screen, so this is also how someone who opened the panel to re-pick one
+   * field gets there without six taps of Next.
+   *
+   * Two marks, because there are two questions. The **icon** says which step
+   * this is; six identical dots said only that there were six of something. The
+   * **dot** keeps saying how that step is doing, and it has to stay a `.cf-dot`
+   * — its check/alert/dash is the shape half of "status is never colour alone",
+   * so the step mark cannot be swapped into it. Hence icon *above*, dot below.
+   *
+   * The icon is `aria-hidden`: the node's `aria-label` already names the step
+   * and its outstanding work, and a screen reader announcing a decorative mark
+   * beside that is noise.
+   */
+  private rail(states: StepState[]): HTMLElement {
+    const rail = el('div', 'cf-rail');
+    rail.setAttribute('role', 'tablist');
+    rail.setAttribute('aria-label', 'Setup steps');
+    for (const s of states) {
+      const node = document.createElement('button');
+      node.className = `cf-rail-node${s.index === this.step ? ' current' : ''}`;
+      node.dataset.k = `rail:${s.key}`;
+      node.setAttribute('role', 'tab');
+      node.setAttribute('aria-selected', String(s.index === this.step));
+      if (s.index === this.step) node.setAttribute('aria-current', 'step');
+      // The whole state of the step, read aloud: which one, what it is, and what
+      // it still needs. The marks alone say none of that.
+      node.setAttribute('aria-label',
+        `Step ${s.index + 1}, ${SETUP_STEP_TITLES[s.key]} — ${s.summary}`);
+
+      const icon = el('span', 'cf-rail-icon');
+      icon.setAttribute('aria-hidden', 'true');
+      icon.style.setProperty('--i', `var(${SETUP_STEP_ICONS[s.key]})`);
+
+      node.append(icon, el('span', `cf-dot ${s.tone}`));
+      node.onclick = () => this.goTo(s.index);
+      rail.append(node);
+    }
+    return rail;
+  }
+
+  /**
+   * Where you are, what this step is, and — shown, not hidden behind the `?` —
+   * what it is for. With one step on screen there is finally room for the prose,
+   * and a panel that opens onto five jargon headings was the whole complaint.
+   */
+  private stepHead(s: StepState): HTMLElement {
+    const head = el('div', 'cf-step-head');
+
+    const meta = el('div', 'cf-step-meta');
+    const count = el('span', 'cf-step-count');
+    count.textContent = `Step ${s.index + 1} of ${SETUP_STEP_ORDER.length}`;
+    meta.append(count);
+    if (s.todo > 0) {
+      const chip = el('span', 'chip warn cf-step-todo');
+      chip.textContent = `${s.todo} to do`;
+      meta.append(chip);
+    }
+
+    const help = SETUP_STEP_HELP[s.key];
+    const open = this.openHelp.has(s.key);
+    meta.append(helpButton(SETUP_STEP_TITLES[s.key], open, (next) => {
+      if (next) this.openHelp.add(s.key);
+      else this.openHelp.delete(s.key);
+      this.repaint();
+    }));
+    head.append(meta);
+
+    const title = el('h2', 'cf-step-title');
+    title.textContent = SETUP_STEP_TITLES[s.key];
+    const lead = el('p', 'cf-step-lead');
+    lead.append(...richText(help.body));
+    head.append(title, lead);
+
+    // The row-by-row reference stays behind the `?`: it is something to look up,
+    // not something to read on the way past.
+    if (open) head.append(helpPanel(help));
+    return head;
+  }
+
+  /** The one step's own controls. Everything else in the wizard is chrome. */
+  private stepBody(key: SetupStepKey, data: SetupData): HTMLElement {
+    const body = el('div', 'cf-step-body');
+
+    if (key === 'site') {
+      const identity = el('div', 'cf-identity');
+      const nameInput = input('Name', data.name, 'site:name');
+      const patternInput = input('URL pattern', data.urlPattern, 'site:pattern');
+      const persistMeta = () => this.cb.onRename(nameInput.value.trim(), patternInput.value.trim());
+      nameInput.onchange = persistMeta;
+      patternInput.onchange = persistMeta;
+      identity.append(field('Name', nameInput), field('URL pattern', patternInput));
+      body.append(identity);
+
+      // The raw JSON is this config, which is what this step is about — so it
+      // lives here rather than taking a permanent third slot in the footer.
+      const advanced = el('div', 'cf-addbar');
+      advanced.append(btn('Advanced (JSON)', () => this.cb.onOpenOptions()));
+      body.append(advanced);
+    }
+
+    if (key === 'prep') {
+      const head = el('div', 'cf-section-row');
+      head.append(sectionHead('Run in order before filling'));
+      head.append(btn('Run steps ▶', () => this.cb.onRunPrep()));
+      body.append(head);
+      this.appendPrepList(body, data.prep, 'prep');
+    }
+
+    if (key === 'kind') {
+      const verdict = el('div', 'cf-verdict');
+      verdict.textContent = data.verdict;
+      verdict.title = data.verdict;
+      body.append(verdict);
+      for (const row of data.redirect) {
+        body.append(this.row('redirect', row,
+          () => this.cb.onPickRedirect(row.key),
+          () => this.cb.onClearRedirect(row.key)));
+      }
+      body.append(sectionHead('Before leaving — run on the posting first, e.g. “Save job”'));
+      this.appendPrepList(body, data.beforeFollow, 'beforeFollow');
+    }
+
+    if (key === 'info') {
+      for (const row of data.containers) {
+        body.append(this.row('container', row,
+          () => this.cb.onPickContainer(row.key as ContainerKey),
+          () => this.cb.onClearContainer(row.key as ContainerKey)));
+      }
+    }
+
+    if (key === 'fields') {
+      body.append(sectionHead('Pick only what stays grey'));
+      for (const row of data.fields) {
+        body.append(this.row('field', row,
+          () => this.cb.onPickField(row.key as FieldKey),
+          () => this.cb.onClearField(row.key as FieldKey)));
+      }
+    }
+
+    if (key === 'send') {
+      // In the order they happen: confirm the file, press the button, read the
+      // answer. The two rows Apply depends on used to be the tail of a sixteen
+      // row field list, which is most of why the confirmation went unset.
+      body.append(sectionHead('After attaching the CV — extra clicks this site needs'));
+      this.appendPrepList(body, data.submitCv, 'submitCv');
+
+      body.append(sectionHead('The button Apply presses'));
+      body.append(this.row('send', data.submit,
+        () => this.cb.onPickSubmit(),
+        () => this.cb.onClearSubmit()));
+      // The instruction lives in the heading rather than the row's note: the note
+      // truncates to one line, and "pick this once a confirmation is on screen" is
+      // the whole trick — it does not exist on the page you are looking at.
+      body.append(sectionHead('How this site says it worked — pick it with a confirmation on screen'));
+      body.append(this.row('send', data.success,
+        () => this.cb.onPickSuccess(),
+        () => this.cb.onClearSuccess()));
+    }
+
+    return body;
   }
 
   /**
@@ -361,62 +437,7 @@ export class SetupPanel extends Sheet<SetupData> {
     return details;
   }
 
-  /**
-   * A collapsible section. `todo` is how many rows still need attention — shown
-   * as a chip so a collapsed group still says whether it can be ignored. The `?`
-   * discloses that section's explanation as the first thing inside its body,
-   * which is why it is built here rather than by each caller.
-   */
-  private group(key: SetupGroupKey, todo: number, open: boolean): { el: HTMLElement; body: HTMLElement } {
-    const title = SETUP_GROUP_TITLES[key];
-    const details = document.createElement('details');
-    details.className = 'cf-group';
-    details.open = open || this.openGroups.has(title);
-
-    const summary = document.createElement('summary');
-    const label = el('span');
-    label.textContent = title;
-    summary.append(label);
-    if (todo > 0) {
-      const chip = el('span', 'chip warn cf-group-count');
-      chip.textContent = `${todo} to do`;
-      summary.append(chip);
-    }
-
-    const helpOpen = this.openHelp.has(key);
-    summary.append(helpButton(title, helpOpen, (next) => {
-      if (next) {
-        this.openHelp.add(key);
-        // Reading the explanation is a reason to see the section, never to lose
-        // it. This goes into the persistent set, not onto `details.open`: the
-        // re-render below replaces this element, and the `toggle` event that
-        // would have recorded it fires too late to be seen by that render.
-        this.openGroups.add(title);
-      } else {
-        this.openHelp.delete(key);
-      }
-      this.refresh();
-    }));
-    details.append(summary);
-
-    // Remember what the user opened, so a re-scan doesn't collapse it under them.
-    details.addEventListener('toggle', () => {
-      if (details.open) this.openGroups.add(title);
-      else this.openGroups.delete(title);
-    });
-
-    const body = el('div', 'cf-group-body');
-    if (helpOpen) body.append(helpPanel(SETUP_GROUP_HELP[key]));
-    details.append(body);
-    return { el: details, body };
-  }
-
-  /** Re-render from the last data — the panel is a pure function of it. */
-  private refresh(): void {
-    this.repaint();
-  }
-
-  /** A step list plus its "+ step" bar; both prep lists render identically. */
+  /** A step list plus its "+ step" bar; all three prep lists render identically. */
   private appendPrepList(body: HTMLElement, steps: PrepRow[], list: PrepListKey): void {
     steps.forEach((step, i) => body.append(this.prepRow(step, i, steps.length, list)));
     const addBar = el('div', 'cf-addbar');
@@ -452,22 +473,28 @@ export class SetupPanel extends Sheet<SetupData> {
       ms.className = 'cf-ms';
       ms.value = String(step.ms ?? (step.action === 'waitFor' ? 10000 : 500));
       ms.title = step.action === 'waitFor' ? 'timeout (ms)' : 'delay (ms)';
+      ms.dataset.k = `prep:${list}:${i}:ms`;
       ms.onchange = () => this.cb.onSetPrepMs(i, Math.max(0, Number(ms.value) || 0), list);
       actions.append(ms);
     }
     if (selectorBased) {
-      actions.append(btn(step.selector ? 'Re-pick' : 'Pick', () => this.cb.onPickPrepTarget(i, list)));
+      actions.append(btn(step.selector ? 'Re-pick' : 'Pick',
+        () => this.cb.onPickPrepTarget(i, list), false, `prep:${list}:${i}`));
     }
-    const up = btn('↑', () => this.cb.onMovePrep(i, -1, list));
-    const down = btn('↓', () => this.cb.onMovePrep(i, 1, list));
+    const up = iconBtn('↑', 'Move up', () => this.cb.onMovePrep(i, -1, list));
+    const down = iconBtn('↓', 'Move down', () => this.cb.onMovePrep(i, 1, list));
     if (i === 0) up.setAttribute('disabled', 'true');
     if (i === total - 1) down.setAttribute('disabled', 'true');
-    actions.append(up, down, btn('✕', () => this.cb.onRemovePrep(i, list)));
+    actions.append(up, down, iconBtn('✕', 'Remove step', () => this.cb.onRemovePrep(i, list)));
     row.append(actions);
     return row;
   }
 
-  private row(m: SetupRow, onPick: () => void, onClear: () => void): HTMLElement {
+  /**
+   * `ns` namespaces the row's `data-k` — the same key (`applySelector`) means a
+   * different row in a different step, and focus must not land on the wrong one.
+   */
+  private row(ns: string, m: SetupRow, onPick: () => void, onClear: () => void): HTMLElement {
     const row = el('div', 'cf-row');
     row.append(el('span', `cf-dot ${DOT[m.status]}`));
 
@@ -483,8 +510,8 @@ export class SetupPanel extends Sheet<SetupData> {
     // Plain, like every other per-row action here: the panel's one coral button is
     // Done in the footer. A Pick on each of a dozen rows read as a dozen CTAs.
     const actions = el('div', 'cf-actions');
-    actions.append(btn(m.hasSave ? 'Re-pick' : ACTION_LABELS.pick, onPick));
-    if (m.hasSave) actions.append(btn('Clear', onClear));
+    actions.append(btn(m.hasSave ? 'Re-pick' : ACTION_LABELS.pick, onPick, false, `${ns}:${m.key}`));
+    if (m.hasSave) actions.append(btn('Clear', onClear, false, `${ns}:${m.key}:clear`));
     row.append(actions);
     return row;
   }
@@ -497,19 +524,37 @@ function el(tag: string, className = ''): HTMLElement {
   return node;
 }
 
-function btn(text: string, onClick: () => void, primary = false): HTMLButtonElement {
+function btn(text: string, onClick: () => void, primary = false, k?: string): HTMLButtonElement {
   const b = document.createElement('button');
   b.className = `cf-btn${primary ? ' primary' : ''}`;
   b.textContent = text;
   b.onclick = onClick;
+  // `data-k` is how `Sheet` finds this control again after a rebuild. Only the
+  // controls worth returning focus to carry one; see `Sheet.place`.
+  if (k) b.dataset.k = k;
   return b;
 }
 
-function input(placeholder: string, value: string): HTMLInputElement {
+/**
+ * A button whose whole label is a glyph. It is marked so the narrow row rules can
+ * hold it square: `.cf-actions .cf-btn { flex: 1 }` sizes every action by how many
+ * the row happens to carry, which turned ↑ ↓ ✕ into 59–86px slabs and put the same
+ * control at a different x on every prep row. The glyph is also hidden from the
+ * accessibility tree — "↑" is not a name, `aria-label` is.
+ */
+function iconBtn(glyph: string, label: string, onClick: () => void): HTMLButtonElement {
+  const b = btn(glyph, onClick);
+  b.className = 'cf-btn cf-btn-icon';
+  b.setAttribute('aria-label', label);
+  return b;
+}
+
+function input(placeholder: string, value: string, k: string): HTMLInputElement {
   const i = document.createElement('input');
   i.className = 'cf-input';
   i.placeholder = placeholder;
   i.value = value;
+  i.dataset.k = k;
   return i;
 }
 
@@ -525,9 +570,4 @@ function sectionHead(text: string): HTMLElement {
   const h = el('div', 'cf-section');
   h.textContent = text;
   return h;
-}
-
-/** Rows that still need a decision: nothing found, or only a weak match. */
-function countTodo(rows: SetupRow[]): number {
-  return rows.filter((r) => r.status !== 'high').length;
 }

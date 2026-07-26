@@ -30,6 +30,14 @@
         ?job=tracked  the same handoff through a tracker chain (302 → interstitial
                       → ATS), so the URL finally recorded is the last one, not the
                       first hop.
+        ?job=applink  an `intent://` apply link — the shape that launches a phone
+                      app — carrying the real form's address in its
+                      `S.browser_fallback_url`. Must be followed AT THAT ADDRESS,
+                      so the handoff stays in the browser. Deliberately carries no
+                      `scheme=`, so only the fallback can possibly satisfy it.
+        ?job=appscheme  a bare `linkedin://` apply link with no web address inside
+                      it at all. Nothing to follow: must open no tab and leave the
+                      link alone, with the modal saying why.
     -->
     <h1 id="job-title">Senior Widget Engineer</h1>
     <div id="job-description">
@@ -47,6 +55,13 @@
       const HOP = `${TRACKER}/sites/redirect-hop.html?ms=700&to=`
         + encodeURIComponent(`${EMPLOYER}/sites/ats-form.html?via=chain`);
       const TRACKED = `${TRACKER}/r/302?to=${encodeURIComponent(HOP)}`;
+
+      // An app link whose web address is reachable, and one whose is not. No
+      // `scheme=` on the first: if the fallback were ignored the only other way
+      // out would be `intent://`'s own host, and this must not pass by luck.
+      const APP_WITH_WEB = 'intent://acme.example/jobs/7#Intent;package=com.acme.jobs'
+        + `;S.browser_fallback_url=${encodeURIComponent(`${EMPLOYER}/sites/ats-form.html?src=applink`)};end`;
+      const APP_ONLY = 'linkedin://jobs/view/7';
 
       const kind = new URLSearchParams(location.search).get('job') ?? 'external';
 
@@ -75,14 +90,20 @@
           document.getElementById('board-success').style.display = 'block';
         });
       } else {
-        // Only the href differs between these: the point is which heuristic rule
-        // fires. "Apply on company website" matches on its label; "Apply now"
-        // matches only because it is cross-origin AND opens a new tab.
+        // Only the href differs between these: the point is which rule fires.
+        // "Apply on company website" matches on its label; "Apply now" matches
+        // only because it is cross-origin AND opens a new tab; the two app-scheme
+        // hrefs match on their label and are then judged on their scheme.
+        const HREFS = {
+          tracked: TRACKED,
+          applink: APP_WITH_WEB,
+          appscheme: APP_ONLY,
+        };
         const applyLink = kind === 'blank'
           ? `<a id="apply-external" class="apply" target="_blank"
                 href="${EMPLOYER}/sites/ats-form.html?src=blank">Apply now</a>`
           : `<a id="apply-external" class="apply"
-                href="${kind === 'tracked' ? TRACKED : `${EMPLOYER}/sites/ats-form.html`}"
+                href="${HREFS[kind] ?? `${EMPLOYER}/sites/ats-form.html`}"
                 >Apply on company website</a>`;
 
         document.getElementById('posting').innerHTML = `

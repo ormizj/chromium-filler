@@ -14,7 +14,8 @@
  * the words, not the class names.
  */
 
-import type { MatchConfidence } from './types';
+import type { JobUrlStatus, MatchConfidence } from './types';
+import type { ExportField } from './jobExport';
 
 export interface StatusText {
   /** Capitalised, for the stat-tile caption: "Filled" / "To check" / "Unmatched". */
@@ -51,6 +52,7 @@ export const STATUS_TEXT: Record<MatchConfidence, StatusText> = {
  */
 export type FlowKey =
   | 'applied'
+  | 'appLink'
   | 'external'
   | 'externalOpened'
   | 'noButton'
@@ -67,6 +69,13 @@ export const FLOW_TEXT: Record<FlowKey, FlowText> = {
   // Worded as what the *site* said, not as what the extension did: the claim is
   // only as good as the confirmation element that produced it.
   applied: { title: 'Application sent', detail: 'confirmed it' },
+  // Names the control that was left alone, and what to do instead. Without this
+  // the page just fills in place and the untouched Apply button reads as a bug.
+  appLink: {
+    title: 'This posting applies in an app',
+    detail: 'Its apply link opens a phone app, not a web page, so nothing there can be '
+      + 'filled or recorded. Any form on this page was still filled.',
+  },
   external: { title: 'Applies on the employer’s own site', detail: 'Opening it fills the form there automatically.' },
   externalOpened: { title: 'Opening the employer’s application', detail: 'The form there is filled on arrival.' },
   // The two halves Apply needs. Each names the missing half and the one place to
@@ -130,4 +139,47 @@ export const ACTION_LABELS: Record<ActionKey, string> = {
   // which is exactly why they belong here and not inline as a string literal.
   fullscreen: 'Fullscreen',
   exitFullscreen: 'Exit fullscreen',
+};
+
+/* ---------------- The archive's columns and statuses ---------------- */
+
+/**
+ * Every column the archive can export, worded — and, being an ordered
+ * `Record<ExportField, string>`, also the **order** they are written in and
+ * offered in. `ExportField` is `keyof ExportedJob`, so a field added to the
+ * export fails `npm run typecheck` until it is named here, and naming it is all
+ * it takes: `EXPORT_FIELD_ORDER` is these keys, and Options draws one checkbox
+ * per entry. A column nobody can name is a column nobody can choose.
+ *
+ * The words are what the *user* calls each one ("Job title"); the file itself
+ * keeps the key (`title`), which is what a script reads.
+ */
+export const EXPORT_FIELD_LABELS: Record<ExportField, string> = {
+  url: 'URL',
+  title: 'Job title',
+  site: 'Board',
+  company: 'Company',
+  location: 'Location',
+  employmentType: 'Employment type',
+  status: 'Status',
+  addedAt: 'Date added',
+  appliedAt: 'Date applied',
+  capturedAt: 'Date captured',
+  sourceUrl: 'Came from',
+  redirectUrl: 'Handed off to',
+  description: 'Description',
+  requirements: 'Requirements',
+};
+
+/**
+ * What each posting status is called where it is offered as a choice. Keyed off
+ * `JobUrlStatus` for the same reason as above: a new status must be given words
+ * before it can be a checkbox, and `ALL_JOB_STATUSES` then makes it one.
+ */
+export const JOB_STATUS_LABELS: Record<JobUrlStatus, string> = {
+  new: 'Not opened yet',
+  opened: 'Opened',
+  redirected: 'Handed off',
+  skipped: 'Skipped',
+  applied: 'Applied',
 };

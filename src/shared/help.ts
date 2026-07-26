@@ -16,6 +16,7 @@
  * before what it is called, and prefer a concrete example to a definition.
  */
 
+import type { SetupStepKey } from './setupSteps';
 import type { PrepAction, RedirectConfig, Settings, SiteConfig } from './types';
 
 export interface HelpEntry {
@@ -37,8 +38,8 @@ export interface HelpEntry {
 }
 
 /**
- * A setup-panel section. `rows` documents the rows inside it, because a `?` on
- * each of sixteen field rows would be noise — one explanation covers the group.
+ * One setup-wizard step. `rows` documents the rows inside it, because a `?` on
+ * each of sixteen field rows would be noise — one explanation covers the step.
  */
 export interface GroupHelp extends HelpEntry {
   rows?: Array<{ label: string; body: string }>;
@@ -265,6 +266,20 @@ export const SETTINGS_HELP: Record<keyof Settings, HelpEntry> = {
     body: 'Where the employer\'s application opens once a two-step posting is followed: '
       + 'in a new tab replacing the posting, in a new tab beside it, or in place.',
   },
+  keepInBrowser: {
+    title: 'Keep links in the browser',
+    short: 'Never let an apply link open a phone app',
+    body: 'Some "Apply" buttons are app links rather than web links, and tapping one '
+      + 'hands the posting to a phone app. Nothing can be filled or recorded there — '
+      + 'this extension only works on a web page — so with this on, a link that has a '
+      + 'web address hidden inside it is opened at that address instead, and one with '
+      + 'no web address at all is left alone, with the posting saying so.',
+    when: 'Turn it off only if you would rather finish those applications in the app '
+      + 'yourself. Two kinds of handoff are outside any extension\'s reach: an ordinary '
+      + 'https link that an installed app has claimed — Android decides that before the '
+      + 'extension sees it, under Settings → Apps → that app → "Open supported links" — '
+      + 'and a page that redirects itself with its own scripts.',
+  },
   sessionBatchSize: {
     title: 'Tabs at once',
     body: 'How many job tabs a queue session keeps open. Finishing one — apply, skip '
@@ -308,22 +323,44 @@ export const SETTINGS_HELP: Record<keyof Settings, HelpEntry> = {
     when: 'You need this when you apply for jobs from more than one computer, and want '
       + 'to avoid applying twice to the same posting.',
   },
+  exportOptions: {
+    title: 'What the archive exports',
+    short: 'The columns, statuses and format the Archive button writes',
+    body: 'Which columns the archive file has, which postings go in it, and whether it '
+      + 'is written as JSON or as CSV for a spreadsheet. Ticked under Queue → Archive, '
+      + 'and kept for next time. Anything you leave alone keeps its default: every '
+      + 'column, and the postings you applied to.',
+    when: 'You only want part of what is saved — the descriptions to read back, or a '
+      + 'plain list of titles and companies to sort in a spreadsheet.',
+  },
 };
 
-/* ---------------- Setup panel sections ---------------- */
+/* ---------------- Setup wizard steps ---------------- */
 
-export type SetupGroupKey = 'site' | 'steps' | 'kind' | 'info' | 'fields';
-
-/** The panel's section titles, so the `?` and the heading cannot disagree. */
-export const SETUP_GROUP_TITLES: Record<SetupGroupKey, string> = {
+/**
+ * The panel's step titles, so the `?` and the heading cannot disagree.
+ *
+ * `prep` is called "Before filling" and not "Setup steps": the wizard's own
+ * units are steps now, and "Step 2 of 6: Setup steps" reads as a stutter. The
+ * prep list is a list of *things to do first*, which is what the title says.
+ */
+export const SETUP_STEP_TITLES: Record<SetupStepKey, string> = {
   site: 'Site',
-  steps: 'Setup steps',
+  prep: 'Before filling',
   kind: 'Application type',
   info: 'Job info',
   fields: 'Form fields',
+  send: 'Sending',
 };
 
-export const SETUP_GROUP_HELP: Record<SetupGroupKey, GroupHelp> = {
+/**
+ * The wizard shows each step's `body` inline, above that step's rows, rather
+ * than only behind the `?` — with one step on screen there is finally room for
+ * it, and the whole complaint about the old panel was that it opened onto
+ * jargon. The `rows` stay behind the `?`: they are a reference, not an
+ * introduction.
+ */
+export const SETUP_STEP_HELP: Record<SetupStepKey, GroupHelp> = {
   site: {
     title: 'Which pages this applies to',
     body: 'A config is matched to a page by its URL pattern. The name is only a label '
@@ -339,7 +376,7 @@ export const SETUP_GROUP_HELP: Record<SetupGroupKey, GroupHelp> = {
       },
     ],
   },
-  steps: {
+  prep: {
     title: 'Things to do before filling',
     body: 'Some forms are not on the page yet when it loads — they are behind an '
       + '"Apply" button, or a tab, or they arrive a second late. These steps run '
@@ -416,13 +453,39 @@ export const SETUP_GROUP_HELP: Record<SetupGroupKey, GroupHelp> = {
         body: 'Picks the file input your stored CV is attached to. Pick the input '
           + 'itself, not the button that opens the file dialog, if you can reach it.',
       },
+    ],
+  },
+  /**
+   * Its own step, not the tail of the field list. These three are what Apply
+   * depends on, and while they sat below sixteen field rows the confirmation
+   * element went unset on almost every site — which is exactly what greys Apply
+   * out and leaves the posting recorded as merely opened.
+   */
+  send: {
+    title: 'How this site is sent, and how you know it worked',
+    body: 'Filling never sends. When you press Apply in the review panel, the extension '
+      + 'presses this site\'s own Send button for you — and then waits for the site to '
+      + 'say it worked. Both of those have to be set here, or Apply stays greyed out.',
+    when: 'Always. This is the one step no site can skip, and the confirmation element '
+      + 'is the one thing that cannot be guessed.',
+    rows: [
       {
-        label: 'After attaching',
+        label: 'After attaching the CV',
         body: CONFIG_HELP.submitCv.body,
       },
       {
         label: 'Send button',
         body: CONFIG_HELP.submitSelector.body,
+      },
+      {
+        label: 'Confirmation element',
+        body: CONFIG_HELP.successSelector.body,
+      },
+      {
+        label: 'Picking the confirmation',
+        body: 'It only exists once an application has really gone through, so pick it '
+          + 'with one on screen — send an application by hand, then Pick the thank-you '
+          + 'message while you are looking at it.',
       },
     ],
   },
@@ -432,7 +495,7 @@ export const SETUP_GROUP_HELP: Record<SetupGroupKey, GroupHelp> = {
 
 export type ConceptKey =
   | 'dots' | 'autoVsSaved' | 'todoChip' | 'picker' | 'neverSubmits'
-  | 'twoStep' | 'sessions' | 'urlPattern' | 'successSelector' | 'howItWorks'
+  | 'twoStep' | 'appLink' | 'sessions' | 'urlPattern' | 'successSelector' | 'howItWorks'
   | 'apply' | 'applyUnverified' | 'exportJobs' | 'syncClient';
 
 export const CONCEPT_HELP: Record<ConceptKey, HelpEntry> = {
@@ -454,9 +517,9 @@ export const CONCEPT_HELP: Record<ConceptKey, HelpEntry> = {
   },
   todoChip: {
     title: 'The “N to do” chip',
-    short: 'How many rows in a section still need you. No chip means you can skip it.',
-    body: 'How many rows in that section still need a decision from you: nothing was '
-      + 'found, or what was found is only a guess. A section with no chip can be '
+    short: 'How many rows on a step still need you. No chip means you can skip it.',
+    body: 'How many rows on that step still need a decision from you: nothing was '
+      + 'found, or what was found is only a guess. A step with no chip can be '
       + 'ignored.',
   },
   picker: {
@@ -508,15 +571,17 @@ export const CONCEPT_HELP: Record<ConceptKey, HelpEntry> = {
    * two-step posting arrives as one row rather than two.
    */
   exportJobs: {
-    title: 'Export applied jobs',
-    short: 'Downloads the postings you applied to, with their text, as one JSON file.',
-    body: 'Downloads one JSON file holding every posting you applied to: the job title, '
-      + 'the company, location and type, and the description and requirements as they '
-      + 'read on the page. The text is kept automatically as each posting is opened, so '
-      + 'the file covers applications made long after the tab was closed. A two-step '
-      + 'posting is one entry, not two — the board\'s description travels with the '
-      + 'application it handed off to. Skipped postings are kept as well but are not '
-      + 'part of this file.',
+    title: 'Export jobs',
+    short: 'Downloads the postings you choose, with their text, as one file.',
+    body: 'Downloads one file holding the postings you ask for: the job title, the '
+      + 'company, location and type, and the description and requirements as they read '
+      + 'on the page. “What to export” picks which of those columns go in it, which '
+      + 'postings — the ones you applied to, by default, but the text of a skipped one '
+      + 'is kept too — and whether the file is JSON or a CSV for a spreadsheet. The text '
+      + 'is saved automatically as each posting is opened, so the file covers '
+      + 'applications made long after the tab was closed. A two-step posting is one '
+      + 'entry, not two — the board\'s description travels with the application it '
+      + 'handed off to.',
     when: 'You want to look back over what you applied to and judge which roles fit.',
   },
   /**
@@ -555,6 +620,20 @@ export const CONCEPT_HELP: Record<ConceptKey, HelpEntry> = {
       + 'The extension follows the link, waits out any tracker redirects, records both '
       + 'ends against each other, and fills the form it lands on. Submitting there marks '
       + 'the original posting applied too.',
+  },
+  appLink: {
+    title: 'Postings that apply in an app',
+    body: 'Some boards make their Apply button an app link — a `linkedin://` or '
+      + '`intent://` address — which a phone resolves by opening the app rather than a '
+      + 'web page. The extension cannot help there: it fills web forms, and it decides a '
+      + 'posting was really sent by watching for the site\'s own confirmation on the page. '
+      + 'So an app link is only followed when it carries a web address inside it, which '
+      + 'many do; that address is opened instead and fills as usual. When there is none, '
+      + 'the link is left for you and any form on this page is filled anyway.',
+    when: 'Two handoffs no extension can intercept: an ordinary https link an installed '
+      + 'app has claimed, which Android resolves under Settings → Apps → that app → '
+      + '"Open supported links", and a page that redirects itself with its own scripts. '
+      + 'Turning off "Keep links in the browser" in Settings hands every app link over.',
   },
   sessions: {
     title: 'Queue sessions',

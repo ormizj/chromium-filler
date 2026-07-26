@@ -9,6 +9,7 @@ import { MSG, type FollowRedirectResponse, type Message } from '../shared/messag
 import { getSettings, mutateJobUrls } from '../shared/storage';
 import { applyStatusChain, linkRedirect } from '../shared/jobUrls';
 import { isExternalUrl } from '../shared/redirect';
+import { navigableUrl } from '../shared/appLink';
 import { DEFAULT_STATE } from '../shared/defaults';
 import {
   onSubmitted, onTabClosed, openUrls, sessionState, skipUrl, startSession, stopSession,
@@ -263,18 +264,28 @@ async function followRedirect(
   const tabId = tab?.id;
   if (tabId == null) return { error: 'no tab' };
 
-  const watch: RedirectWatch = { sourceUrl, sourceTabId: tabId, startedAt: Date.now() };
-  await armWatch(tabId, watch);
-
   const settings = await getSettings();
   const target = settings.redirectTarget ?? 'newTabCloseSource';
 
+  // Re-gated here, not only in the detector: this is the one place a redirect tab
+  // is created, and it must not depend on its caller having checked. Fail closed
+  // and arm no watch — the same rule `findSubmitControl` follows, and without it
+  // a 90-second watch would sit on a navigation that never happens.
+  const destination = navigableUrl(href, sourceUrl, settings.keepInBrowser);
+  if (href && !destination) {
+    console.info(LOG, 'refusing an app-handoff apply link —', href);
+    return { error: 'app link' };
+  }
+
+  const watch: RedirectWatch = { sourceUrl, sourceTabId: tabId, startedAt: Date.now() };
+  await armWatch(tabId, watch);
+
   // No URL to open (a JS apply button): let the page click it and watch where
   // that lands — in this tab or in one the site opens itself.
-  if (!href) return { click: true };
-  if (target === 'sameTab') return { navigate: href };
+  if (!destination) return { click: true };
+  if (target === 'sameTab') return { navigate: destination };
 
-  const created = await chrome.tabs.create({ url: href, openerTabId: tabId, active: tab?.active ?? false });
+  const created = await chrome.tabs.create({ url: destination, openerTabId: tabId, active: tab?.active ?? false });
   if (created.id != null) await armWatch(created.id, watch);
   return { opened: true };
 }

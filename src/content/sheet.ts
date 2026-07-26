@@ -86,6 +86,23 @@ const NARROW = NARROW_WIDTH;
 /** A drag under this many px is a tap, not a gesture (narrow sheets only). */
 const TAP_SLOP = 24;
 
+/** What a rebuild would otherwise throw away. See `Sheet.userPlace`. */
+interface UserPlace {
+  scrollTop: number;
+  /** `data-k` of whatever had focus, or absent if nothing in the sheet did. */
+  key?: string;
+  /** Typed-but-uncommitted text, and its caret. Focused control only. */
+  value?: string;
+  selStart?: number | null;
+  selEnd?: number | null;
+}
+
+type TextControl = HTMLInputElement | HTMLTextAreaElement;
+
+function isTextControl(el: Element | null): el is TextControl {
+  return el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement;
+}
+
 export abstract class Sheet<D extends SheetData> {
   protected host: HTMLElement;
   protected shadow: ShadowRoot;
@@ -135,8 +152,13 @@ export abstract class Sheet<D extends SheetData> {
 
   /* ---------------- Rendering ---------------- */
 
-  /** Swap the card (or the pill) for a freshly built one. */
+  /**
+   * Swap the card (or the pill) for a freshly built one — keeping the user's
+   * place in it. See `captureUserPlace`: a rebuild is how this surface shows *any*
+   * change, so without this every edit is also a jump back to the top.
+   */
   protected paint(): void {
+    this.captureUserPlace();
     this.shadow.querySelector('.cf-card')?.remove();
     this.shadow.querySelector('.cf-pill')?.remove();
 
@@ -161,6 +183,9 @@ export abstract class Sheet<D extends SheetData> {
     this.addResizeGrips(card);
     this.shadow.append(card);
     this.applyLayout();
+    // After `applyLayout`, never before: the card is sized there, and a
+    // `scrollTop` written to an element with no height yet clamps to 0.
+    this.applyUserPlace();
   }
 
   /** Re-run the subclass's render against its last data. */
@@ -202,9 +227,93 @@ export abstract class Sheet<D extends SheetData> {
     if (this.collapsed) this.repaint();
   }
 
-  /** Hide/show the whole surface (used to get it out of the picker's way). */
+  /**
+   * Hide/show the whole surface (used to get it out of the picker's way).
+   *
+   * `display: none` destroys the layout box, so the scroll position goes with it
+   * — and the picker is exactly when it matters, because the row you pressed
+   * Pick on is the row you want to be looking at when you come back. So a hide
+   * captures and a show restores, on top of the capture `paint` already does:
+   * the picker's sequence is hide → pick → show → `refreshSetup`, and only the
+   * hide happens early enough to read the real number.
+   */
   setHidden(hidden: boolean): void {
+    if (hidden) this.captureUserPlace();
     this.host.style.display = hidden ? 'none' : '';
+    if (!hidden) this.applyUserPlace();
+  }
+
+  /* ---------------- Keeping the user's place ---------------- */
+
+  /**
+   * Where the user was in the card, held across a rebuild.
+   *
+   * The sheets are dumb renderers: the controller recomputes everything from the
+   * live DOM and hands back fresh data, and `paint` throws the whole `.cf-card`
+   * away to show it. That is the right design and it has one cost — every edit
+   * also scrolled the panel to the top, dropped focus on the floor, and wiped
+   * anything typed but not yet committed. Picking the 14th of sixteen fields put
+   * you back at the first one, every time.
+   *
+   * Identity comes from `data-k`, stamped by the subclass. It has to survive a
+   * rebuild, so it is keyed on what the control *is* (`field:email`) and never on
+   * its position in the DOM.
+   */
+  private userPlace: UserPlace = { scrollTop: 0 };
+
+  /**
+   * Read the current place off the DOM. A no-op while hidden — the numbers there
+   * are all zero, and overwriting a good capture with them is the one way this
+   * makes things worse than not having it.
+   */
+  private captureUserPlace(): void {
+    if (this.host.style.display === 'none') return;
+    const body = this.shadow.querySelector('.cf-body');
+    const next: UserPlace = { scrollTop: body?.scrollTop ?? 0 };
+
+    const active = this.shadow.activeElement as HTMLElement | null;
+    const key = active?.dataset?.k;
+    if (key) {
+      next.key = key;
+      if (isTextControl(active)) {
+        next.value = active.value;
+        // `selectionStart` throws on an input that has no text selection to
+        // speak of — `type="number"`, which is exactly what the prep-step
+        // timeouts are. The caret is a nicety; losing it must not cost the value.
+        try {
+          next.selStart = active.selectionStart;
+          next.selEnd = active.selectionEnd;
+        } catch { /* no selection API on this input type */ }
+      }
+    }
+    this.userPlace = next;
+  }
+
+  /** Put it back. Every step is optional — a rebuild may legitimately have
+   *  dropped the row that held focus (its prep step was just deleted). */
+  private applyUserPlace(): void {
+    if (this.host.style.display === 'none') return;
+    const body = this.shadow.querySelector('.cf-body');
+    if (body && this.userPlace.scrollTop) body.scrollTop = this.userPlace.scrollTop;
+
+    const { key, value } = this.userPlace;
+    if (!key) return;
+    const el = this.shadow.querySelector<HTMLElement>(`[data-k="${key}"]`);
+    if (!el) return;
+    el.focus();
+
+    // Uncommitted text, restored for the focused control **only**. These inputs
+    // commit on `change`, i.e. on blur, so a refresh landing mid-edit would
+    // otherwise silently discard what was typed. Writing a remembered value into
+    // an unfocused field would be the opposite mistake — stale data beating the
+    // fresh config read that `refreshSetup` exists to make.
+    if (value === undefined || !isTextControl(el) || el.value === value) return;
+    el.value = value;
+    try {
+      if (this.userPlace.selStart != null) {
+        el.setSelectionRange(this.userPlace.selStart, this.userPlace.selEnd ?? this.userPlace.selStart);
+      }
+    } catch { /* see captureUserPlace */ }
   }
 
   /* ---------------- Geometry ---------------- */

@@ -38,6 +38,11 @@ export interface FlowInput {
   /** The site's own confirmation appeared — this posting really was sent. */
   applied?: boolean;
   redirect?: { host?: string; followed: boolean };
+  /**
+   * This page's apply control hands off to a phone app with no web form to reach
+   * instead, so it was left alone (`content/redirectDetect.ts`, `appLink`).
+   */
+  appLink?: boolean;
   /** Fields that took a value, and fields detected in total. */
   filled: number;
   total: number;
@@ -55,6 +60,9 @@ export interface FlowBanner {
 
 const TONES: Record<FlowKey, FlowTone> = {
   applied: 'ok',
+  // `warn`, not `accent`: unlike a two-step posting, nothing is being followed —
+  // there is a control on the page the extension cannot use.
+  appLink: 'warn',
   external: 'accent',
   externalOpened: 'accent',
   noButton: 'warn',
@@ -69,6 +77,7 @@ const HELP: Partial<Record<FlowKey, ConceptKey>> = {
   noConfirmation: 'applyUnverified',
   external: 'twoStep',
   externalOpened: 'twoStep',
+  appLink: 'appLink',
 };
 
 /**
@@ -91,6 +100,12 @@ export function flowBanner(input: FlowInput): FlowBanner {
 
 function classify(input: FlowInput): FlowKey {
   if (input.applied) return 'applied';
+  // Above the redirect branch, because a *configured* apply control can be both:
+  // the site is marked two-step and its link turns out to open an app. "Opening
+  // the employer's application" would then be a plain lie — nothing was opened —
+  // so the specific failure has to win. Below `applied` like everything else: an
+  // unusable apply link cannot still be the answer once something went through.
+  if (input.appLink) return 'appLink';
   if (input.redirect) return input.redirect.followed ? 'externalOpened' : 'external';
   // Blocked beats empty, and the order matters. A listing page has no fields
   // *and* no Send button, and the question its greyed Apply provokes is still

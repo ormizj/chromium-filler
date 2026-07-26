@@ -245,6 +245,7 @@ class Controller {
       root: document,
       pageUrl: location.href,
       config: this.config!.redirect,
+      keepInBrowser: this.settings.keepInBrowser,
     });
     this.detection = detection;
 
@@ -280,6 +281,11 @@ class Controller {
 
   private shouldFollow(det: RedirectDetection): boolean {
     if (det.kind !== 'redirect' || this.fillAnyway) return false;
+    // An apply control that hands off to a phone app is not followable: with no
+    // href the background answers `{ click: true }`, and clicking it is precisely
+    // the app launch `settings.keepInBrowser` exists to prevent. Falling through
+    // fills the page instead, and the modal's `appLink` banner says why.
+    if (det.appLink) return false;
     // Setup mode is for inspecting the page, not leaving it.
     if (this.setupPanel) return false;
     // Never bounce straight back to the board that sent us here.
@@ -446,7 +452,12 @@ class Controller {
     const job = extractJob(this.config!);
     this.captureJob(job);
     const det = this.detection;
-    const isRedirect = det?.kind === 'redirect' && !this.fillAnyway;
+    // An app-handoff apply link is deliberately *not* a redirect here, even when
+    // a config marked the site two-step: the redirect branch of the footer leads
+    // with "Open application", and there is nothing this can open. The `appLink`
+    // banner replaces it and outranks it in `flowBanner` for the same reason.
+    const appLink = !!det?.appLink;
+    const isRedirect = det?.kind === 'redirect' && !this.fillAnyway && !appLink;
     this.modal.render({
       siteName: this.config!.name,
       jobTitle: job.title,
@@ -459,6 +470,7 @@ class Controller {
       redirect: isRedirect
         ? { host: det!.href ? hostOf(det!.href) : undefined, reason: det!.reason, followed: this.followed }
         : undefined,
+      appLink: appLink && !this.fillAnyway,
       via: this.landedFrom ? hostOf(this.landedFrom) : undefined,
       session: this.session,
       // The drag wins for this page. `render` rebuilds `ModalData` from scratch,

@@ -5,9 +5,7 @@
  */
 
 import { normalizeAttr } from './fieldKeys';
-
-/** Schemes that never navigate to another application page. */
-const NON_NAVIGATIONAL = /^(mailto|tel|javascript|data|blob|about):/i;
+import { navigableUrl } from './appLink';
 
 /**
  * Labels that mean "this button leaves the board for the employer's own form".
@@ -24,25 +22,40 @@ const EXTERNAL_APPLY_PATTERNS: RegExp[] = [
   /\bcontinue to (?:the )?(?:company|employer|application)\b/,
 ];
 
-/** Absolutize `href` against `pageUrl`; undefined when it can't navigate anywhere. */
-export function resolveHref(pageUrl: string, href: string | null | undefined): string | undefined {
-  if (!href) return undefined;
-  const trimmed = href.trim();
-  if (!trimmed || trimmed.startsWith('#') || NON_NAVIGATIONAL.test(trimmed)) return undefined;
-  try {
-    return new URL(trimmed, pageUrl).href;
-  } catch {
-    return undefined;
-  }
+/**
+ * Absolutize `href` against `pageUrl`; undefined when it can't navigate anywhere.
+ *
+ * `keepInBrowser` defaults to **on** — fail closed, like `findSubmitControl`. It
+ * is the whole of `settings.keepInBrowser` reaching the detector, and it lands
+ * here rather than in the four callers because `hrefOf` in
+ * `content/redirectDetect.ts` is the only href reader in the classifier: every
+ * path through it (marker, configured apply control, heuristic) comes here, so
+ * both the new-tab and same-tab handoffs are covered by this one line.
+ */
+export function resolveHref(
+  pageUrl: string,
+  href: string | null | undefined,
+  keepInBrowser = true,
+): string | undefined {
+  return navigableUrl(href, pageUrl, keepInBrowser);
 }
 
 function bareHost(url: string): string {
   return new URL(url).host.replace(/^www\./i, '').toLowerCase();
 }
 
-/** True when `href` points at a different host than the page it appears on. */
-export function isExternalUrl(pageUrl: string, href: string | null | undefined): boolean {
-  const target = resolveHref(pageUrl, href);
+/**
+ * True when `href` points at a different host than the page it appears on.
+ *
+ * Judged on the *resolved* URL, so an `intent://` link rewritten to its
+ * `browser_fallback_url` is compared on the host the browser will really reach.
+ */
+export function isExternalUrl(
+  pageUrl: string,
+  href: string | null | undefined,
+  keepInBrowser = true,
+): boolean {
+  const target = resolveHref(pageUrl, href, keepInBrowser);
   if (!target) return false;
   try {
     return bareHost(target) !== bareHost(pageUrl);

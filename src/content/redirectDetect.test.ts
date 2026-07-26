@@ -127,3 +127,89 @@ describe('detectRedirect — heuristic', () => {
     expect(det.kind).toBe('unknown');
   });
 });
+
+describe('detectRedirect — app-handoff apply links', () => {
+  const intent = (fallback?: string) =>
+    `intent://acme.com/jobs/7#Intent;package=com.acme${
+      fallback ? `;S.browser_fallback_url=${encodeURIComponent(fallback)}` : ''
+    };end`;
+
+  it('follows an intent: apply link by way of the web URL it carries', () => {
+    mount(`<a href="${intent(ATS)}">Apply on company website</a>`);
+    const det = detectRedirect({ root: document, pageUrl: PAGE });
+    expect(det.kind).toBe('redirect');
+    expect(det.href).toBe(ATS);
+    expect(det.appLink).toBeUndefined();
+  });
+
+  it('reports a bare app scheme instead of following it', () => {
+    mount(`<a href="linkedin://jobs/view/7">Apply on company website</a>`);
+    const det = detectRedirect({ root: document, pageUrl: PAGE });
+    // `unknown`, so the page still takes the ordinary fill path — the best that
+    // can be done — but the refusal is reported rather than silent.
+    expect(det.kind).toBe('unknown');
+    expect(det.href).toBeUndefined();
+    expect(det.appLink).toBe('linkedin://jobs/view/7');
+    expect(det.reason).toMatch(/opens an app/i);
+  });
+
+  it('reports a plain "Apply" app link without needing target=_blank', () => {
+    mount(`<a href="linkedin://jobs/view/7">Apply now</a>`);
+    expect(detectRedirect({ root: document, pageUrl: PAGE }).appLink).toBe('linkedin://jobs/view/7');
+  });
+
+  it('ignores an app link that is not an apply control', () => {
+    mount(`<a href="linkedin://share/7">Share on LinkedIn</a>`);
+    const det = detectRedirect({ root: document, pageUrl: PAGE });
+    expect(det.appLink).toBeUndefined();
+    expect(det.reason).toMatch(/no external apply link/i);
+  });
+
+  it('ignores a mailto: apply link, as it always has', () => {
+    // Not an app handoff — a recruiter's address deserves no banner.
+    mount(`<a href="mailto:jobs@acme.com">Apply by email</a>`);
+    expect(detectRedirect({ root: document, pageUrl: PAGE }).appLink).toBeUndefined();
+  });
+
+  it('prefers a followable web link over an app link on the same page', () => {
+    mount(`
+      <a href="linkedin://jobs/view/7">Apply in app</a>
+      <a href="${ATS}">Apply on company website</a>`);
+    const det = detectRedirect({ root: document, pageUrl: PAGE });
+    expect(det.kind).toBe('redirect');
+    expect(det.href).toBe(ATS);
+  });
+
+  it('reports the app link on a configured apply control, and offers no href', () => {
+    mount(`<a id="ext" href="linkedin://jobs/view/7">Apply</a>`);
+    const det = detectRedirect({ root: document, pageUrl: PAGE, config: { applySelector: '#ext' } });
+    expect(det.kind).toBe('redirect');
+    expect(det.href).toBeUndefined();
+    expect(det.appLink).toBe('linkedin://jobs/view/7');
+  });
+
+  it('reports the app link behind an external marker too', () => {
+    mount(`
+      <span id="badge">External</span>
+      <a id="ext" href="linkedin://jobs/view/7">Apply</a>`);
+    const config: RedirectConfig = { markerSelector: '#badge', applySelector: '#ext' };
+    const det = detectRedirect({ root: document, pageUrl: PAGE, config });
+    expect(det.appLink).toBe('linkedin://jobs/view/7');
+  });
+
+  it('with keepInBrowser off, follows the app link and reports nothing', () => {
+    // The whole behavioural difference of the setting, on the detector side.
+    mount(`<a href="linkedin://jobs/view/7">Apply on company website</a>`);
+    const det = detectRedirect({ root: document, pageUrl: PAGE, keepInBrowser: false });
+    expect(det.kind).toBe('redirect');
+    expect(det.href).toBe('linkedin://jobs/view/7');
+    expect(det.appLink).toBeUndefined();
+  });
+
+  it('with keepInBrowser off, an intent: link is handed over unrewritten', () => {
+    mount(`<a href="${intent(ATS)}">Apply on company website</a>`);
+    const det = detectRedirect({ root: document, pageUrl: PAGE, keepInBrowser: false });
+    expect(det.kind).toBe('redirect');
+    expect(det.href).toBe(intent(ATS));
+  });
+});

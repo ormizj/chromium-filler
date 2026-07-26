@@ -135,9 +135,15 @@ button.cf-btn.btn-ghost:hover {
   border-color: transparent;
 }
 
+/* Unavailable, not absent: the border stays and only the emphasis goes. Fading
+   the whole control took its outline with it, which turned the setup panel's
+   first ↑ and last ↓ into ghosts of a button rather than a button that cannot act
+   yet. Same decision as `[aria-disabled]` below and as the blocked primary. */
 .btn:disabled,
 button.cf-btn:disabled {
-  opacity: 0.45;
+  background: var(--surface);
+  border-color: var(--border);
+  color: var(--muted-2);
   cursor: not-allowed;
   filter: none;
 }
@@ -295,9 +301,23 @@ button.cf-btn.primary[aria-disabled='true'] {
     flex: 1 0 100%;
     justify-content: flex-end;
   }
-  .cf-row:has(.cf-actions > :nth-child(2)) .cf-actions .cf-btn {
+  /* Only the labelled actions share the line out — see `.cf-btn-icon` below. */
+  .cf-row:has(.cf-actions > :nth-child(2)) .cf-actions .cf-btn:not(.cf-btn-icon) {
     flex: 1;
   }
+}
+
+/**
+ * ...except a button whose label is a single glyph, which stays a square of the
+ * one touch size. Sharing the row equally made ↑ ↓ ✕ 59–86px wide and — because
+ * the share depends on how many actions the row carries — put the same control at
+ * a different x on each of the three prep rows. Only the labelled action flexes,
+ * so the icon columns line up down the list.
+ */
+.cf-actions .cf-btn-icon {
+  flex: none;
+  width: var(--tap);
+  padding: 0;
 }
 
 /* ---------------- Section headings ---------------- */
@@ -505,14 +525,11 @@ button.cf-btn.primary[aria-disabled='true'] {
   line-height: 1;
   cursor: pointer;
   padding: var(--space-1) var(--space-3);
-  min-height: 32px;
-}
-@media (pointer: coarse) {
-  .cf-close,
-  .cf-fullscreen {
-    min-width: var(--tap);
-    min-height: var(--tap);
-  }
+  /* One comfortable size on every pointer, like every other button here. These
+     two kept the pre-reskin 32px on a mouse and only reached `--tap` on touch,
+     which left the sheet's only two header controls the smallest targets on it. */
+  min-width: var(--tap);
+  min-height: var(--tap);
 }
 
 /* The fullscreen toggle carries an icon rather than a glyph, so it centres a
@@ -823,6 +840,14 @@ button.cf-btn.primary[aria-disabled='true'] {
   border-radius: var(--radius-pill);
   background: transparent;
   cursor: pointer;
+  /* A `min-height` from a surface's own bare `button` rule beats a `height`, and
+     options.css has one (`button { min-height: var(--tap) }`) — which made every
+     `?` on that page a 28×44 pill, visible the moment the disc paints on hover or
+     while its panel is open. Neutralising both is what keeps the target square on
+     every surface; `input[type=checkbox]` and the layout simulator's handles carry
+     the same line for the same reason. */
+  min-width: 0;
+  min-height: 0;
   --i: var(--icon-help);
 }
 
