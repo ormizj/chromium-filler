@@ -318,6 +318,63 @@ test('ChaosForm: hashed ids + multi-step; disguised city stays unmatched', async
 });
 
 /**
+ * The report is the record of one fill and holds still.
+ *
+ * ChaosForm's phone input is named by its placeholder alone, which scores below
+ * the threshold: it comes back yellow, unfilled, with a Confirm. Pressing that
+ * used to rewrite the row's `filled` — which turned the dot green, re-counted the
+ * summary line and re-sorted the report, dropping the row out from under the
+ * finger that had just pressed it and moving every row below it.
+ *
+ * Now the page answers and the card does not: the field fills, the button
+ * retires, and the dots, the counts and the order are exactly what the fill left.
+ * Only a fresh fill rebuilds them, which is what Re-run is checked for here.
+ */
+test('ChaosForm: Confirm fills the field and leaves the report exactly as the fill left it', async () => {
+  const page = await context.newPage();
+  await page.goto(urlFor('chaos-form'));
+  await expect(page.getByLabel('Email address')).toHaveValue('ada@example.com');
+
+  const phone = page.locator('input[placeholder="Phone"]');
+  await expect(phone).toHaveValue('');
+
+  await page.locator('.cf-view', { hasText: 'Fields' }).click();
+  const report = page.locator('.cf-report');
+  // The whole overview in two reads: every row's name+dot, and the count line.
+  const overview = async () => [
+    await report.locator('.cf-row').evaluateAll(
+      (rows) => rows.map((r) => `${r.querySelector('.cf-field b')?.textContent}:${r.querySelector('.cf-dot')?.className}`),
+    ),
+    await page.locator('.cf-summary').textContent(),
+  ];
+  const before = await overview();
+
+  const row = report.locator('.cf-row', { hasText: 'Phone' });
+  await row.locator('button', { hasText: /^Confirm$/ }).click();
+
+  // The page took the value...
+  await expect(phone).toHaveValue('+1 555 123 4567');
+  // ...the button says the press landed...
+  await expect(row.locator('button', { hasText: 'Confirmed ✓' })).toBeVisible();
+  await expect(row.locator('button', { hasText: /^Confirm$/ })).toHaveCount(0);
+  // ...and nothing else about the report moved.
+  expect(await overview()).toEqual(before);
+
+  // A fill is the one thing that re-establishes any of it. Re-run detects the
+  // same placeholder-only control at the same low confidence and still declines
+  // to fill it — so the report comes back identical, and the acknowledgement does
+  // not: a new record carries no memory of a press against the old one.
+  await page.locator('.cf-more button').first().click();
+  await page.locator('.cf-more-menu button', { hasText: 'Re-run' }).click();
+  await page.locator('.cf-view', { hasText: 'Fields' }).click();
+  await expect(row.locator('button', { hasText: /^Confirm$/ })).toBeVisible();
+  await expect(row.locator('button', { hasText: 'Confirmed ✓' })).toHaveCount(0);
+  expect(await overview()).toEqual(before);
+
+  await page.close();
+});
+
+/**
  * Apply, end to end, on the fixture that makes both of its phases matter. This
  * ATS only records the CV once "Attach" is pressed (`submitCv`), and its form
  * refuses to submit without a recorded CV — so an Apply that pressed Send first,

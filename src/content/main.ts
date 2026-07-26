@@ -26,7 +26,7 @@ import { captureDetails, type JobDetails } from '../shared/jobDetails';
 import { BUILD_ID } from '../shared/buildId';
 import { getDoc, cvFileToFile } from '../shared/cvStore';
 import { TEXT_FIELDS, FIELD_LABELS, orderFields } from '../shared/fieldKeys';
-import { matchStatus } from '../shared/fieldStatus';
+import { matchStatus, orderReport } from '../shared/fieldStatus';
 import {
   MSG, type FollowRedirectResponse, type Message, type SessionState, type StatusResponse,
 } from '../shared/messages';
@@ -68,6 +68,14 @@ class Controller {
   /** The cover letter as a file, for sites that ask for one instead of prose. */
   private coverFile: File | null = null;
   private matches: FieldMatch[] = [];
+  /**
+   * The rows Confirm has been pressed on since the last fill.
+   *
+   * An acknowledgement of a press, deliberately *not* a status: `matches` is the
+   * record of what the fill did, and a Confirm does not rewrite that record. All
+   * this buys is a retired button on the row, so the control is not silent.
+   */
+  private confirmedFields = new Set<FieldKey>();
   private elements = new Map<FieldKey, HTMLElement>();
   private modal?: FillerModal;
   private setupPanel?: SetupPanel;
@@ -411,6 +419,9 @@ class Controller {
     const config = this.config!;
     clearHighlights();
     this.elements.clear();
+    // A new fill is a new record, so the acknowledgements from the last one go
+    // with it — the rows they sat on may not even exist in what follows.
+    this.confirmedFields.clear();
 
     const detected = detectFields({
       root: document,
@@ -447,9 +458,13 @@ class Controller {
       }
       return match;
     });
-    // Reading order, not detection order — see `orderFields`. Detection is left
-    // to run in its own order because it uses that order as a tie-break.
-    this.matches = orderFields(this.matches, (m) => m.field, (m) => this.hasValueFor(m.field));
+    // Reading order, not detection order — and settled *here*, once, because this
+    // is the moment the report is a record of: unmatched, then to check, then
+    // filled, `FIELD_ORDER` deciding ties. The modal used to run this per render,
+    // which meant the list re-sorted itself under the user as they worked it.
+    // Detection is left to run in its own order because it uses that order as a
+    // tie-break.
+    this.matches = orderReport(this.matches);
   }
 
   /** Whether the *profile* can supply this field — the split `orderFields` sorts on. */
@@ -554,6 +569,7 @@ class Controller {
       jobRequirements: job.requirements,
       meta: job.meta,
       matches: this.matches,
+      confirmed: [...this.confirmedFields],
       applyState: this.applyState(isRedirect),
       applied: this.applied,
       alreadyApplied: this.alreadyApplied,
@@ -632,12 +648,26 @@ class Controller {
       .catch((e) => console.warn(LOG, 'capture failed', e));
   }
 
+  /**
+   * Fill one row's control on the user's say-so.
+   *
+   * It deliberately does **not** write back into `this.matches`. The report is the
+   * record of the last fill, and the whole overview — the dots, the tag words, the
+   * count line, the Job view's tiles, the Fields tab's dot and the row order — is
+   * established by `detectAndFill` and by nothing else. Rewriting one row's
+   * `filled` here re-coloured all of that and moved the row down out from under
+   * the finger that pressed it.
+   *
+   * The page still answers: the field fills and its highlight goes green. On the
+   * card the acknowledgement is the row's retired `Confirmed ✓`, which is what
+   * `confirmedFields` is for. A failed fill records nothing, so the live Confirm
+   * stays there to be pressed again.
+   */
   private confirmField(field: FieldKey): void {
     const el = this.elements.get(field);
     if (!el) return;
     const ok = this.applyFill(field, el);
-    const m = this.matches.find((x) => x.field === field);
-    if (m) m.filled = ok;
+    if (ok) this.confirmedFields.add(field);
     highlight(el, ok ? 'high' : 'low');
     this.showModal();
   }
@@ -1168,12 +1198,17 @@ class Controller {
     clearHighlights();
     for (const [field, el] of this.elements) {
       const m = this.matches.find((x) => x.field === field);
-      if (m?.filled && field !== 'resume' && (el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement)) {
+      // `confirmedFields` counts as filled here even though the report does not
+      // re-colour for it: this blanks what the extension put on the page, and a
+      // confirmed row's value went in exactly the same way the fill's did.
+      const wrote = m?.filled || this.confirmedFields.has(field);
+      if (wrote && field !== 'resume' && (el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement)) {
         fillTextField(el, '');
       }
     }
     this.elements.clear();
     this.matches = [];
+    this.confirmedFields.clear();
     this.hasRun = false;
     this.modal?.destroy();
     this.modal = undefined;

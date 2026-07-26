@@ -133,8 +133,9 @@ describe('FillerModal — the report tells the truth about each field', () => {
       match({ field: 'phone', confidence: 'low', filled: false }),
       match({ field: 'city', confidence: 'none', filled: false }),
     ]));
-    // Unmatched leads the report now, whichever order the matches arrived in.
-    const [none, low] = rows(shadow);
+    // The fill decided this order (`orderReport`, in `detectAndFill`); the card
+    // renders what it was handed.
+    const [low, none] = rows(shadow);
     expect(low.label).toBe('needs review');
     expect(low.buttons).toContain('Confirm');
     expect(none.label).toBe('not found');
@@ -290,44 +291,102 @@ describe('FillerModal — the posting comes first', () => {
  * whatever the report says — appeared nowhere they would actually read it.
  */
 /**
- * The report used to be in `FIELD_ORDER` and nothing else, so the one field that
- * needed a Pick sat wherever that list happened to put it — under eleven green
- * rows on a form with eleven fields it filled. What a row needs from the user
- * outranks which field it is; `orderReport` is the rule, and this is the surface
- * that has to apply it on every render.
+ * The report is the record of one fill, and it holds still. `orderReport` decides
+ * the reading order — unmatched, then to check, then filled — but it runs once, in
+ * `Controller.detectAndFill`, and the modal renders what it was handed. Sorting
+ * per render meant a row you confirmed dropped out from under your finger and
+ * moved every row below it; the ordering rule itself is covered in
+ * `fieldStatus.test.ts`, and what belongs here is that this surface adds nothing.
  */
-describe('FillerModal — the report leads with what needs attention', () => {
-  it('puts unmatched above to-check above filled', () => {
+describe('FillerModal — the report holds the order the fill gave it', () => {
+  it('renders the matches in the order it was handed', () => {
     const shadow = render(data([
-      match({ field: 'email', filled: true }),
-      match({ field: 'phone', confidence: 'low', filled: false }),
       match({ field: 'city', confidence: 'none', filled: false }),
+      match({ field: 'phone', confidence: 'low', filled: false }),
+      match({ field: 'email', filled: true }),
     ]));
     expect(rows(shadow).map((r) => r.label)).toEqual(['not found', 'needs review', 'filled']);
   });
 
-  it('keeps the reading order within a group — the CV still leads the reds', () => {
+  // The one that proves there is no sort left in the card: this order is wrong by
+  // every rule the extension has, and it still comes out untouched.
+  it('does not re-sort an order that disagrees with the statuses', () => {
     const shadow = render(data([
-      match({ field: 'country', confidence: 'none', filled: false }),
       match({ field: 'email', filled: true }),
       match({ field: 'resume', confidence: 'none', filled: false }),
+      match({ field: 'phone', confidence: 'low', filled: false }),
     ]));
-    expect(rows(shadow).map((r) => r.field)).toEqual(['Résumé / CV', 'Country', 'Email']);
+    expect(rows(shadow).map((r) => r.field)).toEqual(['Email', 'Résumé / CV', 'Phone']);
   });
 
-  // Re-sorted per render, not once at fill time: the row moving down to the
-  // filled group is how the card shows the work going down.
-  it('moves a row down to the filled group once it is confirmed', () => {
+  // What `Controller.confirmField` no longer does. Even if a row's `filled` were
+  // rewritten under the card, nothing about the report may move — this is the
+  // regression the whole change exists to prevent.
+  it('leaves the rows where they are when a row changes status', () => {
     const d = data([
-      match({ field: 'email', filled: true }),
       match({ field: 'phone', confidence: 'low', filled: false }),
+      match({ field: 'email', filled: true }),
     ]);
     const shadow = render(d);
     expect(rows(shadow).map((r) => r.field)).toEqual(['Phone', 'Email']);
 
-    d.matches[1].filled = true; // what Controller.confirmField does
+    d.matches[0].filled = true;
     modal!.render(d);
-    expect(rows(shadow).map((r) => r.field)).toEqual(['Email', 'Phone']);
+    expect(rows(shadow).map((r) => r.field)).toEqual(['Phone', 'Email']);
+  });
+});
+
+/**
+ * Confirm fills the control on the page, and the report — being the record of the
+ * *fill* — deliberately does not re-colour for it. That would leave the one
+ * control on the row with no visible effect in the surface it was pressed in, so
+ * the button retires in place instead: same convention as the footer's
+ * `Applied ✓`, and nothing else on the row moves.
+ */
+describe('FillerModal — a confirmed row says so without changing status', () => {
+  const confirmable = () => data([
+    match({ field: 'phone', confidence: 'low', filled: false }),
+    match({ field: 'email', filled: true }),
+  ]);
+
+  /** Everything about the report except the row's own buttons. */
+  const overview = (root: ShadowRoot) => ({
+    rows: rows(root).map(({ field, dot, label }) => ({ field, dot, label })),
+    summary: root.querySelector('.cf-summary')!.textContent,
+    tab: tab(root, 'Fields').querySelector('.cf-dot')?.className,
+  });
+
+  it('retires that row’s Confirm without touching its dot, tag or the counts', () => {
+    const before = overview(render(confirmable()));
+    modal!.render({ ...confirmable(), confirmed: ['phone'] });
+    const after = shadow();
+
+    expect(overview(after)).toEqual(before);
+    expect(rows(after)[0].buttons).toContain('Confirmed ✓');
+    expect(rows(after)[0].buttons).not.toContain('Confirm');
+  });
+
+  // `aria-disabled`, never the `disabled` property — the card's one convention for
+  // a control out of service, so it still reads as a button rather than a gap.
+  it('marks it aria-disabled and gives it nothing to call', () => {
+    const onConfirm = vi.fn();
+    const shadow = render(
+      { ...confirmable(), confirmed: ['phone'] },
+      callbacks({ onConfirm }),
+    );
+    const done = [...shadow.querySelectorAll('.cf-row button')]
+      .find((b) => b.textContent === 'Confirmed ✓') as HTMLButtonElement;
+    expect(done.getAttribute('aria-disabled')).toBe('true');
+    expect(done.hasAttribute('disabled')).toBe(false);
+    done.click();
+    expect(onConfirm).not.toHaveBeenCalled();
+  });
+
+  // Pick is how a row is re-aimed at a different control, and confirming the value
+  // that went in says nothing about whether it went to the right place.
+  it('leaves Pick alone', () => {
+    const shadow = render({ ...confirmable(), confirmed: ['phone'] });
+    expect(rows(shadow)[0].buttons).toContain('Pick');
   });
 });
 

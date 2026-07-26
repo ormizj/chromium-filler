@@ -103,18 +103,18 @@ const SESSION: SessionState = {
 
 /**
  * The report a filled quick-apply posting produces — one row of every shape, in
- * `FIELD_ORDER`, which is what `detectAndFill` now sorts the real one into.
- * Written sorted rather than sorted here, so a controller that stopped sorting
- * would still show up in this harness.
+ * the order `orderReport` leaves them: unmatched, then to check, then filled,
+ * `FIELD_ORDER` within each band. The modal renders this verbatim now, so writing
+ * it sorted is what makes the harness show what a real fill looks like.
  */
 const REPORT: FieldMatch[] = [
+  match('city', 'none', false),
+  // A low-confidence row: the only shape with two actions (Confirm + Pick).
+  match('phone', 'low', false, { valueToFill: '+1 555 123 4567', selectorUsed: '.field input:nth-of-type(3)' }),
   match('resume', 'high', true, { selectorUsed: 'input[type=file]' }),
   match('coverLetter', 'high', true, { valueToFill: 'I love building widgets.', selectorUsed: 'textarea' }),
   match('email', 'high', true, { valueToFill: 'ada@example.com', selectorUsed: '#email' }),
-  // A low-confidence row: the only shape with two actions (Confirm + Pick).
-  match('phone', 'low', false, { valueToFill: '+1 555 123 4567', selectorUsed: '.field input:nth-of-type(3)' }),
   match('fullName', 'high', true, { valueToFill: 'Ada Lovelace', selectorUsed: '#name' }),
-  match('city', 'none', false),
 ];
 
 const BASE_MODAL: ModalData = {
@@ -244,6 +244,11 @@ const MODAL_STATES: Record<string, Partial<ModalData>> = {
       match('resume', 'high', false, { selectorUsed: '.dropzone' }),
     ],
   },
+  // Confirm has been pressed on one row. The dot, the tag and the count line are
+  // deliberately identical to `default` — the report is the record of the fill and
+  // does not re-colour itself — so the retired `Confirmed ✓` is the only thing on
+  // the card saying the press landed. Reachable otherwise only by pressing it.
+  confirmed: { confirmed: ['phone'] },
   // A page where no Send button could be found, so the footer's Apply is greyed
   // out. `&note=apply` opens the note that says why — the whole point of the
   // state, and only reachable by pressing the button.

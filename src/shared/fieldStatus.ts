@@ -41,9 +41,14 @@ const REPORT_RANK: Record<MatchConfidence, number> = { none: 0, low: 1, high: 2 
  *
  * Deliberately keyed on `matchStatus` rather than on `confidence` — a
  * high-confidence match the control would not take reports as `low`, and a row
- * has to sort where its own dot says it belongs. It is also applied at *render*
- * time, not once at fill time: confirming or picking a row changes its status, and
- * the row moving into the filled band is the point.
+ * has to sort where its own dot says it belongs.
+ *
+ * Applied **once, to the output of a fill** (`Controller.detectAndFill`), never at
+ * render time. The report is the record of what that fill did, so it has to hold
+ * still: re-sorting per render meant confirming a row moved it down past the rows
+ * below it, shifting the whole list under the finger that had just pressed the
+ * button. A row's outcome changes when the extension fills again, and that is when
+ * the report is rebuilt.
  *
  * This is the modal's rule alone. The setup wizard lists every field the
  * extension knows and sorts by what the *profile* can supply (`orderFields`),

@@ -566,11 +566,37 @@ on the shared `orderFieldsBy`): unmatched, then to check, then filled, with
 outranks which field it is — in plain `FIELD_ORDER` the one field needing a Pick
 sat wherever the list happened to put it, under eleven green rows. It ranks on
 `matchStatus`, not on `confidence`, so a high-confidence match the control would
-not take sorts where its own dot says it belongs; and it runs at **render** time,
-not once at fill time, so confirming or picking a row moves it down into the
-filled band — which is how the card shows the work going down. The wizard keeps
+not take sorts where its own dot says it belongs. The wizard keeps
 the profile-filled split instead: it lists every field the extension knows, where
 most `none` rows only mean "this page never asked for it".
+
+**The report is the record of one fill, and it holds still.** `orderReport` runs
+**once**, at the end of `detectAndFill`, and `modal.ts` renders `data.matches`
+verbatim — the whole overview (row order, dots, tag words, the `.cf-summary`
+counts, the Job view's tiles, the Fields tab's dot) is established by a fill and
+by nothing else. It sorted per render for a while, on the theory that a row
+leaving the top showed the work going down; what it actually did was drop the row
+out from under the finger that had just pressed its button and move every row
+below it. Every other thing that re-renders the card (the success
+`MutationObserver`, `closeSetup`, fold/restore/fullscreen, the Job/Fields toggle)
+paints the same array, so a snapshot is all any of them can show.
+
+Two consequences, each with a test:
+
+- **`confirmField` does not write back into `matches`.** It fills the control and
+  re-colours the on-page highlight, and that is the whole of its effect on the
+  record. The card's acknowledgement is the row's own button retiring to
+  `Confirmed ✓` (`ModalData.confirmed`, `Controller.confirmedFields`) — the same
+  `aria-disabled` convention as the footer's `Applied ✓`, and deliberately *not* a
+  status: it must never reach `matchStatus`, `statCounts` or `worstStatus`. Only a
+  successful fill records one, so a Confirm that fails leaves the live button
+  there to press again, and `detectAndFill` clears the set, because a new record
+  carries no memory of a press against the old one. `reset()` still counts a
+  confirmed field as written, or it would leave on the page the one value it put
+  there outside a fill.
+- **The dev harness's `REPORT` is written pre-sorted**, since the modal no longer
+  sorts anything; `?page=modal&state=confirmed` is the retired button, which is
+  otherwise reachable only by pressing it.
 
 `settings.modalLayout` (`shared/modalLayout.ts`) is where an on-page sheet sits and
 how big it is — **both** of them, the review modal and the setup panel, because

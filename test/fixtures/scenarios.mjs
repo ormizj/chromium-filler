@@ -72,10 +72,10 @@ export const SCENARIOS = [
   {
     id: 'chaos-form',
     flow: 'quick-apply',
-    title: 'ChaosForm — hashed ids, multi-step, one disguised field',
+    title: 'ChaosForm — hashed ids, multi-step, one disguised field, one guessed',
     url: site(HOSTS.board, 'chaos-form'),
     config: 'chaos-form',
-    expect: 'fills everything except "Where are you located?", which stays red for Pick',
+    expect: 'red for Pick on "Where are you located?", yellow for Confirm on the placeholder-only phone; the report holds still either way',
   },
   {
     id: 'quick-plain',

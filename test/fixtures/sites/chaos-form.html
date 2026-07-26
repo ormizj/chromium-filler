@@ -23,6 +23,8 @@
       * Multi-step: CV + cover letter live on step 2, revealed by "Next" (prep).
       * One field ("How did you hear about us?") is intentionally unmappable and
         must show up as unmatched (red) for the Pick workflow.
+      * One field is named by its placeholder alone, which scores below the
+        threshold: it comes back yellow with a Confirm rather than filled.
     -->
     <h1 id="role-title">Full-Stack Engineer</h1>
     <div id="role-desc">
@@ -47,6 +49,11 @@
               <label for="${hid('sn')}">Family name</label>
               <input id="${hid('sn')}" placeholder="Family name" />
               <input id="${hid('em')}" aria-label="Email address" placeholder="you@company.com" />
+              <!-- Named by its placeholder and nothing else, which is a weak
+                   signal: this matches "phone" at *low* confidence, so it is left
+                   empty for the user to Confirm rather than filled outright. The
+                   only row on any fixture that offers a Confirm which succeeds. -->
+              <input id="${hid('ph')}" placeholder="Phone" />
               <!-- This is really the "city" field, but nothing here says so:
                    hashed id, no placeholder, and a label our heuristics miss.
                    It should surface as unmatched (red) and be fixed via Pick. -->

@@ -117,6 +117,7 @@ export type ActionKey =
   | 'skipNext'
   | 'rerun'
   | 'confirm'
+  | 'confirmed'
   | 'pick'
   | 'done'
   | 'openOptions'
@@ -135,6 +136,11 @@ export const ACTION_LABELS: Record<ActionKey, string> = {
   skipNext: 'Skip → next',
   rerun: 'Re-run',
   confirm: 'Confirm',
+  // The retired form of the verb above, paired with it the way `applied` is with
+  // `apply`. The report is a record of the last fill and does not re-colour itself
+  // when a single row is confirmed, so this label is the only thing on the card
+  // that says the press landed.
+  confirmed: 'Confirmed ✓',
   pick: 'Pick',
   done: 'Done',
   // One word, like every other secondary action. "Open options" named the verb

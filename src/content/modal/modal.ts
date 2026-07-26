@@ -19,13 +19,13 @@
  * "Reset & Re-run") wiped every field it had just filled.
  */
 
-import type { FieldMatch, MatchConfidence } from '../../shared/types';
+import type { FieldKey, FieldMatch, MatchConfidence } from '../../shared/types';
 import type { SessionState } from '../../shared/messages';
 import { progressDots } from '../../shared/queue';
 import type { JobBlock } from '../../shared/jobText';
 import type { JobMeta } from '../../shared/jobMeta';
 import { FIELD_LABELS } from '../../shared/fieldKeys';
-import { STATUS_LABELS, matchStatus, orderReport } from '../../shared/fieldStatus';
+import { STATUS_LABELS, matchStatus } from '../../shared/fieldStatus';
 import { ACTION_LABELS, STATUS_TEXT } from '../../shared/labels';
 import { flowBanner, type ApplyState } from '../../shared/flowState';
 import { CONCEPT_HELP } from '../../shared/help';
@@ -81,6 +81,15 @@ export interface ModalData extends SheetData {
   /** Company / location / employment type, as far as the posting states them. */
   meta?: JobMeta;
   matches: FieldMatch[];
+  /**
+   * The rows Confirm has been pressed on since the last fill.
+   *
+   * An acknowledgement of a press, deliberately **not** a status — it must never
+   * reach `matchStatus`, `statCounts` or `worstStatus`. `matches` is the record of
+   * what the fill did and the whole overview is derived from it alone; all this
+   * does is retire one row's button so the control is not silent.
+   */
+  confirmed?: FieldKey[];
   /** Whether Apply may run, and which half is missing when it may not. */
   applyState: ApplyState;
   /** The site's own confirmation appeared — this posting really was sent. */
@@ -586,13 +595,14 @@ export class FillerModal extends Sheet<ModalData> {
     }
     body.append(summary);
 
-    // Sorted here rather than in `main.ts`, and on every render: what a row needs
-    // from the user outranks which field it is, and confirming or picking one
-    // changes that — so the row leaving the top of the report is how the card
-    // shows the work going down. See `orderReport`. The counts above and the tab
-    // dot are aggregates, so neither cares about the order.
+    // Rendered in the order the fill left them, never re-sorted here. `orderReport`
+    // runs once, in `Controller.detectAndFill` — the report is the record of a
+    // fill, and sorting it per render meant a row you confirmed dropped out from
+    // under your finger and moved every row below it. Nothing on this card changes
+    // the overview; the next fill rebuilds it.
+    const confirmed = new Set(data.confirmed);
     const report = el('div', 'cf-report');
-    for (const m of orderReport(data.matches)) report.append(this.row(m));
+    for (const m of data.matches) report.append(this.row(m, confirmed.has(m.field)));
     body.append(report);
 
     // Only once it has been sent. "Nothing has been sent yet" now rides in the
@@ -740,7 +750,7 @@ export class FillerModal extends Sheet<ModalData> {
     return wrap;
   }
 
-  private row(m: FieldMatch): HTMLElement {
+  private row(m: FieldMatch, confirmed = false): HTMLElement {
     const status = matchStatus(m);
     const row = el('div', 'cf-row');
     const dot = el('span', `cf-dot ${status}`);
@@ -774,8 +784,20 @@ export class FillerModal extends Sheet<ModalData> {
     // button (design/reference/states-gallery.html), and the coral fill belongs to
     // the footer's Apply alone. As a primary, sixteen rows of Confirm outshouted
     // the one control that actually sends anything.
+    //
+    // Once pressed it retires in place — `aria-disabled` and a dead handler, the
+    // same convention as the footer's `Applied ✓`, never the `disabled` property.
+    // The dot, the tag and the counts stay exactly as the fill left them (that is
+    // the point), so this label is the only thing on the card that says the press
+    // landed. Nothing moves: the row keeps its size and its position.
     if (!m.filled && m.confidence !== 'none') {
-      actions.append(btn(ACTION_LABELS.confirm, () => this.cb.onConfirm(m.field)));
+      if (confirmed) {
+        const done = btn(ACTION_LABELS.confirmed, () => {});
+        done.setAttribute('aria-disabled', 'true');
+        actions.append(done);
+      } else {
+        actions.append(btn(ACTION_LABELS.confirm, () => this.cb.onConfirm(m.field)));
+      }
     }
     actions.append(btn(ACTION_LABELS.pick, () => this.cb.onPick(m.field)));
     row.append(actions);
