@@ -14,7 +14,10 @@
  * before any code that reads `chrome.*` (the harness imports it first).
  */
 
-import { MSG, type SessionState, type StatusResponse } from '../src/shared/messages';
+import {
+  MSG, type SessionState, type StatusResponse, type SyncState,
+} from '../src/shared/messages';
+import { clientProblem, normalizeClient, type SyncClient } from '../src/shared/syncConfig';
 import { DEFAULT_SETTINGS, EXAMPLE_SITE_CONFIG } from '../src/shared/defaults';
 import type { JobUrlEntry } from '../src/shared/types';
 import { applyStatus, makeEntry } from '../src/shared/jobUrls';
@@ -171,8 +174,31 @@ function topUp(): void {
   console.log('[mock chrome] session opened', urls);
 }
 
-function backgroundReply(msg: { type?: string; batchSize?: number; url?: string }): unknown {
+/* --- Fake sync: enough to walk through entering an OAuth client. --- */
+
+function readSyncClientSync(): SyncClient {
+  return normalizeClient(readAll().syncClient as Partial<SyncClient> | undefined);
+}
+
+function fakeSyncState(): SyncState {
+  const { clientId } = readSyncClientSync();
+  return { configured: clientId.length > 0, clientId };
+}
+
+function backgroundReply(
+  msg: { type?: string; batchSize?: number; url?: string; clientId?: string; clientSecret?: string },
+): unknown {
   switch (msg?.type) {
+    case MSG.SYNC_STATE:
+      return fakeSyncState();
+    case MSG.SYNC_SET_CLIENT: {
+      const client = normalizeClient({ clientId: msg.clientId, clientSecret: msg.clientSecret });
+      const clearing = !client.clientId && !client.clientSecret;
+      const problem = clearing ? undefined : clientProblem(client);
+      if (problem) return { error: problem };
+      writeAll({ ...readAll(), syncClient: clearing ? undefined : client });
+      return fakeSyncState();
+    }
     case MSG.SESSION_START:
       sessionActive = true;
       if (msg.batchSize) sessionBatch = msg.batchSize;
@@ -237,6 +263,11 @@ const mockChrome = {
       console.log('[mock chrome] openOptionsPage()');
     },
     lastError: undefined as chrome.runtime.LastError | undefined,
+  },
+  // The Sync tab shows the redirect URI to paste into Google Cloud, and reads it
+  // at init — without this the whole options page throws before its first render.
+  identity: {
+    getRedirectURL: () => 'https://dev-extension-id.chromiumapp.org/',
   },
   tabs: {
     query: () =>

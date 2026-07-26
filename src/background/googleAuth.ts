@@ -13,7 +13,7 @@
  */
 
 import {
-  SYNC_CLIENT_ID, SYNC_CLIENT_SECRET, SYNC_SCOPES, isSyncConfigured,
+  SYNC_SCOPES, clientProblem, readSyncClient, type SyncClient,
 } from '../shared/syncConfig';
 
 const AUTH_ENDPOINT = 'https://accounts.google.com/o/oauth2/v2/auth';
@@ -31,6 +31,22 @@ interface StoredAuth {
 }
 
 export class SyncAuthError extends Error {}
+
+/**
+ * The user's OAuth client, refused rather than sent half-filled.
+ *
+ * Read on every call instead of once at load: the service worker outlives the
+ * options page it was entered on, and a client pasted a minute ago must be the
+ * one the next Connect uses.
+ */
+async function requireClient(): Promise<SyncClient> {
+  const client = await readSyncClient();
+  const problem = clientProblem(client);
+  if (problem) {
+    throw new SyncAuthError(`${problem} Options → Sync → Google OAuth client.`);
+  }
+  return client;
+}
 
 async function read(): Promise<StoredAuth | undefined> {
   const raw = await chrome.storage.local.get(KEY);
@@ -112,13 +128,11 @@ async function postToken(body: Record<string, string>): Promise<TokenResponse> {
  * refresh token comes back — Google omits it on a repeat authorization.
  */
 export async function connect(): Promise<string | undefined> {
-  if (!isSyncConfigured()) {
-    throw new SyncAuthError('Sync is not configured in this build — see src/shared/syncConfig.ts.');
-  }
+  const client = await requireClient();
   const verifier = randomVerifier();
   const redirectUri = chrome.identity.getRedirectURL();
   const url = `${AUTH_ENDPOINT}?${new URLSearchParams({
-    client_id: SYNC_CLIENT_ID,
+    client_id: client.clientId,
     redirect_uri: redirectUri,
     response_type: 'code',
     scope: SYNC_SCOPES,
@@ -138,8 +152,8 @@ export async function connect(): Promise<string | undefined> {
   if (!code) throw new SyncAuthError('Google did not return an authorization code.');
 
   const token = await postToken({
-    client_id: SYNC_CLIENT_ID,
-    client_secret: SYNC_CLIENT_SECRET,
+    client_id: client.clientId,
+    client_secret: client.clientSecret,
     code,
     code_verifier: verifier,
     grant_type: 'authorization_code',
@@ -172,11 +186,12 @@ export async function accessToken(): Promise<string> {
     return auth.accessToken;
   }
 
+  const client = await requireClient();
   let token: TokenResponse;
   try {
     token = await postToken({
-      client_id: SYNC_CLIENT_ID,
-      client_secret: SYNC_CLIENT_SECRET,
+      client_id: client.clientId,
+      client_secret: client.clientSecret,
       refresh_token: auth.refreshToken,
       grant_type: 'refresh_token',
     });

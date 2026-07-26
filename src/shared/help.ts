@@ -433,7 +433,7 @@ export const SETUP_GROUP_HELP: Record<SetupGroupKey, GroupHelp> = {
 export type ConceptKey =
   | 'dots' | 'autoVsSaved' | 'todoChip' | 'picker' | 'neverSubmits'
   | 'twoStep' | 'sessions' | 'urlPattern' | 'successSelector' | 'howItWorks'
-  | 'apply' | 'applyUnverified' | 'exportJobs';
+  | 'apply' | 'applyUnverified' | 'exportJobs' | 'syncClient';
 
 export const CONCEPT_HELP: Record<ConceptKey, HelpEntry> = {
   dots: {
@@ -518,6 +518,29 @@ export const CONCEPT_HELP: Record<ConceptKey, HelpEntry> = {
       + 'application it handed off to. Skipped postings are kept as well but are not '
       + 'part of this file.',
     when: 'You want to look back over what you applied to and judge which roles fit.',
+  },
+  /**
+   * The one thing sync cannot ship with: a Google OAuth client. It is a Google
+   * Cloud console errand, so the steps are numbered and name the exact screens —
+   * and the redirect URI is shown beside this in the page, because it is the
+   * only value that has to be copied *out* of here and into Google.
+   */
+  syncClient: {
+    title: 'Your Google OAuth client',
+    short: 'Sync talks to your own Google project, so you create the client once.',
+    body: 'Sync stores the job database in your own Google Drive, through a Google Cloud '
+      + 'project you own — nothing passes through anyone else — so the one-time errand is '
+      + 'creating the client it signs in with. In Google Cloud: (1) enable the Google '
+      + 'Drive API; (2) create an OAuth client of type “Web application”; (3) add the '
+      + 'redirect URI shown below it to that client, exactly as written — and on your '
+      + 'second browser, add that one\'s too, since each has its own; (4) on the consent '
+      + 'screen add your own account as a user, or publish it. Then paste the client ID '
+      + 'and secret here and press Connect. Left in “Testing”, Google expires the sign-in '
+      + 'after seven days and you reconnect weekly; publishing it costs one '
+      + '“Advanced → continue” the first time instead. The secret is not really a secret '
+      + 'in an installed extension — Google requires it here and assumes anyone with the '
+      + 'extension can read it; the redirect URI and PKCE are what actually protect it.',
+    when: 'You want the two browsers to share one job database automatically.',
   },
   neverSubmits: {
     title: 'Nothing is sent until you say so',

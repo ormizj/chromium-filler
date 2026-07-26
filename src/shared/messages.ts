@@ -50,6 +50,14 @@ export const MSG = {
   SYNC_NOW: 'CF_SYNC_NOW',
   /** options -> background: report which account, when it last synced, what failed. */
   SYNC_STATE: 'CF_SYNC_STATE',
+  /**
+   * options -> background: store the Google OAuth client the user entered.
+   *
+   * Through the background rather than written from the options page, because
+   * changing the client has to invalidate the tokens issued by the old one, and
+   * that is the auth module's business.
+   */
+  SYNC_SET_CLIENT: 'CF_SYNC_SET_CLIENT',
 } as const;
 
 /** Session snapshot shown by the popup, the options queue, and the modal strip. */
@@ -82,8 +90,10 @@ export interface StatusResponse {
 
 /** What the options page shows in the Sync section. */
 export interface SyncState {
-  /** An OAuth client id is configured in this build at all. */
+  /** This device has an OAuth client id at all — the first setup step. */
   configured: boolean;
+  /** The client id itself, so the options form can show what is stored. */
+  clientId?: string;
   /** The Google account this browser is syncing through, once authorized. */
   account?: string;
   lastSyncAt?: number;
@@ -128,7 +138,8 @@ export type Message =
   // connecting the wrong Google account would union a stranger's job list into
   // this one, and that is worth one look before it happens.
   | { type: typeof MSG.SYNC_NOW; confirmed?: boolean }
-  | { type: typeof MSG.SYNC_STATE };
+  | { type: typeof MSG.SYNC_STATE }
+  | { type: typeof MSG.SYNC_SET_CLIENT; clientId: string; clientSecret: string };
 
 export interface RunResult {
   status: StatusResponse;

@@ -44,6 +44,7 @@ import {
   buildSnapshot, mergeIntoLocal, parseSnapshot, snapshotFilename,
 } from '../shared/syncSnapshot';
 import { getCv, setCv, clearCv } from '../shared/cvStore';
+import { readSyncClient } from '../shared/syncConfig';
 import {
   CONCEPT_HELP, CONFIG_HELP, PREP_HELP, REDIRECT_HELP, SETTINGS_HELP, describeConfig,
   type HelpEntry,
@@ -323,7 +324,7 @@ function initHelp(): void {
 
   const concepts: Array<keyof typeof CONCEPT_HELP> = [
     'howItWorks', 'neverSubmits', 'apply', 'dots', 'autoVsSaved', 'picker', 'todoChip',
-    'urlPattern', 'twoStep', 'sessions', 'successSelector',
+    'urlPattern', 'twoStep', 'sessions', 'successSelector', 'syncClient',
   ];
   $('help-concepts').replaceChildren(...concepts.map((key) => helpPanel(CONCEPT_HELP[key])));
 
@@ -1300,6 +1301,7 @@ async function initSync(): Promise<void> {
 
   attachHelp($('sync-heading'), SETTINGS_HELP.syncEnabled);
   attachRowHelp(toggle, SETTINGS_HELP.syncEnabled);
+  attachHelp($('sync-client-heading'), CONCEPT_HELP.syncClient);
 
   toggle.checked = (await getSettings()).syncEnabled;
   toggle.addEventListener('change', async () => {
@@ -1329,8 +1331,12 @@ async function initSync(): Promise<void> {
     $<HTMLButtonElement>('sync-now').disabled = !connected || !toggle.checked;
     $<HTMLButtonElement>('sync-disconnect').disabled = !connected;
 
+    // Connect is what a missing client actually blocks, so it is disabled with
+    // the account line pointing at the form below rather than failing there.
+    $<HTMLButtonElement>('sync-connect').disabled = s?.configured === false;
+
     if (s?.configured === false) {
-      showAccount('Sync is not set up in this build — see src/shared/syncConfig.ts', true);
+      showAccount('Sync needs a Google OAuth client — add one under “Google OAuth client” below', true);
     } else if (connected) {
       const when = s.lastSyncAt ? `last synced ${fmtDate(s.lastSyncAt)}` : 'not synced yet';
       showAccount(`Syncing through ${s.account} — ${when}`);
@@ -1339,6 +1345,54 @@ async function initSync(): Promise<void> {
     }
     if (s?.lastError) setStatus(status, s.lastError, 'err');
   }
+
+  /* --- The OAuth client, entered here rather than built in --- */
+
+  const clientId = $<HTMLInputElement>('sync-client-id');
+  const clientSecret = $<HTMLInputElement>('sync-client-secret');
+  const clientStatus = $('sync-client-status');
+  const redirect = $<HTMLInputElement>('sync-redirect-uri');
+
+  // Derived from this browser's extension ID, so it differs between machines and
+  // cannot be printed in the help text — each browser's has to go on the client.
+  redirect.value = chrome.identity.getRedirectURL();
+
+  // The id is prefilled from what is stored; the secret deliberately is not. It
+  // is write-only here, so a screen-share does not carry it, and leaving the
+  // field blank on save keeps whatever is already stored.
+  const stored = await readSyncClient();
+  clientId.value = stored.clientId;
+  clientSecret.placeholder = stored.clientSecret ? 'Stored — type to replace' : 'GOCSPX-…';
+
+  $('sync-client-save').addEventListener('click', async () => {
+    // Emptying the id is how a credential is taken back off this machine, so the
+    // secret goes with it rather than being left behind on its own.
+    const wanted = clientId.value.trim();
+    const secret = wanted
+      ? clientSecret.value.trim() || (await readSyncClient()).clientSecret
+      : '';
+    const s = await sendBg<SyncState>(MSG.SYNC_SET_CLIENT, {
+      clientId: wanted,
+      clientSecret: secret,
+    });
+    if (!s || 'error' in s) {
+      return setStatus(clientStatus, String((s as { error?: string })?.error), 'err');
+    }
+    clientSecret.value = '';
+    clientId.value = s.clientId ?? '';
+    clientSecret.placeholder = s.clientId ? 'Stored — type to replace' : 'GOCSPX-…';
+    setStatus(
+      clientStatus,
+      s.clientId ? 'Saved. Press Connect to authorize a Google account.' : 'Client removed.',
+      'ok',
+    );
+    await renderSync(s);
+  });
+
+  $('sync-redirect-copy').addEventListener('click', async () => {
+    await navigator.clipboard.writeText(redirect.value);
+    setStatus(clientStatus, 'Copied — paste it into the OAuth client in Google Cloud', 'ok');
+  });
 
   $('sync-connect').addEventListener('click', async () => {
     setStatus(status, 'Waiting for Google…');

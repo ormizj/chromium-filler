@@ -15,7 +15,10 @@
 
 import type { SyncState } from '../shared/messages';
 import { getSettings } from '../shared/storage';
-import { isSyncConfigured } from '../shared/syncConfig';
+import {
+  clientProblem, isSyncConfigured, normalizeClient, readSyncClient, saveSyncClient,
+  type SyncClient,
+} from '../shared/syncConfig';
 import { SYNC_SCHEMA, emptySnapshot, mergeJobs, type JobSnapshot } from '../shared/syncJobs';
 import { buildSnapshot, applySnapshot, parseSnapshot } from '../shared/syncSnapshot';
 import { connect, connectedAccount, disconnect, isConnected } from './googleAuth';
@@ -51,13 +54,38 @@ async function writeStatus(patch: Partial<StoredStatus>): Promise<void> {
 }
 
 export async function syncState(): Promise<SyncState> {
-  const [status, account] = await Promise.all([readStatus(), connectedAccount()]);
+  const [status, account, client] = await Promise.all([
+    readStatus(), connectedAccount(), readSyncClient(),
+  ]);
   return {
-    configured: isSyncConfigured(),
+    configured: client.clientId.length > 0,
+    clientId: client.clientId,
     account,
     lastSyncAt: status.lastSyncAt,
     lastError: status.lastError,
   };
+}
+
+/**
+ * Store the OAuth client the user entered, and drop the tokens if it is a
+ * different one.
+ *
+ * A refresh token belongs to the client that issued it, so keeping it across a
+ * change would leave the account line naming an account this build can no longer
+ * get a token for — a connected state that fails at every sync. Forgetting it
+ * asks for one more Connect and is honest about what happened.
+ */
+export async function setSyncClient(input: Partial<SyncClient>): Promise<SyncState> {
+  const client = normalizeClient(input);
+  const clearing = !client.clientId && !client.clientSecret;
+  const problem = clearing ? undefined : clientProblem(client);
+  if (problem) throw new Error(problem);
+
+  const before = await readSyncClient();
+  await saveSyncClient(client);
+  if (before.clientId !== client.clientId) await disconnect();
+  await writeStatus({ lastError: undefined });
+  return syncState();
 }
 
 /** Authorize an account. The first merge waits for the user to confirm it. */
@@ -116,7 +144,9 @@ async function runSync(): Promise<SyncState> {
 export async function syncNow(confirmed = false): Promise<SyncState> {
   return serialize(async () => {
     try {
-      if (!isSyncConfigured()) throw new Error('Sync is not configured in this build.');
+      if (!(await isSyncConfigured())) {
+        throw new Error('Add your Google OAuth client below before syncing.');
+      }
       if (!(await isConnected())) throw new Error('Connect a Google account first.');
       if (!(await getSettings()).syncEnabled) throw new Error('Sync is turned off.');
 
@@ -146,7 +176,7 @@ export async function syncNow(confirmed = false): Promise<SyncState> {
  */
 export async function syncOnStartup(): Promise<void> {
   const settings = await getSettings();
-  if (!settings.syncEnabled || !isSyncConfigured() || !(await isConnected())) return;
+  if (!settings.syncEnabled || !(await isSyncConfigured()) || !(await isConnected())) return;
   if ((await readStatus()).awaitingConfirm) return;
   await syncNow(true);
 }

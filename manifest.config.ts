@@ -13,9 +13,10 @@ export default defineManifest({
   host_permissions: ['<all_urls>'],
   // A `key` pins the extension ID. Unpacked, the ID is derived from the install
   // path, so without one the same extension on two machines is two different
-  // applications to Google and only one of them matches the OAuth client's
-  // redirect URI. Paste the "key" field from a packed .crx, or from
-  // `chrome://extensions` → Pack extension, before setting up sync.
+  // applications to Google, with a redirect URI each. Optional: Options → Sync
+  // shows this browser's URI to copy, and adding both to the same OAuth client
+  // works as well. Paste the "key" field from a packed .crx, or from
+  // `chrome://extensions` → Pack extension, to avoid that.
   // key: '<base64 public key>',
   action: {
     default_popup: 'src/popup/popup.html',

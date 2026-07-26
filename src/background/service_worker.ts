@@ -13,7 +13,9 @@ import { DEFAULT_STATE } from '../shared/defaults';
 import {
   onSubmitted, onTabClosed, openUrls, sessionState, skipUrl, startSession, stopSession,
 } from './session';
-import { connectAccount, disconnectAccount, syncNow, syncOnStartup, syncState } from './sync';
+import {
+  connectAccount, disconnectAccount, setSyncClient, syncNow, syncOnStartup, syncState,
+} from './sync';
 
 const LOG = '[chromium-filler:bg]';
 
@@ -90,6 +92,12 @@ chrome.runtime.onMessage.addListener((msg: Message, _sender, sendResponse) => {
   }
   if (msg.type === MSG.SYNC_DISCONNECT) {
     disconnectAccount().then(sendResponse).catch((e) => sendResponse({ error: String(e) }));
+    return true;
+  }
+  if (msg.type === MSG.SYNC_SET_CLIENT) {
+    setSyncClient({ clientId: msg.clientId, clientSecret: msg.clientSecret })
+      .then(sendResponse)
+      .catch((e) => sendResponse({ error: (e as Error).message }));
     return true;
   }
   if (msg.type === MSG.SYNC_NOW) {

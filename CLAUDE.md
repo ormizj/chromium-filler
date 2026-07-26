@@ -543,11 +543,30 @@ first. `sync.ts` serializes runs through a promise chain, like `session.ts`.
 The UI is its own **tab**, not a section under Settings: it has a connected
 account to report, and below the layout simulator it sat a screen and a half past
 anything anyone was looking for. Triggers are the **Sync now** button and
-`chrome.runtime.onStartup` only — hence no `alarms` permission. Setup needs an
-OAuth client in
-`src/shared/syncConfig.ts` and a manifest `key` (an unpacked ID is path-derived,
-so without one the two machines are two different apps to Google); until then
-Connect says so and the backup file still moves the database by hand.
+`chrome.runtime.onStartup` only — hence no `alarms` permission.
+
+**The OAuth client is the user's, entered in Options → Sync**, not a build-time
+constant — a Google Cloud project is per-person, and as two constants an
+installed build could only ever tell its user to go and edit a source file they
+may not have. `syncConfig.ts` holds it in `chrome.storage.local` under
+`syncClient` (device state; never in the snapshot), and the steps for creating
+one are in `CONCEPT_HELP.syncClient`, behind the section's `?`, because it is a
+thing the extension explains to the person doing it. Three rules there:
+
+- **`googleAuth` reads the client on every call**, never at load — the worker
+  outlives the options page, and a client pasted a minute ago has to be the one
+  the next Connect uses.
+- **Changing the client id drops the tokens** (`setSyncClient` → `disconnect`).
+  A refresh token belongs to the client that issued it, so keeping it leaves the
+  account line naming an account no token can be got for — connected, and
+  failing at every sync.
+- **The redirect URI is shown and copyable in the panel**, because it is derived
+  from *this* browser's extension ID and so cannot be printed in the help text.
+  Each browser's has to be added to the client; a manifest `key` pins the ID to
+  one string instead, but adding both URIs works without it.
+
+Until a client is entered, Connect is disabled and says so, and the backup file
+still moves the database by hand.
 
 ### The archive (captured postings + export)
 `extractJob` ran for the modal alone and threw its result away every re-render,

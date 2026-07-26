@@ -310,6 +310,44 @@
           </div>
           <p id="sync-status" class="status" role="status" aria-live="polite"></p>
 
+          <!-- Below Connect, not above it: this is a once-per-device errand and
+               the everyday state of this tab is "which account, when did it last
+               run". The account line points down here while it is unset. The
+               steps themselves come from CONCEPT_HELP.syncClient via the `?` —
+               the catalog is the only place the extension explains itself. -->
+          <h3 id="sync-client-heading">Google OAuth client</h3>
+          <div class="settings-list">
+            <div class="setrow stacked">
+              <label class="setrow-text" for="sync-client-id">
+                <span class="setrow-title">Client ID</span>
+              </label>
+              <input type="text" id="sync-client-id" spellcheck="false"
+                     placeholder="…apps.googleusercontent.com" />
+            </div>
+            <div class="setrow stacked">
+              <label class="setrow-text" for="sync-client-secret">
+                <span class="setrow-title">Client secret</span>
+              </label>
+              <input type="password" id="sync-client-secret" spellcheck="false"
+                     placeholder="GOCSPX-…" />
+            </div>
+            <!-- The one value that has to travel the other way: Google will not
+                 accept the sign-in unless this exact string is on the client, and
+                 it is derived from this browser's extension ID, so it cannot be
+                 written down anywhere ahead of time. -->
+            <div class="setrow stacked span">
+              <label class="setrow-text" for="sync-redirect-uri">
+                <span class="setrow-title">Redirect URI — add this to the client in Google Cloud</span>
+              </label>
+              <input type="text" id="sync-redirect-uri" readonly />
+            </div>
+          </div>
+          <div class="row">
+            <button id="sync-client-save" class="btn">Save client</button>
+            <button id="sync-redirect-copy" class="btn">Copy redirect URI</button>
+          </div>
+          <p id="sync-client-status" class="status" role="status" aria-live="polite"></p>
+
           <h3>Backup file</h3>
           <p class="hint" style="margin: 0 0 8px;">
             The same database as a file you can move yourself. Importing combines it
