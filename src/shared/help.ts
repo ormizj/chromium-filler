@@ -295,6 +295,19 @@ export const SETTINGS_HELP: Record<keyof Settings, HelpEntry> = {
     body: 'Records that you have dismissed the setup panel\'s legend, so the basics are '
       + 'not re-explained on every posting. Set for you; there is nothing to configure.',
   },
+  syncEnabled: {
+    title: 'Sync the job database',
+    short: 'Share applied and skipped postings with another browser',
+    body: 'Keeps the job database the same in two browsers — which postings you have '
+      + 'applied to, which you skipped, and the job text that was saved with them. Both '
+      + 'browsers connect to the same Google account, and the data is kept in a folder '
+      + 'there that only this extension can see. Nothing else is shared: your profile, '
+      + 'your CV, your site configurations and the rest of these settings stay on this '
+      + 'device. Neither side overwrites the other — the two databases are combined, so '
+      + 'a posting applied to on either browser is applied to on both.',
+    when: 'You need this when you apply for jobs from more than one computer, and want '
+      + 'to avoid applying twice to the same posting.',
+  },
 };
 
 /* ---------------- Setup panel sections ---------------- */

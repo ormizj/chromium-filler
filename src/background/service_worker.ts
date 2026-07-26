@@ -13,6 +13,7 @@ import { DEFAULT_STATE } from '../shared/defaults';
 import {
   onSubmitted, onTabClosed, openUrls, sessionState, skipUrl, startSession, stopSession,
 } from './session';
+import { connectAccount, disconnectAccount, syncNow, syncOnStartup, syncState } from './sync';
 
 const LOG = '[chromium-filler:bg]';
 
@@ -28,6 +29,14 @@ chrome.runtime.onInstalled.addListener(async (details) => {
       await chrome.storage.local.set({ ...DEFAULT_STATE });
     }
   }
+});
+
+// Pull once per browser start, so a profile that was left behind is current
+// before the first posting is opened. There is no timer beyond this — sync is
+// otherwise only what the user asks for, which is why there is no `alarms`
+// permission.
+chrome.runtime.onStartup.addListener(() => {
+  void syncOnStartup().catch((e) => console.warn(LOG, 'startup sync failed', e));
 });
 
 chrome.runtime.onMessage.addListener((msg: Message, _sender, sendResponse) => {
@@ -69,6 +78,22 @@ chrome.runtime.onMessage.addListener((msg: Message, _sender, sendResponse) => {
   }
   if (msg.type === MSG.SESSION_SKIP) {
     skipUrl(msg.url, _sender.tab?.id).then(sendResponse).catch((e) => sendResponse({ error: String(e) }));
+    return true;
+  }
+  if (msg.type === MSG.SYNC_STATE) {
+    syncState().then(sendResponse).catch((e) => sendResponse({ error: String(e) }));
+    return true;
+  }
+  if (msg.type === MSG.SYNC_CONNECT) {
+    connectAccount().then(sendResponse).catch((e) => sendResponse({ error: String(e) }));
+    return true;
+  }
+  if (msg.type === MSG.SYNC_DISCONNECT) {
+    disconnectAccount().then(sendResponse).catch((e) => sendResponse({ error: String(e) }));
+    return true;
+  }
+  if (msg.type === MSG.SYNC_NOW) {
+    syncNow(msg.confirmed).then(sendResponse).catch((e) => sendResponse({ error: String(e) }));
     return true;
   }
   if (msg.type === MSG.OPEN_OPTIONS) {

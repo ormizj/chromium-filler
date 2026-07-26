@@ -20,6 +20,8 @@ export const DEFAULT_SETTINGS: Settings = {
   modalLayout: DEFAULT_MODAL_LAYOUT,
   modalFullscreen: false,
   helpSeen: false,
+  // Off until asked for: everything else here happens on-device.
+  syncEnabled: false,
 };
 
 /**

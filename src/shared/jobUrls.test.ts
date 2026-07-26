@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import {
-  addUrls, applyStatus, applyStatusChain, jobUrlStats, linkRedirect, normalizeEntry,
-  recordStatus, removeUrl,
+  addUrls, applyStatus, applyStatusChain, deleteUrl, jobUrlStats, linkRedirect, normalizeEntry,
+  pruneTombstones, recordStatus, removeUrl, TOMBSTONE_TTL_MS, visibleUrls,
 } from './jobUrls';
 import type { JobUrlEntry } from './types';
 
@@ -206,6 +206,72 @@ describe('removeUrl', () => {
   it('removes by url', () => {
     const { list } = addUrls([], ['a://1', 'a://2'], 0);
     expect(removeUrl(list, 'a://1').map((e) => e.url)).toEqual(['a://2']);
+  });
+});
+
+describe('deleteUrl — tombstones', () => {
+  it('keeps the entry and logs the removal, so a sync cannot resurrect it', () => {
+    const { list } = addUrls([], ['a://1'], 0);
+    const out = deleteUrl(list, 'a://1', 10);
+    expect(out).toHaveLength(1);
+    expect(out[0].status).toBe('deleted');
+    expect(out[0].history).toEqual([{ status: 'new', at: 0 }, { status: 'deleted', at: 10 }]);
+  });
+
+  it('is hidden from every surface by visibleUrls', () => {
+    const { list } = addUrls([], ['a://1', 'a://2'], 0);
+    expect(visibleUrls(deleteUrl(list, 'a://1', 10)).map((e) => e.url)).toEqual(['a://2']);
+  });
+
+  it('un-deletes by logging the old status again, as a later event', () => {
+    const { list } = addUrls([], ['a://1'], 0);
+    const back = applyStatus(deleteUrl(list, 'a://1', 10), 'a://1', 'applied', 20);
+    expect(back[0].status).toBe('applied');
+    expect(visibleUrls(back)).toHaveLength(1);
+  });
+
+  it('drops out of the stats it can never contribute to', () => {
+    const { list } = addUrls([], ['a://1', 'a://2'], 0);
+    const stats = jobUrlStats(deleteUrl(list, 'a://1', 10));
+    expect(stats.total).toBe(1);
+    expect(stats.new).toBe(1);
+  });
+});
+
+describe('pruneTombstones', () => {
+  it('keeps a fresh tombstone and forgets an expired one', () => {
+    const { list } = addUrls([], ['a://1'], 0);
+    const dead = deleteUrl(list, 'a://1', 1_000);
+    expect(pruneTombstones(dead, 1_000 + TOMBSTONE_TTL_MS - 1)).toHaveLength(1);
+    expect(pruneTombstones(dead, 1_000 + TOMBSTONE_TTL_MS)).toHaveLength(0);
+  });
+
+  it('never touches a live entry, however old', () => {
+    const { list } = addUrls([], ['a://1'], 0);
+    expect(pruneTombstones(list, TOMBSTONE_TTL_MS * 10)).toHaveLength(1);
+  });
+});
+
+describe('linkRedirect — never demotes', () => {
+  it('leaves an applied source applied', () => {
+    let list = addUrls([], ['a://board'], 0).list;
+    list = applyStatus(list, 'a://board', 'applied', 1);
+    const out = linkRedirect(list, 'a://board', 'b://ats', 2);
+    expect(out.find((e) => e.url === 'a://board')?.status).toBe('applied');
+  });
+
+  it('leaves a skipped source skipped — the rank says so, not a list of exceptions', () => {
+    let list = addUrls([], ['a://board'], 0).list;
+    list = applyStatus(list, 'a://board', 'skipped', 1);
+    const out = linkRedirect(list, 'a://board', 'b://ats', 2);
+    expect(out.find((e) => e.url === 'a://board')?.status).toBe('skipped');
+  });
+
+  it('does not overwrite a status this build cannot interpret', () => {
+    let list = addUrls([], ['a://board'], 0).list;
+    list = applyStatus(list, 'a://board', 'interviewing', 1);
+    const out = linkRedirect(list, 'a://board', 'b://ats', 2);
+    expect(out.find((e) => e.url === 'a://board')?.status).toBe('interviewing');
   });
 });
 

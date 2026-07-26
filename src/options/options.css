@@ -695,6 +695,24 @@ label.fld.inline input {
   .urls li .inline-actions {
     display: none;
   }
+  /**
+   * Wrap the tab strip rather than scroll it.
+   *
+   * `.tabs` scrolls horizontally with `scrollbar-width: none`, which is fine
+   * while everything fits and invisible when it does not: at 390px the six tabs
+   * are 401px wide, so Sync was clipped and Help was entirely off-screen with no
+   * affordance saying to swipe. A tab nobody can see is a tab nobody uses, and
+   * mobile is the priority target.
+   *
+   * The cost is that an active tab on the first row is a raised folder tab with
+   * the panel a row below it, instead of sitting on it. That is why this is
+   * scoped to narrow widths — on desktop all six fit on one line and the folder
+   * metaphor is untouched. `revealSection` already measures the topbar per call,
+   * so a two-row strip does not throw its scroll offset out.
+   */
+  .tabs {
+    flex-wrap: wrap;
+  }
 }
 @media (min-width: 641px) {
   .rowmenu {

@@ -148,8 +148,14 @@ pure, unit-tested logic):
   message (mark URL applied + optional tab close), and owns the two-step redirect
   watcher (below). `session.ts` owns the queue session (below).
 - **`src/popup`, `src/options`** — popup triggers run/reset and shows session
-  progress; options is four tabs (Queue · Profile · Settings · Sites) managing
-  the job queue, profile, CV, behavior settings, and site configs.
+  progress; options is six tabs (Queue · Profile · Settings · Sites · Sync ·
+  Help) managing the job queue, profile, CV, behavior settings, site configs and
+  the job-database sync. Adding a tab is `'name'` in `TABS` plus a button and a
+  panel following the `tab-`/`panel-` id convention — deep-linking comes free.
+  At ≤640px the strip **wraps** (`options.css`): six tabs are 401px wide on a
+  390px screen, and `overflow-x: auto` with a hidden scrollbar hides the last two
+  with nothing saying to swipe. The cost, paid only on narrow, is that an active
+  tab on the first row no longer sits on the panel.
 
 Cross-context messaging goes through the typed `MSG` contract in
 `src/shared/messages.ts` (payloads must be structured-clone friendly).
@@ -473,6 +479,76 @@ two-step posting (both ends, cross-linked, never demoting an existing status),
 dashboard.
 `urlImport.ts` extracts/normalizes/dedupes URLs from a pasted text blob.
 
+`STATUS_RANK` names how far through the flow each status is. It exists because
+two callers needed it for different reasons: `linkRedirect` must not demote a
+posting by re-visiting it (it used to spell that as two inline
+`!== 'applied'` checks, which silently *did* demote a skipped one), and the sync
+merge needs a deterministic tie-break. Both now go through `promote()`.
+
+### Syncing the job database
+Two browser profiles on different Google accounts, one database. **Only the job
+database** — `jobUrls` and `jobDetails`. The profile, the CV, the site configs and
+every other setting are device state: `modalLayout` alone settles it, being a
+rectangle measured against *one* screen (`sampleScreen`), so replicating it is
+the stranding `clampLayout` exists to undo.
+
+`src/shared/syncJobs.ts` (pure) is the whole correctness story. Two devices write
+with nobody arbitrating, so `mergeJobs` is **commutative, associative and
+idempotent** — asserted directly in `syncJobs.test.ts`, not just implied. That is
+also what makes the compare-and-swap retry safe: a lost race is repaired by
+merging again. It is bought by making every rule a *join*:
+
+- **`history` is set-unioned and `status` is *derived* from it** (newest event
+  wins; same-millisecond ties by `STATUS_RANK`). The obvious rule — "the stronger
+  status wins" — reads well and is wrong: rank is monotonic, so a posting could
+  never be **un-skipped**, and every later sync would silently re-skip it. A union
+  of events also needs no special case for a manual edit; a correction is just a
+  later event.
+- `jobDetails` reuses `captureDetails`' rule: an empty capture never overwrites a
+  populated one.
+- Conflicts tie-break **symmetrically** (newest, then a stable content key).
+  "The left-hand side wins" would quietly destroy commutativity, and the bug shows
+  only as two devices disagreeing forever.
+
+Three things that follow, each with a test:
+
+- **Deletion is a `'deleted'` log event, never a splice** (`deleteUrl`). A union
+  can only grow, so a spliced entry returns on the next sync — the delete appears
+  to work and then undoes itself. That includes Options' Clear button, which
+  tombstones every entry rather than writing `[]`. `visibleUrls` hides them;
+  `pruneTombstones` forgets them after 90 days, at the storage edge rather than in
+  the merge (it depends on `now`, and a merge that changed with the clock could
+  not be idempotent).
+- **The wire format *is* the storage format** — `JobUrlEntry[]` and
+  `JobDetailsMap` verbatim, plus a `schema`. No mapping layer to drift, and the
+  round-trip is lossless by construction. Contrast `jobExport.ts`, which flattens
+  and reformats for a human and is therefore unusable here.
+- **Forward compatibility is a one-shot decision.** `JobLogStatus` is
+  deliberately open (`| (string & {})`), inbound entries go through
+  `normalizeEntry`, and unknown fields are preserved by spreading both sides.
+  Tolerance lives in the *older* build, which is frozen once installed — so an
+  unrecognised status is carried through the log untouched rather than validated
+  away. `parseSnapshot` refuses an unknown `schema` outright: merging is
+  all-or-nothing, so a stale peer can be *blocked* but must never corrupt.
+
+`src/background/` — `googleAuth.ts` uses `launchWebAuthFlow` + PKCE, **not
+`getAuthToken`**, and that is the feature: `getAuthToken` returns a token for
+whatever account the *browser profile* is signed into, so two profiles would get
+two separate Drives and nothing would ever sync. The chooser is how the same
+account gets picked twice. `drive.ts` keeps one `jobs.json` in `appDataFolder`
+(hidden, `drive.appdata` scope only) and **compare-and-swaps every write** —
+without it two simultaneous syncs both read version N and the second erases the
+first. `sync.ts` serializes runs through a promise chain, like `session.ts`.
+
+The UI is its own **tab**, not a section under Settings: it has a connected
+account to report, and below the layout simulator it sat a screen and a half past
+anything anyone was looking for. Triggers are the **Sync now** button and
+`chrome.runtime.onStartup` only — hence no `alarms` permission. Setup needs an
+OAuth client in
+`src/shared/syncConfig.ts` and a manifest `key` (an unpacked ID is path-derived,
+so without one the two machines are two different apps to Google); until then
+Connect says so and the backup file still moves the database by hand.
+
 ### The archive (captured postings + export)
 `extractJob` ran for the modal alone and threw its result away every re-render,
 so a posting became unreadable the moment its tab closed. `jobDetails.ts` (pure)
@@ -511,6 +587,12 @@ needs no `downloads` permission, and an MV3 service worker has no
 - **Content scripts share the PAGE's origin**, not the extension's — so the CV
   is stored in `chrome.storage.local` (base64, needs `unlimitedStorage`), NOT
   extension IndexedDB. See `cvStore.ts`.
+- **Sync carries the job database and nothing else.** Never widen the snapshot to
+  the profile, the CV, the site configs or `settings` — see the sync section
+  above. `Omit`ing them is not the guard; the snapshot type simply has two fields.
+- **Never make the sync merge depend on `now`, or on which argument came first.**
+  Both break the properties two-way sync rests on. Pruning belongs at the storage
+  edge, tie-breaks must be symmetric.
 - **`successSelector` becoming VISIBLE is the ONLY "actually sent" signal.**
   Not merely present — sites pre-render hidden success nodes; the
   `MutationObserver` in `main.ts` watches `style`/`class`/`hidden` flips. There is

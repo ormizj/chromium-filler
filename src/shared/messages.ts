@@ -42,6 +42,14 @@ export const MSG = {
   SESSION_SKIP: 'CF_SESSION_SKIP',
   /** popup -> content: re-open the minimized review modal without re-running. */
   SHOW_REPORT: 'CF_SHOW_REPORT',
+  /** options -> background: authorize a Google account to sync the job database with. */
+  SYNC_CONNECT: 'CF_SYNC_CONNECT',
+  /** options -> background: forget the account and its tokens; the data stays. */
+  SYNC_DISCONNECT: 'CF_SYNC_DISCONNECT',
+  /** options -> background: merge with the remote copy now. */
+  SYNC_NOW: 'CF_SYNC_NOW',
+  /** options -> background: report which account, when it last synced, what failed. */
+  SYNC_STATE: 'CF_SYNC_STATE',
 } as const;
 
 /** Session snapshot shown by the popup, the options queue, and the modal strip. */
@@ -70,6 +78,18 @@ export interface StatusResponse {
    * instead of the destructive "Reset & Re-run" when this is set.
    */
   modalMinimized?: boolean;
+}
+
+/** What the options page shows in the Sync section. */
+export interface SyncState {
+  /** An OAuth client id is configured in this build at all. */
+  configured: boolean;
+  /** The Google account this browser is syncing through, once authorized. */
+  account?: string;
+  lastSyncAt?: number;
+  lastError?: string;
+  /** Postings held here and on the far side — the first-merge confirmation. */
+  pending?: { local: number; remote: number };
 }
 
 /** Background's answer to FOLLOW_REDIRECT: who performs the navigation. */
@@ -101,7 +121,14 @@ export type Message =
   | { type: typeof MSG.SESSION_STOP }
   | { type: typeof MSG.SESSION_STATE }
   | { type: typeof MSG.SESSION_SKIP; url: string }
-  | { type: typeof MSG.SHOW_REPORT };
+  | { type: typeof MSG.SHOW_REPORT }
+  | { type: typeof MSG.SYNC_CONNECT }
+  | { type: typeof MSG.SYNC_DISCONNECT }
+  // `confirmed` is the answer to the count prompt shown before the first merge:
+  // connecting the wrong Google account would union a stranger's job list into
+  // this one, and that is worth one look before it happens.
+  | { type: typeof MSG.SYNC_NOW; confirmed?: boolean }
+  | { type: typeof MSG.SYNC_STATE };
 
 export interface RunResult {
   status: StatusResponse;

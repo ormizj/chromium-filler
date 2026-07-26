@@ -11,7 +11,7 @@ import {
 } from './session';
 import { addUrls } from '../shared/jobUrls';
 import { getJobUrls, saveJobUrls } from '../shared/storage';
-import type { JobUrlStatus } from '../shared/types';
+import type { JobLogStatus } from '../shared/types';
 import { closeTab, openTabs, resetChromeMock } from '../../test/setup';
 
 const URLS = ['a://1', 'a://2', 'a://3', 'a://4', 'a://5'];
@@ -28,7 +28,7 @@ async function settled<T>(promise: Promise<T>): Promise<T> {
   return result;
 }
 
-async function statuses(): Promise<Record<string, JobUrlStatus>> {
+async function statuses(): Promise<Record<string, JobLogStatus>> {
   const list = await getJobUrls();
   return Object.fromEntries(list.map((e) => [e.url, e.status]));
 }

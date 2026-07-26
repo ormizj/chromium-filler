@@ -4,7 +4,37 @@
  * track which applications were actually sent.
  */
 
-import type { JobUrlEntry, JobUrlStats, JobUrlStatus } from './types';
+import type { JobLogStatus, JobUrlEntry, JobUrlStats, JobUrlStatus } from './types';
+
+/**
+ * How far through the flow each status is. Two callers need it and they need it
+ * for different reasons, which is why it is a constant rather than a comparison
+ * written twice: `linkRedirect` below must not demote a posting by re-visiting
+ * it, and the sync merge needs a *deterministic* tie-break when two devices log
+ * different statuses in the same millisecond.
+ *
+ * Tombstones outrank everything ordinary — a removal is the user's most recent
+ * word on a posting. An unrecognised status (a newer peer's) ranks -1: it is
+ * never chosen as a tie-break winner by a build that cannot interpret it, while
+ * the event itself is still carried in the log.
+ */
+export const STATUS_RANK: Record<JobUrlStatus | 'deleted', number> = {
+  new: 0, opened: 1, redirected: 2, skipped: 3, applied: 4, deleted: 5,
+};
+
+export function statusRank(status: JobLogStatus): number {
+  return STATUS_RANK[status as JobUrlStatus] ?? -1;
+}
+
+/** A status this build understands well enough to act on. */
+export function isKnownStatus(status: JobLogStatus): status is JobUrlStatus {
+  return status !== 'deleted' && statusRank(status) >= 0;
+}
+
+/** Removed on some device. Kept as a log entry so a sync cannot resurrect it. */
+export function isDeleted(entry: JobUrlEntry): boolean {
+  return entry.status === 'deleted';
+}
 
 function newId(): string {
   return (globalThis.crypto?.randomUUID?.() ?? `id-${Math.random().toString(36).slice(2)}`);
@@ -56,7 +86,7 @@ export function addUrls(
 export function applyStatus(
   list: JobUrlEntry[],
   url: string,
-  status: JobUrlStatus,
+  status: JobLogStatus,
   now: number = Date.now(),
 ): JobUrlEntry[] {
   return list.map((entry) => {
@@ -94,14 +124,34 @@ function ensureUrl(list: JobUrlEntry[], url: string, now: number): JobUrlEntry[]
 export function recordStatus(
   list: JobUrlEntry[],
   url: string,
-  status: JobUrlStatus,
+  status: JobLogStatus,
   now: number = Date.now(),
 ): JobUrlEntry[] {
   return applyStatus(ensureUrl(list, url, now), url, status, now);
 }
 
-function statusOf(list: JobUrlEntry[], url: string): JobUrlStatus | undefined {
+function statusOf(list: JobUrlEntry[], url: string): JobLogStatus | undefined {
   return list.find((e) => e.url === url)?.status;
+}
+
+/**
+ * Move a posting forward through the flow, never back.
+ *
+ * The "never demote" rule the two-step path relies on, said once. It also
+ * declines to touch a status this build does not recognise — after a sync a
+ * newer peer's value can be sitting here, and overwriting what we cannot
+ * interpret is how the log stops being the truth.
+ */
+function promote(
+  list: JobUrlEntry[],
+  url: string,
+  status: JobUrlStatus,
+  now: number,
+): JobUrlEntry[] {
+  const current = statusOf(list, url);
+  if (current === undefined) return applyStatus(list, url, status, now);
+  if (!isKnownStatus(current)) return list;
+  return statusRank(current) >= statusRank(status) ? list : applyStatus(list, url, status, now);
 }
 
 /**
@@ -111,8 +161,8 @@ function statusOf(list: JobUrlEntry[], url: string): JobUrlStatus | undefined {
  * page actually applied on — and they point at each other.
  *
  * Either end may be new (a posting browsed rather than imported) or already
- * known; existing entries are never demoted, so re-visiting an application
- * already marked applied leaves it applied.
+ * known; existing entries are never demoted (`promote`), so re-visiting an
+ * application already marked applied — or skipped — leaves it that way.
  */
 export function linkRedirect(
   list: JobUrlEntry[],
@@ -125,10 +175,10 @@ export function linkRedirect(
   let out = ensureUrl(ensureUrl(list, sourceUrl, now), destUrl, now);
 
   out = out.map((e) => (e.url === sourceUrl ? { ...normalizeEntry(e), redirectUrl: destUrl } : e));
-  if (statusOf(out, sourceUrl) !== 'applied') out = applyStatus(out, sourceUrl, 'redirected', now);
+  out = promote(out, sourceUrl, 'redirected', now);
 
   out = out.map((e) => (e.url === destUrl ? { ...normalizeEntry(e), sourceUrl } : e));
-  if (statusOf(out, destUrl) === 'new') out = applyStatus(out, destUrl, 'opened', now);
+  out = promote(out, destUrl, 'opened', now);
 
   return out;
 }
@@ -145,7 +195,7 @@ export function linkRedirect(
 export function applyStatusChain(
   list: JobUrlEntry[],
   url: string,
-  status: JobUrlStatus,
+  status: JobLogStatus,
   now: number = Date.now(),
 ): JobUrlEntry[] {
   let out = list;
@@ -160,14 +210,58 @@ export function applyStatusChain(
   return out;
 }
 
+/**
+ * Delete a posting: record a tombstone rather than splice it out.
+ *
+ * Sync merges two databases by unioning their logs, and a union can only grow —
+ * so a spliced entry is re-added by the next sync from the other device, and the
+ * delete appears to work and then silently undoes itself. Logging the removal
+ * keeps it a fact both devices can see, and makes un-deleting simply a later
+ * event rather than a special case.
+ */
+export function deleteUrl(
+  list: JobUrlEntry[],
+  url: string,
+  now: number = Date.now(),
+): JobUrlEntry[] {
+  return applyStatus(list, url, 'deleted', now);
+}
+
+/**
+ * Forget an entry outright, tombstone and all. For pruning only — user-facing
+ * deletion is `deleteUrl`, because this cannot survive a sync.
+ */
 export function removeUrl(list: JobUrlEntry[], url: string): JobUrlEntry[] {
   return list.filter((e) => e.url !== url);
 }
 
+/** The postings a surface should show: everything not tombstoned. */
+export function visibleUrls(list: JobUrlEntry[]): JobUrlEntry[] {
+  return list.filter((e) => !isDeleted(e));
+}
+
+export const TOMBSTONE_TTL_MS = 90 * 24 * 60 * 60 * 1000;
+
+/**
+ * Drop tombstones that have outlived their purpose. A tombstone only has to
+ * outlast the other device's next sync; keeping them forever would grow the
+ * file without bound.
+ */
+export function pruneTombstones(
+  list: JobUrlEntry[],
+  now: number = Date.now(),
+  maxAgeMs: number = TOMBSTONE_TTL_MS,
+): JobUrlEntry[] {
+  return list.filter((e) => !isDeleted(e) || now - e.updatedAt < maxAgeMs);
+}
+
 export function jobUrlStats(list: JobUrlEntry[]): JobUrlStats {
+  const visible = visibleUrls(list);
   const stats: JobUrlStats = {
-    total: list.length, new: 0, opened: 0, redirected: 0, applied: 0, skipped: 0,
+    total: visible.length, new: 0, opened: 0, redirected: 0, applied: 0, skipped: 0,
   };
-  for (const e of list) stats[e.status]++;
+  // A status from a newer peer counts toward `total` and nothing else — there is
+  // no honest bucket for it, and inventing one would misreport the queue.
+  for (const e of visible) if (isKnownStatus(e.status)) stats[e.status]++;
   return stats;
 }

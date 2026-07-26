@@ -13,6 +13,7 @@
  */
 
 import type { JobUrlEntry } from './types';
+import { visibleUrls } from './jobUrls';
 
 /** Statuses that mean "this posting still needs to be looked at". */
 const WAITING = 'new';
@@ -83,7 +84,10 @@ export function progressDots(progress: QueueProgress, max = 7): ProgressDot[] {
 }
 
 /** Summarize the queue for the popup, modal, and options headers. */
-export function queueProgress(list: JobUrlEntry[], inFlight: string[]): QueueProgress {
+export function queueProgress(rawList: JobUrlEntry[], inFlight: string[]): QueueProgress {
+  // A tombstone is a posting the user removed; counting it would leave the
+  // session reporting progress against a denominator it can never finish.
+  const list = visibleUrls(rawList);
   const open = new Set(inFlight);
   let queued = 0;
   let applied = 0;

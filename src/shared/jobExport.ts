@@ -94,8 +94,11 @@ export function buildExport(
   map: JobDetailsMap,
   opts: ExportOptions = {},
 ): ExportedJob[] {
-  const wanted = new Set<JobUrlStatus>(opts.statuses ?? ['applied']);
-  const selected = list.filter((entry) => wanted.has(entry.status));
+  const wanted = new Set<string>(opts.statuses ?? ['applied']);
+  // Membership decides this, so a tombstone or a newer peer's status is excluded
+  // by simply not being asked for — no separate filter to keep in step.
+  const selected = list.filter((entry): entry is JobUrlEntry & { status: JobUrlStatus } =>
+    wanted.has(entry.status));
   const urls = new Set(selected.map((e) => e.url));
   return selected
     .filter((entry) => !(entry.redirectUrl && urls.has(entry.redirectUrl)))

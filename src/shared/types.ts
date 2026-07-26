@@ -147,8 +147,30 @@ export interface FieldMatch {
 
 export type JobUrlStatus = 'new' | 'opened' | 'redirected' | 'applied' | 'skipped';
 
+/**
+ * A status as it appears in the log — deliberately *open*, and the openness is
+ * load-bearing for sync.
+ *
+ * Two things widen it beyond `JobUrlStatus`:
+ *
+ * `'deleted'` is a tombstone. Sync merges two databases by unioning their logs,
+ * and a union can only grow, so a removed posting would come back on the next
+ * sync. Recording the removal as another timestamped event means it needs no
+ * special merge rule — it wins if it is newest, and a later un-delete beats it.
+ * It is never rendered as a status; a tombstoned entry is simply not shown.
+ *
+ * `(string & {})` — which keeps literal autocomplete while accepting any string
+ * — is forward compatibility, and it can only be bought *now*. A peer running a
+ * newer build may log a status this one has never heard of, and whether that
+ * survives is decided by code in the *older* build, which is frozen the moment
+ * it is installed. So an unrecognised status is carried through the log
+ * untouched rather than validated away, and `npm run typecheck` fails on any
+ * consumer that assumes the set is closed.
+ */
+export type JobLogStatus = JobUrlStatus | 'deleted' | (string & {});
+
 export interface JobStatusEvent {
-  status: JobUrlStatus;
+  status: JobLogStatus;
   at: number;
 }
 
@@ -157,7 +179,13 @@ export interface JobUrlEntry {
   /** The job URL — the unique key for the database. */
   url: string;
   note?: string;
-  status: JobUrlStatus;
+  /**
+   * The current status — a *cache* of `history`, which is the truth. Sync
+   * re-derives it from the merged log, so it is safe for a build that does not
+   * recognise the newest event to render it plainly and move on: the log still
+   * carries it, and a build that does understand it will derive the same value.
+   */
+  status: JobLogStatus;
   /** For a destination entry: the board posting that redirected here. */
   sourceUrl?: string;
   /** For a source posting: the external application URL it redirected to. */
@@ -251,6 +279,20 @@ export interface Settings {
    * posting would be the same wall of text sixty times in a session.
    */
   helpSeen: boolean;
+  /**
+   * Share the job database with another browser profile through a Google Drive
+   * folder only this extension can see.
+   *
+   * Only the job database — the URL list and the captured postings. The profile,
+   * the CV, the site configs and the rest of these settings are device state and
+   * never leave the machine. `modalLayout` alone would be reason enough: it is a
+   * rectangle measured against *this* screen.
+   *
+   * Off by default, and deliberately explicit. Everything else this extension
+   * does happens on-device, so the first request it ever makes should be one the
+   * user asked for.
+   */
+  syncEnabled: boolean;
 }
 
 /** Everything persisted in chrome.storage.local (the CV bytes are stored separately, also in chrome.storage.local). */

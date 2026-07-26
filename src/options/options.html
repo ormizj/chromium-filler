@@ -17,6 +17,7 @@
           <button class="tab" role="tab" id="tab-profile" aria-controls="panel-profile" aria-selected="false">Profile</button>
           <button class="tab" role="tab" id="tab-settings" aria-controls="panel-settings" aria-selected="false">Settings</button>
           <button class="tab" role="tab" id="tab-sites" aria-controls="panel-sites" aria-selected="false">Sites</button>
+          <button class="tab" role="tab" id="tab-sync" aria-controls="panel-sync" aria-selected="false">Sync</button>
           <button class="tab" role="tab" id="tab-help" aria-controls="panel-help" aria-selected="false">Help</button>
         </div>
       </div>
@@ -280,6 +281,51 @@
           </div>
         </section>
       </div>
+      <!-- ---------------- Sync ---------------- -->
+      <!-- Its own tab rather than a section under Settings: it is a once-per-device
+           setup with its own connected state, and below the layout simulator it sat
+           past a screen and a half of drag-and-resize UI. -->
+      <div id="panel-sync" role="tabpanel" aria-labelledby="tab-sync" hidden>
+        <section id="sync-section">
+          <h2 id="sync-heading">Sync</h2>
+          <p class="hint">
+            Keeps the job database the same in two browsers — which postings you have
+            applied to, which you skipped, and the job text saved with them. Only that:
+            your profile, CV, site configurations and settings stay on this device.
+            Neither side overwrites the other, the two are combined.
+          </p>
+          <div class="settings-list">
+            <div class="setrow">
+              <div class="setrow-text"><h5>Sync the job database</h5></div>
+              <label class="switch"><input type="checkbox" id="sync-enabled" class="switch-input" /><span class="switch-track" aria-hidden="true"><i></i></span></label>
+            </div>
+          </div>
+          <!-- Which account this browser is pointed at is the thing that actually
+               goes wrong, so it is shown rather than buried behind Connect. -->
+          <p id="sync-account" class="status" role="status" aria-live="polite"></p>
+          <div class="row" style="margin-top: 8px;">
+            <button id="sync-connect" class="btn">Connect</button>
+            <button id="sync-now" class="btn">Sync now</button>
+            <button id="sync-disconnect" class="btn">Disconnect</button>
+          </div>
+          <p id="sync-status" class="status" role="status" aria-live="polite"></p>
+
+          <h3>Backup file</h3>
+          <p class="hint" style="margin: 0 0 8px;">
+            The same database as a file you can move yourself. Importing combines it
+            with what is here rather than replacing it, exactly as syncing does. This
+            is not the applied-jobs export on the Queue tab, which is written for
+            reading rather than for loading back in.
+          </p>
+          <div class="row">
+            <button id="sync-export" class="btn">Export backup</button>
+            <button id="sync-import" class="btn">Import backup</button>
+            <input type="file" id="sync-import-input" accept="application/json,.json" hidden />
+          </div>
+          <p id="sync-file-status" class="status" role="status" aria-live="polite"></p>
+        </section>
+      </div>
+
       <!-- ---------------- Help ---------------- -->
       <div id="panel-help" role="tabpanel" aria-labelledby="tab-help" hidden>
         <section id="help-section">

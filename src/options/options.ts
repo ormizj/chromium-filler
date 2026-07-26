@@ -1,9 +1,12 @@
 /**
  * Options page: the job queue (session control + URL database), profile editor,
- * CV upload, behavior settings, the site-config JSON editor, and Help.
+ * CV upload, behavior settings, the site-config JSON editor, Sync, and Help.
  *
- * The five areas are tabs rather than one long scroll — the queue is the only
- * part used daily, and on a phone it used to sit behind everything else.
+ * The six areas are tabs rather than one long scroll — the queue is the only
+ * part used daily, and on a phone it used to sit behind everything else. Sync
+ * earns one despite being configured once, because it has its own connected
+ * state to report; as a section under Settings it sat below the layout
+ * simulator, a screen and a half past the last thing anyone was looking for.
  *
  * Everything explanatory on this page renders from `shared/help.ts`, never from
  * copy written here: the same words have to reach the on-page setup panel, and
@@ -14,7 +17,7 @@
 import type {
   JobUrlEntry, JobUrlStatus, ModalLayout, Profile, RedirectTarget, SiteConfig, TextFieldKey,
 } from '../shared/types';
-import type { SessionState } from '../shared/messages';
+import type { SessionState, SyncState } from '../shared/messages';
 import {
   activeLimits, ALL_LIMITS, clampLayout, DEFAULT_MODAL_LAYOUT, describeLimits, layoutLimits,
   modelledViewport, nudgeLayout, sampleScreen, snapLayout,
@@ -27,16 +30,19 @@ import { FillerModal, type ModalCallbacks, type ModalData } from '../content/mod
 import { TEXT_FIELDS, FIELD_LABELS } from '../shared/fieldKeys';
 import { configTemplate } from '../shared/configTemplate';
 import { extractUrls } from '../shared/urlImport';
-import { addUrls, applyStatus, jobUrlStats, removeUrl } from '../shared/jobUrls';
+import { addUrls, applyStatus, deleteUrl, jobUrlStats, visibleUrls } from '../shared/jobUrls';
 import { hostOf } from '../shared/url';
 import { MSG } from '../shared/messages';
 import {
   getProfile, saveProfile, getSettings, saveSettings,
-  getSiteConfigs, saveSiteConfigs, getJobUrls, saveJobUrls, mutateJobUrls,
+  getSiteConfigs, saveSiteConfigs, getJobUrls, mutateJobUrls,
   getJobDetails, saveJobDetails, mutateJobDetails,
 } from '../shared/storage';
 import { pruneDetails } from '../shared/jobDetails';
 import { buildExport, exportFilename } from '../shared/jobExport';
+import {
+  buildSnapshot, mergeIntoLocal, parseSnapshot, snapshotFilename,
+} from '../shared/syncSnapshot';
 import { getCv, setCv, clearCv } from '../shared/cvStore';
 import {
   CONCEPT_HELP, CONFIG_HELP, PREP_HELP, REDIRECT_HELP, SETTINGS_HELP, describeConfig,
@@ -63,7 +69,7 @@ function setStatus(el: HTMLElement, text: string, kind: 'ok' | 'err' | '' = ''):
 
 /* ---------------- Tabs ---------------- */
 
-const TABS = ['queue', 'profile', 'settings', 'sites', 'help'] as const;
+const TABS = ['queue', 'profile', 'settings', 'sites', 'sync', 'help'] as const;
 type TabName = (typeof TABS)[number];
 
 function selectTab(name: TabName, pushHash = true): void {
@@ -223,6 +229,34 @@ function attachHelp(anchor: HTMLElement, entry: HelpEntry, insertAfter: HTMLElem
   }));
 }
 
+/**
+ * Each settings row gets the catalog's one-line `short` as its caption and the full
+ * entry behind a `?`. The reference captions every settings row, and writing those
+ * lines into the HTML meant the row and the `?` beside it could disagree — which
+ * they had already started to. The `?` is anchored in the title so it sits inline
+ * with it; the panel opens below the whole row, past the caption.
+ *
+ * Module scope rather than inside `initSettings`, because the Sync section renders
+ * its row the same way and a second copy is how the two would drift.
+ */
+function attachRowHelp(control: HTMLElement, entry: HelpEntry): void {
+  const row = control.closest('.setrow') as HTMLElement;
+  const text = row.querySelector('.setrow-text') as HTMLElement;
+  // The `?` is attached BEFORE the caption, so it rides at the end of the title
+  // line and the caption still wraps whole beneath both. Anchoring it inside the
+  // `h5` — which is what this did — put it at a different x on every row (the
+  // title's own width) and drove a control through the middle of a text block.
+  attachHelp(text, entry, row);
+  if (entry.short) {
+    // A span, not a <p>: half of these text blocks are the control's own <label>,
+    // which takes phrasing content only.
+    const caption = document.createElement('span');
+    caption.className = 'setrow-caption';
+    caption.textContent = entry.short;
+    text.append(caption);
+  }
+}
+
 /** `key — what it does`, the shape used by both the Sites reference and Help. */
 function referenceRow(key: string, entry: HelpEntry): HTMLElement {
   const row = document.createElement('div');
@@ -370,30 +404,6 @@ async function initSettings(): Promise<void> {
   redirectTarget.addEventListener('change', persist);
   modalFullscreen.addEventListener('change', persist);
 
-  /**
-   * Each row gets the catalog's one-line `short` as its caption and the full entry
-   * behind a `?`. The reference captions every settings row, and writing those
-   * lines into the HTML meant the row and the `?` beside it could disagree — which
-   * they had already started to. The `?` is anchored in the title so it sits inline
-   * with it; the panel opens below the whole row, past the caption.
-   */
-  const attachRowHelp = (control: HTMLElement, entry: HelpEntry): void => {
-    const row = control.closest('.setrow') as HTMLElement;
-    const text = row.querySelector('.setrow-text') as HTMLElement;
-    // The `?` is attached BEFORE the caption, so it rides at the end of the title
-    // line and the caption still wraps whole beneath both. Anchoring it inside the
-    // `h5` — which is what this did — put it at a different x on every row (the
-    // title's own width) and drove a control through the middle of a text block.
-    attachHelp(text, entry, row);
-    if (entry.short) {
-      // A span, not a <p>: half of these text blocks are the control's own <label>,
-      // which takes phrasing content only.
-      const caption = document.createElement('span');
-      caption.className = 'setrow-caption';
-      caption.textContent = entry.short;
-      text.append(caption);
-    }
-  };
   attachRowHelp(autoRun, SETTINGS_HELP.autoRunOnLoad);
   attachRowHelp(closeOnSubmit, SETTINGS_HELP.closeTabOnSubmit);
   attachRowHelp(closeOnSkip, SETTINGS_HELP.closeTabOnSkip);
@@ -902,7 +912,9 @@ function renderFilters(list: JobUrlEntry[]): void {
 
 function visibleEntries(list: JobUrlEntry[]): JobUrlEntry[] {
   const q = urlQuery.trim().toLowerCase();
-  return list.filter((e) => {
+  // Removed postings stay in the database as tombstones so a sync cannot
+  // resurrect them (see jobUrls.deleteUrl); they are never shown.
+  return visibleUrls(list).filter((e) => {
     if (urlFilter !== 'all' && e.status !== urlFilter) return false;
     if (q && !e.url.toLowerCase().includes(q)) return false;
     return true;
@@ -951,7 +963,9 @@ function urlRow(entry: JobUrlEntry): HTMLElement {
   const sub = document.createElement('div');
   sub.className = 'sub';
   const chip = document.createElement('span');
-  chip.className = `chip ${STATUS_KIND[entry.status]}`.trim();
+  // A status this build does not know (a newer peer's, arriving by sync) gets no
+  // tone rather than a broken class, and is shown under its own name.
+  chip.className = `chip ${STATUS_KIND[entry.status as JobUrlStatus] ?? ''}`.trim();
   chip.textContent = entry.status;
 
   const info = document.createElement('small');
@@ -1059,20 +1073,17 @@ let undoTimer: ReturnType<typeof setTimeout> | undefined;
  * Remove is a single tap on a row that is easy to mis-hit on a phone, and the
  * entry carries a status history that cannot be reconstructed — so it gets a
  * grace period rather than a confirmation dialog in the way of every delete.
+ *
+ * The removal is a tombstone, not a splice, so that a sync from the other device
+ * cannot resurrect it. Undo is then simply the previous status logged again as a
+ * later event, which is also how the other device will read it.
  */
 async function removeWithUndo(entry: JobUrlEntry): Promise<void> {
-  const list = await getJobUrls();
-  const index = list.findIndex((e) => e.url === entry.url);
-  await mutateJobUrls((all) => removeUrl(all, entry.url));
+  await mutateJobUrls((all) => deleteUrl(all, entry.url));
   await renderQueue();
 
   showToast(`Removed ${shortUrl(entry.url)}`, 'Undo', async () => {
-    await mutateJobUrls((all) => {
-      if (all.some((e) => e.url === entry.url)) return all;
-      const next = [...all];
-      next.splice(Math.min(index < 0 ? next.length : index, next.length), 0, entry);
-      return next;
-    });
+    await mutateJobUrls((all) => applyStatus(all, entry.url, entry.status));
     await renderQueue();
   });
 }
@@ -1213,7 +1224,10 @@ async function initUrls(): Promise<void> {
   });
   $('clear-cancel').addEventListener('click', () => { confirmBox.hidden = true; });
   $('clear-really').addEventListener('click', async () => {
-    await saveJobUrls([]);
+    // Tombstone rather than truncate. A bare `saveJobUrls([])` is undone by the
+    // next sync — the other device still holds every entry, and a union can only
+    // grow — so the clear would appear to work and then silently reverse itself.
+    await mutateJobUrls((all) => all.reduce((list, e) => deleteUrl(list, e.url), all));
     await saveJobDetails({});
     confirmBox.hidden = true;
     shownCount = PAGE_SIZE;
@@ -1267,6 +1281,141 @@ async function exportApplied(): Promise<void> {
       : `Exported ${jobs.length} posting(s) — ${missing} with no saved text`,
     'ok',
   );
+}
+
+/* ---------------- Sync ---------------- */
+
+/**
+ * Options → Settings → Sync. Two ways to move the same database: through a
+ * Google account, or as a file you carry yourself. Both end in the same
+ * `mergeJobs`, so importing a backup and syncing cannot disagree about what
+ * combining two databases means.
+ */
+async function initSync(): Promise<void> {
+  const toggle = $<HTMLInputElement>('sync-enabled');
+  const account = $('sync-account');
+  const status = $('sync-status');
+  const fileStatus = $('sync-file-status');
+  const importInput = $<HTMLInputElement>('sync-import-input');
+
+  attachHelp($('sync-heading'), SETTINGS_HELP.syncEnabled);
+  attachRowHelp(toggle, SETTINGS_HELP.syncEnabled);
+
+  toggle.checked = (await getSettings()).syncEnabled;
+  toggle.addEventListener('change', async () => {
+    await saveSettings({ ...(await getSettings()), syncEnabled: toggle.checked });
+    setStatus(status, toggle.checked ? 'Sync on' : 'Sync off', 'ok');
+    await renderSync();
+  });
+
+  /**
+   * Which account, and when it last ran. Written directly rather than through
+   * `setStatus`, which clears anything non-error after three seconds: this is a
+   * standing label, not a transient message, and it is the one thing most likely
+   * to be wrong (the second machine authorized as a different account).
+   */
+  function showAccount(text: string, bad = false): void {
+    account.textContent = text;
+    account.className = `status ${bad ? 'err' : ''}`.trim();
+  }
+
+  async function renderSync(state?: SyncState): Promise<void> {
+    const s = state ?? (await sendBg<SyncState>(MSG.SYNC_STATE));
+    const connected = !!s?.account;
+    $<HTMLButtonElement>('sync-connect').textContent = connected ? 'Switch account' : 'Connect';
+    // Disabled rather than hidden: `.btn` sets a `display`, which beats the UA
+    // stylesheet's `[hidden]`, so a hidden button here is simply a visible one.
+    // It also keeps the row from reflowing under the pointer on connect.
+    $<HTMLButtonElement>('sync-now').disabled = !connected || !toggle.checked;
+    $<HTMLButtonElement>('sync-disconnect').disabled = !connected;
+
+    if (s?.configured === false) {
+      showAccount('Sync is not set up in this build — see src/shared/syncConfig.ts', true);
+    } else if (connected) {
+      const when = s.lastSyncAt ? `last synced ${fmtDate(s.lastSyncAt)}` : 'not synced yet';
+      showAccount(`Syncing through ${s.account} — ${when}`);
+    } else {
+      showAccount('Not connected to a Google account');
+    }
+    if (s?.lastError) setStatus(status, s.lastError, 'err');
+  }
+
+  $('sync-connect').addEventListener('click', async () => {
+    setStatus(status, 'Waiting for Google…');
+    const s = await sendBg<SyncState>(MSG.SYNC_CONNECT);
+    if (!s || 'error' in s) return setStatus(status, String((s as { error?: string })?.error), 'err');
+    setStatus(status, 'Connected. Press Sync now to combine the two databases.', 'ok');
+    await renderSync(s);
+  });
+
+  $('sync-disconnect').addEventListener('click', async () => {
+    // The database stays; only the tokens go. Saying so matters — "disconnect"
+    // reads like "delete" next to a list of sixty postings.
+    await renderSync(await sendBg<SyncState>(MSG.SYNC_DISCONNECT));
+    setStatus(status, 'Disconnected. The job database on this device is untouched.', 'ok');
+  });
+
+  $('sync-now').addEventListener('click', () => void runSync(false));
+
+  async function runSync(confirmed: boolean): Promise<void> {
+    setStatus(status, 'Syncing…');
+    const s = await sendBg<SyncState>(MSG.SYNC_NOW, { confirmed });
+    if (!s) return setStatus(status, 'No answer from the extension', 'err');
+    if (s.pending) {
+      // The one check before the first merge: connecting the wrong account would
+      // fold a stranger's job list into this one, and only the counts show it.
+      showToast(
+        `Combine ${s.pending.remote} posting(s) from ${s.account} with ${s.pending.local} here?`,
+        'Combine',
+        () => void runSync(true),
+      );
+      setStatus(status, 'Waiting for confirmation');
+      return;
+    }
+    await renderSync(s);
+    if (!s.lastError) setStatus(status, 'Synced', 'ok');
+    await renderQueue();
+  }
+
+  /* --- The same database as a file --- */
+
+  $('sync-export').addEventListener('click', async () => {
+    // Same anchor download as the archive export, and for the same reasons: no
+    // `downloads` permission, and a service worker has no `URL.createObjectURL`.
+    const snapshot = await buildSnapshot();
+    const blob = new Blob([JSON.stringify(snapshot)], { type: 'application/json' });
+    const href = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = href;
+    a.download = snapshotFilename(new Date());
+    a.click();
+    URL.revokeObjectURL(href);
+    setStatus(fileStatus, `Exported ${snapshot.jobUrls.length} posting(s)`, 'ok');
+  });
+
+  $('sync-import').addEventListener('click', () => importInput.click());
+  importInput.addEventListener('change', async () => {
+    const file = importInput.files?.[0];
+    if (!file) return;
+    importInput.value = '';
+    try {
+      const before = (await buildSnapshot()).jobUrls.length;
+      const merged = await mergeIntoLocal(parseSnapshot(await file.text()));
+      const added = merged.jobUrls.length - before;
+      setStatus(
+        fileStatus,
+        added > 0
+          ? `Combined — ${added} posting(s) added, ${merged.jobUrls.length} in total`
+          : `Combined — nothing new, ${merged.jobUrls.length} in total`,
+        'ok',
+      );
+      await renderQueue();
+    } catch (e) {
+      setStatus(fileStatus, (e as Error).message, 'err');
+    }
+  });
+
+  await renderSync();
 }
 
 /* ---------------- Getting started ---------------- */
@@ -1377,7 +1526,9 @@ async function main(): Promise<void> {
   initTabs();
   initHelp();
   initGettingStarted();
-  await Promise.all([initProfile(), initCv(), initSettings(), initConfigs(), initSession(), initUrls()]);
+  await Promise.all([
+    initProfile(), initCv(), initSettings(), initConfigs(), initSession(), initUrls(), initSync(),
+  ]);
   await renderGettingStarted();
 
   // Deep link: `#sites&create=<url>` (and the bare `#create=<url>` the popup and
