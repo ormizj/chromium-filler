@@ -216,7 +216,12 @@ pure, unit-tested logic):
   none, so the outline ran up the left of the panel and stopped dead where the
   Queue tab began. The first tab takes a `border-left` and the last a
   `border-right` — only the outer edge of each, since those are the two that
-  continue anything.
+  continue anything. `.tab` has to **name `border-color` even while `border:
+  none`**: the bare `button` rule transitions `border-color`, and the shorthand
+  leaves the colour at its initial `currentColor` — the near-black label colour —
+  so the new hairline appeared at full strength and spent 120ms fading down to
+  `--border`, a visible dark flash on every Queue/Help click. The width appears
+  instantly and cannot animate, so the colour has to be right before it does.
   **Switching tab scrolls to the top** (`selectTab`, only when the tab actually
   changes): the panel underneath is replaced whole, so keeping the offset opened
   the new one halfway down itself. Instant, not smooth — the smooth scroll belongs

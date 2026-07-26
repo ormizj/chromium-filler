@@ -161,6 +161,13 @@ body[data-scroll~='down'] .scrollfade {
   min-height: var(--tap);
   padding: 0 var(--space-5);
   border: none;
+  /* Named even though there is no border to paint yet, because the *selected*
+     first and last tabs grow one (below) and the bare `button` rule transitions
+     `border-color`. `border: none` leaves the colour at its initial
+     `currentColor` — the near-black label colour — so the hairline arrived at
+     full strength and spent 120ms fading down to this. The width appears
+     instantly and cannot animate; the colour must therefore already be right. */
+  border-color: var(--border);
   border-radius: var(--radius-lg) var(--radius-lg) 0 0;
   background: transparent;
   color: var(--muted);
