@@ -9,6 +9,7 @@
     "dev:all": "concurrently -n ext,sites -c green,magenta \"vite build --watch\" \"PRINT_URLS=1 node e2e/server.mjs\"",
     "build": "tsc --noEmit && vite build",
     "package": "bash scripts/package.sh",
+    "icons": "node scripts/generate-icons.mjs",
     "test": "vitest",
     "test:run": "vitest run",
     "test:e2e": "playwright test",
