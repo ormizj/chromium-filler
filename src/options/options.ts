@@ -487,12 +487,18 @@ function initHelp(): void {
       // handoff settles, so that menu is gone by the time anyone reads this. The
       // route below is the one that still exists afterwards — the setup panel
       // holds the handoff open for as long as it is on screen.
+      // Both labels quoted as the surfaces actually draw them. "Set up this site"
+      // is the popup's primary button on a site with *no* config — which this is
+      // not, since it classified and followed one — so here the control is the
+      // popup's "Site setup" link. And the redirect target reads "New tab, close
+      // posting"; sending someone to Settings to find a wording that is not there
+      // is the same errand as naming a button that is not there.
       body: 'It classified the posting as applying on the employer’s site, and followed '
         + 'it. If you catch it in time, the review modal’s ⋯ menu has “Fill this page '
-        + 'instead” — but under the default “new tab, closing the posting” that tab '
+        + 'instead” — but under the default “New tab, close posting” that tab '
         + 'closes itself, so the way back is: turn off “Auto-run when a matching page '
-        + 'loads” in Settings, re-open the posting, and press “Set up this site”. With '
-        + 'auto-run off nothing is classified or followed until you ask, so the posting '
+        + 'loads” in Settings, re-open the posting, and press “Site setup” in the popup. '
+        + 'With auto-run off nothing is classified or followed until you ask, so the posting '
         + 'stays put. Then set a quick-apply marker under Application type so the same '
         + 'board is judged correctly from then on.',
     },

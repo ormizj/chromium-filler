@@ -121,8 +121,12 @@ export const CONFIG_HELP: Record<keyof SiteConfig, HelpEntry> = {
   },
   fieldOverrides: {
     title: 'fieldOverrides',
+    // The CV really is the exception: `saveFieldOverride` special-cases `resume`
+    // into `cvUpload`, so someone looking here for the selector they just picked
+    // on the one row that step counts as work would not find it.
     body: 'An exact selector per profile field, which always beats the built-in '
-      + 'guessing. Each one you save with Pick in the setup panel lands here.',
+      + 'guessing. Each one you save with Pick in the setup panel lands here — except '
+      + 'the CV\'s, which lands in `cvUpload` below.',
     when: 'A field is left grey (not found) or is matched to the wrong input.',
     example: '{ "city": "#candidate_location" }',
   },
@@ -130,7 +134,14 @@ export const CONFIG_HELP: Record<keyof SiteConfig, HelpEntry> = {
     title: 'cvUpload',
     body: 'The file input your CV is attached to, when the automatic search finds the '
       + 'wrong one or none at all.',
-    when: 'The CV row stays grey on a page that clearly takes a file.',
+    // Not "stays grey on a page that clearly takes a file" — the one thing that
+    // cannot happen. `resume` alone gets a fallback onto any unclaimed file input
+    // (`fieldDetect.ts`), so a page with an upload leaves the row *yellow*, which
+    // is the state `stepStates` words as "CV upload needs checking". Waiting for
+    // grey is the mirror of the yellow-dot hunt `CONCEPT_HELP.dots` was fixed for.
+    when: 'The CV row is yellow, or points at the wrong upload. An unlabelled file '
+      + 'input is claimed as the CV on a guess, so a page with more than one needs a '
+      + 'selector here to settle which.',
     example: 'input[type=file][name=resume]',
   },
   submitCv: {
@@ -170,9 +181,14 @@ export const CONFIG_HELP: Record<keyof SiteConfig, HelpEntry> = {
   },
   successSelector: {
     title: 'successSelector',
+    // Not "and triggers auto-close": closing the tab is `closeTabOnSubmit`, which
+    // is off by default, so the promised outcome never happened on a fresh
+    // install. This body is quoted into the wizard's last step as well, where it
+    // is the first thing anyone reads about the confirmation element.
     body: 'The element that only appears once the application really went through — a '
       + 'thank-you banner or confirmation panel. This is what marks the posting '
-      + 'applied and triggers auto-close. It counts only once that element is on '
+      + 'applied, and what “Auto-close the tab after I apply” waits for when that is on. '
+      + 'It counts only once that element is on '
       + 'screen, never merely present in the page\'s HTML, because sites routinely '
       + 'ship a hidden success node and reveal it when the server answers.',
     // Two ways in, not one. `applyStatusChain` walks `sourceUrl`, so a board
