@@ -177,19 +177,55 @@ describe('application-type step', () => {
 });
 
 describe('job-info step', () => {
-  it('counts every row that is not a confident match', () => {
+  it('counts a title or description the modal could not find', () => {
     const s = state(snapshot({
-      containers: [row(), row({ status: 'low' }), row({ status: 'none' })],
+      containers: [row({ key: 'jobTitle', status: 'low' }), row({ key: 'jobDescription', status: 'none' })],
     }), 'info');
     expect(s.todo).toBe(2);
     expect(s.tone).toBe('warn');
     expect(s.summary).toMatch(/2 to do/);
   });
 
+  /**
+   * The requirements row is this step's `resume`, inverted: it is the one row
+   * whose unset state is never work. `content/extract.ts` gives `jobTitle` and
+   * `jobDescription` generic fallbacks and gives `jobRequirements` *none*, so a
+   * posting with no separate requirements block — which is most of them — can
+   * only ever report it as `none`. Counted, that was "1 to do" on every site in
+   * the world, on a step whose own help calls its rows optional.
+   */
+  it('ignores a requirements block the posting does not have', () => {
+    const s = state(snapshot({
+      containers: [
+        row({ key: 'jobTitle' }),
+        row({ key: 'jobDescription' }),
+        row({ key: 'jobRequirements', status: 'none', note: 'not set' }),
+      ],
+    }), 'info');
+    expect(s.todo).toBe(0);
+    expect(s.tone).toBe('ok');
+  });
+
   it('is settled when every row matched', () => {
     const s = state(snapshot(), 'info');
     expect(s.todo).toBe(0);
     expect(s.tone).toBe('ok');
+  });
+
+  /**
+   * The whole point of the exemption: the panel a returning user opens on is
+   * `firstStepWithWork`, so a requirements row that always counts sent everyone
+   * to Job info on a site with nothing outstanding anywhere.
+   */
+  it('leaves a fully configured site with no step outstanding', () => {
+    const states = stepStates(snapshot({
+      containers: [
+        row({ key: 'jobTitle' }),
+        row({ key: 'jobDescription' }),
+        row({ key: 'jobRequirements', status: 'none', note: 'not set' }),
+      ],
+    }));
+    expect(firstStepWithWork(states)).toBe(-1);
   });
 });
 

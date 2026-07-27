@@ -143,10 +143,30 @@ export interface StepState {
 
 type Part = Omit<StepState, 'key' | 'index'>;
 
-/** Rows are work whenever they are not a confident match — the job-info rule. */
-function fromRows(rows: SetupRow[]): Part {
-  if (!rows.length) return { tone: 'none', todo: 0, summary: 'nothing to set' };
-  const todo = rows.filter((r) => r.status !== 'high').length;
+/**
+ * Job info: a title or description the modal could not find is work, and the
+ * requirements row never is.
+ *
+ * `content/extract.ts` gives `jobTitle` and `jobDescription` generic fallbacks
+ * (`h1`, `main`, `article`, `[class*="description"]` …) and gives
+ * `jobRequirements` **none** — deliberately, because no substring of a class name
+ * reliably means "requirements". So on a posting with no separate requirements
+ * block, which is most of them, that row can only ever come back `none`, and
+ * counting it put a permanent "1 to do" on every site in the world — beside a
+ * step whose own help calls its rows optional, and directly under
+ * `CONCEPT_HELP.todoChip`'s promise that a step with no chip can be ignored.
+ *
+ * Same shape of exemption as `fields`' (which counts the CV alone) and `kind`'s
+ * ("not set" is the healthy state): the step counts what it is *for*, not how
+ * many rows are grey. The other two rows still count, because a modal that
+ * cannot find the title or the body really has nothing to show.
+ */
+const INFO_OPTIONAL = new Set(['jobRequirements']);
+
+function info(s: SetupSnapshot): Part {
+  if (!s.containers.length) return { tone: 'none', todo: 0, summary: 'nothing to set' };
+  const todo = s.containers
+    .filter((r) => !INFO_OPTIONAL.has(r.key) && r.status !== 'high').length;
   if (todo) return { tone: 'warn', todo, summary: `${todo} to do` };
   return { tone: 'ok', todo: 0, summary: 'all found' };
 }
@@ -239,7 +259,7 @@ const PARTS: Record<SetupStepKey, (s: SetupSnapshot) => Part> = {
   site,
   prep,
   kind,
-  info: (s) => fromRows(s.containers),
+  info,
   fields,
   send,
 };

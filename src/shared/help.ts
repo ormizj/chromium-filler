@@ -516,7 +516,14 @@ export const SETUP_STEP_HELP: Record<SetupStepKey, GroupHelp> = {
     body: 'These point at the posting\'s title, description and requirements so the '
       + 'review modal can show the job itself — the thing you actually need in order to '
       + 'decide whether to send it. They have no effect on filling.',
-    when: 'Optional. Unset just means the modal shows less.',
+    // Which of the three are chased, and why it is not all of them: the title and
+    // the description are guessed from generic fallbacks and so are worth
+    // flagging when even those find nothing, while requirements has no fallback
+    // at all — counting it reported "1 to do" on every site that simply has no
+    // requirements block, which is most of them.
+    when: 'Optional. Unset just means the modal shows less — and the requirements row '
+      + 'is never chased at all, because plenty of postings have no separate '
+      + 'requirements block to point at.',
     rows: [
       { label: 'Job title', body: 'The heading — usually the page\'s `h1`.' },
       {
@@ -688,10 +695,12 @@ export const CONCEPT_HELP: Record<ConceptKey, HelpEntry> = {
       + 'that asks for four things leaves a dozen grey rows and no chip. “Application '
       + 'type” counts only a selector you saved that has stopped matching, since “not '
       + 'set” is the healthy state there. “Sending” counts a missing Send button or a '
-      + 'missing confirmation element. “Site” counts a blank URL pattern, “Job info” '
-      + 'counts every row that is not a confident match, and “Page actions” never '
-      + 'counts: a step that has not run yet is its normal state. A step with no chip '
-      + 'can be ignored.',
+      + 'missing confirmation element. “Site” counts a blank URL pattern. “Job info” '
+      + 'counts a title or description the modal could not find, but never the '
+      + 'requirements row — that one has no automatic fallback, so “not set” is simply '
+      + 'what a posting without a separate requirements block looks like. And “Page '
+      + 'actions” never counts: a step that has not run yet is its normal state. A step '
+      + 'with no chip can be ignored.',
   },
   picker: {
     title: 'Pick / Re-pick / Clear',
