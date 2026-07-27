@@ -50,10 +50,22 @@ function stampBuildId(): Plugin {
   };
 }
 
-export default defineConfig({
+/**
+ * `--mode store` is the Chrome Web Store build (see scripts/package.sh). The
+ * only thing it changes is minification, and the reason is the review: minified
+ * code is allowed — obfuscation is what the policy bans — but "hard-to-review
+ * code" is named in Chrome's own review-process page as a thing that draws extra
+ * scrutiny, and this extension already asks for `<all_urls>`. So the archive a
+ * reviewer opens carries the code as authored. Every other build stays minified.
+ *
+ * A mode rather than an env var because `types` in tsconfig.json deliberately
+ * excludes Node's globals, so `process.env` does not type-check here.
+ */
+export default defineConfig(({ mode }) => ({
   plugins: [crx({ manifest }), stampBuildId()],
   build: {
     target: 'es2022',
+    minify: mode === 'store' ? false : 'esbuild',
     // MV3 content scripts must not rely on runtime ESM imports; @crxjs handles
     // wrapping, but keep chunking predictable for the service worker/content.
     rollupOptions: {},
@@ -63,4 +75,4 @@ export default defineConfig({
     strictPort: true,
     hmr: { port: 5173 },
   },
-});
+}));
