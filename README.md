@@ -79,7 +79,9 @@ npm test          # Vitest watch (unit + integration, TDD)
 npm run test:run  # Vitest once (CI-style)
 npm run typecheck # tsc --noEmit
 npm run build     # typecheck + vite build -> dist/
-npm run package   # build, then zip dist/ as chromium-filler-v<version>.zip
+npm run build:store # same, unminified (vite build --mode store)
+npm run package   # build both release zips (see below)
+npm run screenshots # regenerate the store screenshots from the built extension
 
 # End-to-end: loads the built extension into real Chromium and drives the
 # fixture sites. Requires the browser once: `npx playwright install chromium`.
@@ -90,6 +92,39 @@ The E2E suite (`e2e/extension.spec.ts`) is the confidence signal: 57 specs run
 the whole pipeline (wait → prep → classify → detect → fill → CV → Apply →
 success-watch → auto-close) against 13 deliberately nasty fixture pages, plus
 popup/options render and size checks. If it's green, real boards should behave.
+
+### The two zips
+
+`npm run package` produces **two** archives, and they are not interchangeable.
+The difference that matters is where `manifest.json` sits: Chrome Web Store
+uploads must have it at the archive root, and "Load unpacked" wants a folder.
+
+|                      | `chromium-filler-v<version>.zip`         | `chromium-filler-v<version>-store.zip`      |
+| -------------------- | ---------------------------------------- | ------------------------------------------- |
+| **Use it for**       | GitHub releases, handing to a tester, mobile sideloading | The Chrome Web Store upload — nothing else |
+| **Archive layout**   | everything nested under `chromium-filler/` | `manifest.json` at the archive **root**     |
+| **Unzips to**        | one clean `chromium-filler/` folder       | its contents, loose in the current directory |
+| **Code**             | minified (`npm run build`)                | unminified (`npm run build:store`)          |
+| **Size**             | ~97 KB                                    | ~171 KB                                     |
+
+**Why the store copy is unminified.** Minification is allowed — obfuscation is
+what the policy bans — but Chrome's review-process page names "hard-to-review
+code" as something that draws extra scrutiny, and this extension already asks for
+`<all_urls>`, which routes it to in-depth review regardless. The reviewer reading
+`getSettings` instead of `f` costs nothing and can only help. `--mode store` is
+the *only* thing that changes; the manifest, the version and the behaviour are
+identical.
+
+`package.sh` asserts the root manifest and fails the build if it is ever missing,
+because that mistake is silent until the store rejects the upload. It also builds
+the store copy **last**, so whatever is left in `dist/` afterwards is the readable
+build — the one to load unpacked while reproducing something a reviewer reports.
+
+Loading either one by hand still needs `chrome://extensions` → Developer mode →
+**Load unpacked**, pointed at an unzipped folder. Note that an unpacked
+extension's ID is derived from its install path, so a tester's copy is a
+different extension to Google than yours — which matters for sync, and is what
+the commented-out `key` in `manifest.config.ts` is for.
 
 ## Running it while you work on it
 
