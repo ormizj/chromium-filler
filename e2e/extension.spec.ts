@@ -1686,6 +1686,66 @@ test('Setup: an edit re-renders the panel without losing your place in the wizar
 });
 
 /**
+ * The Send row must say which selector actually found the button.
+ *
+ * `findSubmitControl` falls through to the label heuristic when a saved
+ * `submitSelector` stops resolving — a site changing its markup under a
+ * selector the user picked months ago is the ordinary way there. The row used
+ * to key its note off whether a selector was *saved* rather than whether it was
+ * *used*, so it read `saved · button.gone` — naming a selector that had matched
+ * nothing and crediting it with a button the guessing had found. Nothing in the
+ * panel then said the save had stopped applying.
+ *
+ * Only a real browser can see it: the note is built in `refreshSetup` against a
+ * live document, and it takes a page whose heuristic genuinely finds a Send
+ * button for the fall-through to have anything to fall through to.
+ */
+test('Setup: a saved Send selector that stopped matching says so, and credits the guess', async () => {
+  const setSubmitSelector = (selector: string | null) =>
+    onExtensionPage((opts) => opts.evaluate(async (sel) => {
+      const { siteConfigs } = await chrome.storage.local.get('siteConfigs');
+      for (const c of siteConfigs) {
+        if (c.id !== 'quick-board') continue;
+        if (sel) c.submitSelector = sel;
+        else delete c.submitSelector;
+      }
+      await chrome.storage.local.set({ siteConfigs });
+    }, selector));
+
+  const page = await context.newPage();
+  try {
+    await setSubmitSelector('#a-button-this-page-does-not-have');
+    await page.setViewportSize({ width: 390, height: 780 });
+    await page.goto(urlFor('quick-plain'));
+    await expect(page.locator('.cf-card[data-sheet="review"]')).toBeVisible({ timeout: 20_000 });
+
+    await openSetupPanel(page);
+    const setup = page.locator('.cf-card[data-sheet="setup"]');
+    await expect(setup).toBeVisible({ timeout: 20_000 });
+
+    // Step 6 — "Sending" — whatever the panel opened on.
+    await setup.locator('.cf-rail-node').nth(5).click();
+    await expect(setup.locator('.cf-step-count')).toHaveText('Step 6 of 6');
+
+    // By its Pick button's key, not by its position: `send:submitSelector` is
+    // what the row *is*, and the step carries two rows of the same shape.
+    const row = setup.locator('.cf-row', { has: page.locator('[data-k="send:submitSelector"]') });
+    const note = row.locator('.cf-field small');
+
+    await expect(note).toContainText('saved selector · no match');
+    // The heuristic found the real button, and the row credits it rather than
+    // the selector that missed.
+    await expect(note).toContainText('auto ·');
+    expect(await note.textContent()).not.toMatch(/^saved · /);
+    // Yellow, as it already was — found, but not settled.
+    await expect(row.locator('.cf-dot')).toHaveClass(/warn/);
+  } finally {
+    await setSubmitSelector(null);
+    await page.close();
+  }
+});
+
+/**
  * The rest of "an edit does not start fresh", and the half only a real browser
  * can see: jsdom does no layout, so `scrollTop` there never leaves 0.
  *

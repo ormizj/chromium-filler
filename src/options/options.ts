@@ -1870,7 +1870,15 @@ async function renderGettingStarted(): Promise<void> {
       done: configs.some((c) => c.id !== 'example-fixture'),
     },
     {
-      label: 'Start a session',
+      // Named for what the tick actually means. Nothing here requires a
+      // session: "Open all new now" flips every posting to `opened`, applying
+      // or skipping writes a status, and a sync can arrive carrying finished
+      // ones — so a step reading "Start a session" ticked itself with the
+      // session panel never touched. There is no persistent "a session was
+      // started" record to test instead, so the label is what moves. The Go
+      // button still points at the session panel: starting one is the way to do
+      // this that the extension is built around.
+      label: 'Open some postings from the queue',
       done: urls.some((u) => u.status !== 'new'),
       tab: 'queue',
       at: 'session-panel',

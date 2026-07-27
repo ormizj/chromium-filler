@@ -1,6 +1,6 @@
 /**
  * Popup: shows whether the current page matches a site config, offers a
- * state-aware Fill / Show report / Reset & Re-run button, and reports where you
+ * state-aware Fill / Show report / Reset button, and reports where you
  * are in a running queue session.
  */
 
@@ -81,9 +81,14 @@ function render(): void {
         : `${status.siteName}${via}: ready to fill.`;
     primary.disabled = false;
     // With the report collapsed, the useful action is to bring it back — not to
-    // wipe every field that was just filled, which is what re-running does.
+    // wipe every field that was just filled, which is what resetting does.
+    //
+    // "Reset" and not "Reset & Re-run": the press only resets. It blanks the
+    // fields, throws the report away and puts this button back to Fill — and
+    // that second press is deliberately the user's (see the click handler). A
+    // label has to say what one press does.
     primary.textContent = status.hasRun
-      ? (status.modalMinimized ? 'Show report' : 'Reset & Re-run')
+      ? (status.modalMinimized ? 'Show report' : 'Reset')
       : 'Fill';
   } else {
     badge.textContent = 'no config';
@@ -105,7 +110,12 @@ function renderSession(): void {
   // chips below, where applied / skipped / waiting read at a glance.
   sessionCount.textContent = `${p.done}`;
   sessionTotal.textContent = ` / ${p.total}`;
-  sessionDetail.textContent = 'postings done this session';
+  // "in the queue", not "this session": `queueProgress` counts applied, skipped
+  // and redirected across the whole visible database against its whole length
+  // (`shared/queue.ts`), not against the postings this session has opened. Read
+  // as a session tally it told anyone with a backlog that 40 of their 60
+  // postings were done before the session's first one had been looked at.
+  sessionDetail.textContent = 'postings done in the queue';
   sessionBar.style.width = `${Math.round(p.ratio * 100)}%`;
   renderSessionChips(p.applied, p.skipped, p.queued);
   // Only offer Skip for a page that is actually one of the session's postings.

@@ -374,6 +374,13 @@ class Controller {
     } catch (e) {
       console.warn(LOG, 'follow-redirect message failed', e);
     }
+    // Nothing was opened, so the banner must not say it was. `followed` is what
+    // picks `externalOpened` over `external`, and that state promises "the form
+    // there is filled on arrival" — on an undelivered message (an MV3 worker
+    // that had gone to sleep) or a refusal (`no tab`, `app link`) there is
+    // neither a form nor an arrival. Dropping back to `external` also leaves the
+    // footer's "Open application" live, which is the one thing that recovers it.
+    if (!resp || resp.error) this.followed = false;
     this.showModal();
 
     if (resp?.navigate) { location.href = resp.navigate; return; }
@@ -542,7 +549,7 @@ class Controller {
         onOpenOptions: () => chrome.runtime.sendMessage({ type: MSG.OPEN_OPTIONS }),
         // Collapse to the pill rather than destroying the report: the fills stay
         // in place and the modal is one tap away, instead of only reachable
-        // through a Reset & Re-run that would wipe them.
+        // through a Reset that would wipe them.
         onClose: () => this.modal?.minimize(),
         onFold: () => this.arbitrateSheets('modal'),
         onLayoutChange: (layout) => { this.draggedLayout = layout; },
@@ -604,8 +611,8 @@ class Controller {
    * that just claimed the slot; everything else folds to its pill.
    *
    * Folding, never destroying: a destroyed review modal takes the fill report with
-   * it, and the only route back used to be a Reset & Re-run that wiped every field
-   * it had just filled.
+   * it, and the only route back used to be a Reset that wiped every field it
+   * had just filled.
    *
    * Then the pills. A collapsed sheet shows one only when *nothing* is expanded —
    * both pills dock bottom-right, which is where an expanded card already is, and
@@ -899,14 +906,26 @@ class Controller {
       detected.map((d) => d.element).filter((e): e is HTMLElement => e != null),
     );
     if (found.element) highlight(found.element, found.source === 'override' ? 'high' : 'low');
+    const foundLabel = found.element
+      ? clip(found.element.textContent ?? '', 40) || generateSelector(found.element)
+      : '';
     const submitRow: SetupRow = {
       key: 'submitSelector',
       label: 'Send button',
       status: found.element ? (found.source === 'override' ? 'high' : 'low') : 'none',
-      note: !config.submitSelector
-        ? (found.element ? `auto · ${clip(found.element.textContent ?? '', 40) || generateSelector(found.element)}` : 'not found — Apply is greyed out')
-        : found.element ? `saved · ${config.submitSelector}`
-        : 'saved selector · no match',
+      // Branch on which selector actually produced the control, not on whether
+      // one is saved. `findSubmitControl` falls through to the label heuristic
+      // when a saved selector stops resolving, so `saved · …` there named a
+      // selector that had matched nothing and credited it with a button the
+      // guessing had found — the one row where "saved beats the guessing every
+      // time" is not true. The dot already keys off `found.source`; only the
+      // words did not.
+      note: found.source === 'override' ? `saved · ${config.submitSelector}`
+        : found.element
+          ? `${config.submitSelector ? 'saved selector · no match — ' : ''}auto · ${foundLabel}`
+          : config.submitSelector
+            ? 'saved selector · no match — Apply is greyed out'
+            : 'not found — Apply is greyed out',
       hasSave: !!config.submitSelector,
     };
 
@@ -1195,8 +1214,8 @@ class Controller {
   /**
    * Blank every field we filled and throw the card away.
    *
-   * Reached only through `MSG.RESET`, i.e. the popup's "Reset & Re-run". It used
-   * to sit in the review modal's `⋯` as well, which put an unconfirmed wipe of
+   * Reached only through `MSG.RESET`, i.e. the popup's "Reset". It used to sit
+   * in the review modal's `⋯` as well, which put an unconfirmed wipe of
    * the whole fill — and of the report describing it — one tap from Site setup,
    * on the surface whose entire job is showing what was filled. The popup is the
    * right home for it: there, starting over is what the button is for.

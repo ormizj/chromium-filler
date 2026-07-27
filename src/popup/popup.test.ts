@@ -96,10 +96,13 @@ describe('popup render', () => {
     expect(primary.disabled).toBe(false);
   });
 
-  it('matched, has run: shows filled/reported counts and Reset & Re-run', async () => {
+  // "Reset", not "Reset & Re-run": one press resets and stops there, which is
+  // deliberate (see the test below). A label naming an action the button does
+  // not take is the drift `labels.ts` exists to keep out of the vocabulary.
+  it('matched, has run: shows filled/reported counts and Reset', async () => {
     await mountPopup(matched({ hasRun: true, filledCount: 5, reportedCount: 6 }));
     expect(document.getElementById('detail')!.textContent).toContain('5/6 fields filled');
-    expect((document.getElementById('primary') as HTMLButtonElement).textContent).toBe('Reset & Re-run');
+    expect((document.getElementById('primary') as HTMLButtonElement).textContent).toBe('Reset');
   });
 
   it('no config: prompts to set one up visually, button enabled', async () => {
@@ -145,7 +148,7 @@ describe('popup render', () => {
   });
 
   /** Reset does not: it puts the button back to Fill, which is what to press next. */
-  it('Reset & Re-run leaves the popup open on a Fill button', async () => {
+  it('Reset leaves the popup open on a Fill button', async () => {
     await mountPopup(matched({ hasRun: true, filledCount: 3, reportedCount: 5 }));
     recordTabMessages(matched());
     (document.getElementById('primary') as HTMLButtonElement).click();
@@ -279,10 +282,10 @@ describe('first-run nudge', () => {
 
 describe('minimized report', () => {
   /**
-   * The close button used to destroy the report, leaving "Reset & Re-run" — a
+   * The close button used to destroy the report, leaving "Reset" — a
    * destructive action — as the only way back. Collapsed now means restorable.
    */
-  it('offers Show report instead of Reset & Re-run when the modal is collapsed', async () => {
+  it('offers Show report instead of Reset when the modal is collapsed', async () => {
     await mountPopup(matched({ hasRun: true, filledCount: 5, reportedCount: 6, modalMinimized: true }));
     expect((document.getElementById('primary') as HTMLButtonElement).textContent).toBe('Show report');
   });

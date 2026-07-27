@@ -885,11 +885,22 @@ export const CONCEPT_HELP: Record<ConceptKey, HelpEntry> = {
  * The dot key, as rows rather than prose — a colour is explained by showing the
  * colour next to its meaning, not by naming it in a paragraph. `status` matches
  * the `.cf-dot` modifier classes in primitives.css.
+ *
+ * It is rendered in exactly one place — the setup panel's legend — so each line
+ * has to describe *that panel's* dots, and to agree with `CONCEPT_HELP.dots`
+ * three lines below it. Two of them used to do neither. "a saved selector that
+ * no longer matches" is true of the redirect rows alone: on a form field the
+ * guessing takes back over (`auto ·` again, or `not found`, and no yellow) and
+ * on a job-info row it goes grey — so the line sent someone hunting for a
+ * yellow dot that cannot appear, while omitting what yellow is mostly drawn
+ * for. And "press Pick" read as an instruction on every grey row, when grey is
+ * the healthy resting state of the redirect rows and of the dozen profile
+ * fields a short form never asks for.
  */
 export const DOT_LEGEND: Array<{ status: 'high' | 'low' | 'none'; label: string }> = [
   { status: 'high', label: 'matched — nothing to do' },
-  { status: 'low', label: 'a guess, or a saved selector that no longer matches' },
-  { status: 'none', label: 'nothing found — press Pick' },
+  { status: 'low', label: 'found something, but it is not settled' },
+  { status: 'none', label: 'nothing found — often fine; Pick it if this page asks for it' },
 ];
 
 /* ---------------- Config → sentence ---------------- */

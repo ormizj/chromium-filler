@@ -83,7 +83,7 @@ export interface StatusResponse {
   landedFrom?: string;
   /**
    * The review modal is collapsed to its pill. The popup offers "Show report"
-   * instead of the destructive "Reset & Re-run" when this is set.
+   * instead of the destructive "Reset" when this is set.
    */
   modalMinimized?: boolean;
 }

@@ -458,8 +458,8 @@ describe('FillerModal — the footer offers Apply and Skip', () => {
    * Reset blanked every field the extension had just filled and destroyed the
    * card with the report on it — an unconfirmed, unundoable wipe one tap from
    * Site setup, on the one surface whose whole job is showing what was filled.
-   * The popup's "Reset & Re-run" still reaches `Controller.reset()`, from a
-   * surface where wiping the page is the point of pressing the button.
+   * The popup's "Reset" still reaches `Controller.reset()`, from a surface
+   * where wiping the page is the point of pressing the button.
    */
   it('does not offer Reset', () => {
     expect(menu(render(data([match()])))).not.toContain('Reset');

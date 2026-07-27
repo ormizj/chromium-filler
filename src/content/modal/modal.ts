@@ -16,7 +16,7 @@
  * three taps through the browser menu, so the modal carries the session actions
  * too, and closing it collapses to a pill instead of destroying it — the old
  * close button threw the report away, and the only route back (the popup's
- * "Reset & Re-run") wiped every field it had just filled.
+ * "Reset") wiped every field it had just filled.
  */
 
 import type { FieldKey, FieldMatch, MatchConfidence } from '../../shared/types';
