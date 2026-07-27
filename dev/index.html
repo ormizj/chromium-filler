@@ -98,7 +98,13 @@
                the only thing that says why the button was left alone. -->
           <a href="./frame.html?page=modal&amp;state=app-link">applies in an app</a>
           <a href="./frame.html?page=modal&amp;state=landed">landed (via)</a>
-          <a href="./frame.html?page=modal&amp;state=empty">nothing found</a>
+          <!-- Two different things, and they were one link reaching only the
+               second. `empty` is an empty *profile* — the report has no rows,
+               which is the only way that banner can fire — and `listing` is a
+               results page whose fields all went unrecognised, which is where
+               the blocked Apply really shows up. -->
+          <a href="./frame.html?page=modal&amp;state=empty">nothing to fill with</a>
+          <a href="./frame.html?page=modal&amp;state=listing">listing page</a>
           <!-- The three flow-banner states. Each is a distinct rendering of the
                card and none of them was reachable from here, which is most of why
                the confirmed state went unlooked-at for so long. -->

@@ -97,12 +97,26 @@ export const FLOW_TEXT: Record<FlowKey, FlowText> = {
     title: 'Apply is unavailable here',
     detail: 'No Send button was found on this page. Open Site setup and pick it.',
   },
+  // `applyState` tests the confirmation *before* the button, so a site missing
+  // both only ever reaches this one — and the old wording sent the user off to
+  // set the confirmation, only for Apply to stay grey with a new complaint. Both
+  // rows live on the same step, so naming the step rather than the row costs a
+  // word and ends the second trip.
   noConfirmation: {
     title: 'Apply is unavailable here',
-    detail: 'This site has no confirmation element set, so a result cannot be read back. Set it in Site setup.',
+    detail: 'This site has no confirmation element set, so a result cannot be read back. Set it under Site setup → Sending, along with the Send button if that is unset too.',
   },
   ready: { title: 'Filled — nothing has been sent yet', detail: 'ready to review' },
-  empty: { title: 'Nothing to fill on this page', detail: 'No application form was found here.' },
+  // Not "no form was found here". This state is reached when the *report* has no
+  // rows, and `main.ts` builds one row per field it has something to fill with —
+  // so zero rows means an empty profile and nothing else. A page whose fields all
+  // went unrecognised still reports a row each and lands on `ready`. The old
+  // wording blamed the site for the one thing only the profile can cause, on the
+  // run the getting-started checklist walks every new user through.
+  empty: {
+    title: 'Nothing to fill with yet',
+    detail: 'Your profile is empty — add your details and your CV in Options → Profile.',
+  },
 };
 
 /**

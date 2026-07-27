@@ -21,12 +21,19 @@ import { accessToken } from './googleAuth';
 const FILES = 'https://www.googleapis.com/drive/v3/files';
 const UPLOAD = 'https://www.googleapis.com/upload/drive/v3/files';
 
-/** A file's identity and the version any write must be based on. */
+/**
+ * A file's identity and the version any write must be based on.
+ *
+ * `version` is the only write token here, deliberately. There was an `etag`
+ * beside it, read off the *list* response — which describes the query, not the
+ * file — and replayed as an `If-Match` precondition on the upload. Drive v3
+ * dropped resource etags and ignores it, which is the only reason that ever
+ * worked: honoured, it would have failed every write on a single device.
+ */
 export interface RemoteFile {
   id: string;
   /** Drive's own change counter — the compare-and-swap token. */
   version?: string;
-  etag?: string;
 }
 
 export interface RemoteDocument {
@@ -42,11 +49,25 @@ export class RemoteConflictError extends Error {
   }
 }
 
+/**
+ * A Drive request carrying the access token, retried once if Drive says the
+ * token is no good.
+ *
+ * Expiry is otherwise judged only against `expiresAt` on this machine's clock,
+ * so a skewed clock, a revoked consent or a token retired early all look fine
+ * here — and every call for the next hour failed with "Invalid Credentials"
+ * while a refresh was one request away.
+ */
 async function authed(url: string, init: RequestInit = {}): Promise<Response> {
-  const token = await accessToken();
-  const headers = new Headers(init.headers);
-  headers.set('Authorization', `Bearer ${token}`);
-  return fetch(url, { ...init, headers });
+  const send = async (token: string): Promise<Response> => {
+    const headers = new Headers(init.headers);
+    headers.set('Authorization', `Bearer ${token}`);
+    return fetch(url, { ...init, headers });
+  };
+
+  const res = await send(await accessToken());
+  if (res.status !== 401) return res;
+  return send(await accessToken(true));
 }
 
 async function fail(res: Response, what: string): Promise<never> {
@@ -60,19 +81,35 @@ async function fail(res: Response, what: string): Promise<never> {
   throw new Error(`${what}: ${detail}`);
 }
 
+/**
+ * The one `jobs.json`, or nothing.
+ *
+ * More than one is possible: Drive allows same-named siblings, and two devices
+ * that connect the same account and first sync together can each get past the
+ * `create` guard. That used to be asked with `pageSize: 1` and no ordering, so
+ * each device could settle on a *different* copy and the two would then appear
+ * to sync happily for ever while diverging. Asking for several and picking by
+ * id — the same choice on every device — is what makes them agree again.
+ */
 async function locate(): Promise<RemoteFile | undefined> {
   const query = new URLSearchParams({
     spaces: 'appDataFolder',
     q: `name = '${SYNC_FILENAME}' and trashed = false`,
     fields: 'files(id,version)',
-    pageSize: '1',
+    pageSize: '10',
   });
   const res = await authed(`${FILES}?${query}`);
   if (!res.ok) await fail(res, 'Could not look in the Drive app folder');
   const body = (await res.json()) as { files?: Array<{ id: string; version?: string }> };
-  const found = body.files?.[0];
-  if (!found) return undefined;
-  return { id: found.id, version: found.version, etag: res.headers.get('etag') ?? undefined };
+  const found = [...(body.files ?? [])].sort((a, b) => a.id.localeCompare(b.id));
+  if (found.length === 0) return undefined;
+  if (found.length > 1) {
+    console.warn(
+      `[chromium-filler:sync] ${found.length} copies of ${SYNC_FILENAME} in the app folder;`
+      + ` syncing through ${found[0].id}. The others are being left alone.`,
+    );
+  }
+  return { id: found[0].id, version: found[0].version };
 }
 
 /** The remote copy, or an empty result when this account has never synced. */
@@ -124,9 +161,12 @@ export async function upload(text: string, base?: RemoteFile): Promise<RemoteFil
   if (!current) throw new RemoteConflictError();
   if (current.version !== base.version) throw new RemoteConflictError();
 
+  // `If-Match: *` is only "as long as it still exists" — the version check above
+  // is what actually guards the write. Anything narrower would have to come from
+  // the file itself, and Drive v3 does not offer it.
   const res = await authed(`${UPLOAD}/${base.id}?uploadType=media&fields=id,version`, {
     method: 'PATCH',
-    headers: { 'Content-Type': 'application/json', 'If-Match': base.etag ?? '*' },
+    headers: { 'Content-Type': 'application/json', 'If-Match': '*' },
     body: text,
   });
   if (res.status === 412) throw new RemoteConflictError();

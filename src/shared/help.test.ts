@@ -42,6 +42,20 @@ describe('help catalog', () => {
   });
 
   /**
+   * A row built from a catalog entry has to carry that entry's example with it.
+   * The concrete selector is what the wizard is missing at the moment it matters
+   * — you are on the step, about to press Pick — and it already exists one
+   * surface away, on the Sites reference. Asserted through the entry rather than
+   * against a literal, because a second copy of the string is the drift this
+   * whole file exists to prevent.
+   */
+  it('carries the catalog example onto the row that quotes it', () => {
+    const row = SETUP_STEP_HELP.kind.rows?.find((r) => r.label === 'Quick-apply marker');
+    expect(row?.example).toBe(REDIRECT_HELP.quickApplySelector.example);
+    expect(row?.example?.trim()).toBeTruthy();
+  });
+
+  /**
    * The legend is read at a glance, above the work itself. The first attempt
    * used the full bodies and filled an entire phone screen with prose before
    * the user could reach a single row.
@@ -51,6 +65,38 @@ describe('help catalog', () => {
       const short = CONCEPT_HELP[key].short;
       expect(short, key).toBeTruthy();
       expect(short!.length, `${key} is too long for a legend line`).toBeLessThan(90);
+    }
+  });
+
+  /**
+   * `richText` renders backticks and nothing else — no bold, no italic. A
+   * `*word*` therefore ships as two literal asterisks on the Sites reference,
+   * the Help tab and every `?` that quotes the entry, and nothing else here
+   * would fail: the shape rules above only ask that a body be non-empty.
+   *
+   * The backtick spans come out first, because several bodies legitimately
+   * quote `*` as the URL-pattern glob. `example` is exempt for the same reason
+   * from the other side — it is rendered as a whole `<code>`, never through
+   * `richText`.
+   */
+  it('never uses an emphasis mark no surface can render', () => {
+    const prose = (entry: HelpEntry): Array<[string, string]> => [
+      ['body', entry.body],
+      ...(entry.when ? [['when', entry.when] as [string, string]] : []),
+      ...(entry.short ? [['short', entry.short] as [string, string]] : []),
+    ];
+    const outsideCode = (text: string) =>
+      text.split('`').filter((_, i) => i % 2 === 0).join('');
+
+    for (const [key, entry] of ALL) {
+      for (const [field, text] of prose(entry)) {
+        expect(outsideCode(text), `${key}.${field}`).not.toMatch(/[*_]/);
+      }
+    }
+    for (const [key, group] of Object.entries(SETUP_STEP_HELP)) {
+      for (const row of group.rows ?? []) {
+        expect(outsideCode(row.body), `${key}.${row.label}`).not.toMatch(/[*_]/);
+      }
     }
   });
 
@@ -93,7 +139,10 @@ describe('describeConfig', () => {
     expect(text).toContain('15s');
   });
 
-  it('counts prep steps and says what the first one does', () => {
+  // "Page actions" is what the wizard's second step is called, so that is what
+  // these are named here too — "setup step" collided with the wizard's own
+  // numbered steps, which is two vocabularies wearing one word.
+  it('counts page actions and says what the first one does', () => {
     const text = describeConfig({
       ...base,
       prep: [
@@ -102,13 +151,41 @@ describe('describeConfig', () => {
       ],
     });
     expect(text).toContain('#apply');
-    expect(text).toMatch(/2 (setup )?steps?/i);
+    expect(text).toMatch(/2 page actions/i);
+    expect(text).not.toMatch(/setup steps?/i);
   });
 
   it('mentions the handoff when redirect selectors are configured', () => {
     const text = describeConfig({ ...base, redirect: { markerSelector: '.ext-badge' } });
     expect(text).toMatch(/employer|external/i);
     expect(text).toContain('.ext-badge');
+  });
+
+  /**
+   * The board that mixes both kinds of posting is the normal shape, and it is
+   * exactly the one this used to get wrong: the two branches were an `else if`,
+   * so a config carrying both was described as handing off and the quick-apply
+   * selector went unmentioned — naming the rule that loses and omitting the rule
+   * that wins. Someone debugging the site would go looking in the wrong place.
+   */
+  it('never describes a quick-apply site as only handing off', () => {
+    const text = describeConfig({
+      ...base,
+      redirect: { quickApplySelector: '.inline-form', applySelector: '.ext' },
+    });
+    expect(text).toContain('.inline-form');
+    expect(text).toContain('.ext');
+  });
+
+  // Order is the claim: `detectRedirect` checks the quick-apply marker first and
+  // returns there, so a sentence that reads the other way round is a lie about
+  // precedence even when it names both selectors.
+  it('states the two redirect rules in the order the detector applies them', () => {
+    const text = describeConfig({
+      ...base,
+      redirect: { quickApplySelector: '.inline-form', markerSelector: '.ext-badge' },
+    });
+    expect(text.indexOf('.inline-form')).toBeLessThan(text.indexOf('.ext-badge'));
   });
 
   it('explains successSelector as the proof it was sent', () => {

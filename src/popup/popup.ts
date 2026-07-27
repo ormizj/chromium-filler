@@ -5,6 +5,7 @@
  */
 
 import { MSG, type SessionState, type StatusResponse } from '../shared/messages';
+import { ACTION_LABELS } from '../shared/labels';
 import { BUILD_ID, BUILD_LABEL } from '../shared/buildId';
 import { hostOf } from '../shared/url';
 import { getProfile } from '../shared/storage';
@@ -24,6 +25,11 @@ const sessionBar = document.getElementById('session-bar')!;
 const sessionChips = document.getElementById('session-chips')!;
 const sessionSkip = document.getElementById('session-skip') as HTMLButtonElement;
 const nudge = document.getElementById('nudge') as HTMLAnchorElement;
+
+// The same control the review modal's footer draws during a session, so it takes
+// the same words from labels.ts. Written into popup.html it had already drifted
+// — "Skip & next" here against "Skip → next" there, for one action.
+sessionSkip.textContent = ACTION_LABELS.skipNext;
 
 let tabId: number | undefined;
 let tabUrl: string | undefined;

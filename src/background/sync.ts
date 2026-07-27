@@ -54,11 +54,12 @@ async function writeStatus(patch: Partial<StoredStatus>): Promise<void> {
 }
 
 export async function syncState(): Promise<SyncState> {
-  const [status, account, client] = await Promise.all([
-    readStatus(), connectedAccount(), readSyncClient(),
+  const [status, account, client, connected] = await Promise.all([
+    readStatus(), connectedAccount(), readSyncClient(), isConnected(),
   ]);
   return {
     configured: client.clientId.length > 0,
+    connected,
     clientId: client.clientId,
     account,
     lastSyncAt: status.lastSyncAt,
@@ -105,7 +106,12 @@ function decode(text: string | undefined): JobSnapshot {
   // Absent means this account has never synced; unreadable is a different thing
   // and `parseSnapshot` throws rather than quietly starting over, which would
   // replace a database it merely failed to understand.
-  return text === undefined ? emptySnapshot() : parseSnapshot(text);
+  //
+  // Blank counts as absent. A zero-byte file is what an interrupted create or
+  // PATCH leaves behind, and refusing it was a dead end: every later sync failed
+  // with "not a job database backup" and nothing in the UI can reset the remote
+  // copy. There is no content there to protect, which is the whole difference.
+  return text === undefined || text.trim() === '' ? emptySnapshot() : parseSnapshot(text);
 }
 
 /**
@@ -118,8 +124,9 @@ function decode(text: string | undefined): JobSnapshot {
 async function runSync(): Promise<SyncState> {
   for (let attempt = 1; ; attempt++) {
     const remote = await download();
-    const merged = mergeJobs(await buildSnapshot(), decode(remote.text));
-    await applySnapshot(merged);
+    // What is stored locally is what goes up: `applySnapshot` prunes, and both
+    // ends should be holding the same answer when this returns.
+    const merged = await applySnapshot(mergeJobs(await buildSnapshot(), decode(remote.text)));
     try {
       await upload(JSON.stringify({ ...merged, schema: SYNC_SCHEMA }), remote.file as RemoteFile);
       await writeStatus({ lastSyncAt: Date.now(), lastError: undefined, awaitingConfirm: false });

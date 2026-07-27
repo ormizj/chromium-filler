@@ -182,7 +182,9 @@ function readSyncClientSync(): SyncClient {
 
 function fakeSyncState(): SyncState {
   const { clientId } = readSyncClientSync();
-  return { configured: clientId.length > 0, clientId };
+  // Never connected: there is no OAuth flow behind the harness, and pretending
+  // otherwise would show a Sync tab offering to sync through nothing.
+  return { configured: clientId.length > 0, connected: false, clientId };
 }
 
 function backgroundReply(

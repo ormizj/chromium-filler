@@ -63,6 +63,15 @@ export function helpPanel(entry: HelpEntry | GroupHelp): HTMLElement {
       const label = document.createElement('b');
       label.textContent = row.label;
       li.append(label, document.createTextNode(' — '), ...richText(row.body));
+      // The same `.cf-help-example` the entry-level one uses, so a row needs no
+      // styling vocabulary of its own — only the tighter gap primitives.css
+      // gives it when it sits inside a row rather than after a whole panel.
+      if (row.example) {
+        const example = document.createElement('code');
+        example.className = 'cf-help-example';
+        example.textContent = row.example;
+        li.append(example);
+      }
       ul.append(li);
     }
     box.append(ul);

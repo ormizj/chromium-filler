@@ -35,7 +35,7 @@ driving a real site. `?page=modal&session=1` shows the queue strip and the
 footer overflow menu.
 
 `&state=…` picks which **flow** the surface is showing — modal: `long`, `redirect`,
-`redirect-followed`, `app-link`, `landed`, `empty`, `failed-fill`, `apply-unset`,
+`redirect-followed`, `app-link`, `landed`, `empty`, `listing`, `failed-fill`, `apply-unset`,
 `apply-unverified`, `applied`, `already-applied`, `already-applied-redirect`,
 `flush`, `fullscreen`; setup: `external`, `help`,
 `cv-steps`, `submit-unset`, `success-unset`; options *and popup*: `fresh`, which
@@ -133,8 +133,16 @@ Five rules the branch order encodes, each with a test:
   application", and there is nothing here to open.
 - **Blocked outranks `empty`.** A listing page has no fields *and* no Send
   button, and its greyed Apply still provokes "why can't I apply?"; answering
-  "nothing to fill here" leaves a dead control unexplained. So `empty` is the
-  narrower case: a page Apply *could* run on, whose fields went unrecognised.
+  "nothing to fill here" leaves a dead control unexplained.
+- **`empty` means the profile is empty, and nothing else.** It fires on
+  `total === 0`, where `total` is the number of rows in the report — and
+  `detectFields` returns one row per *wanted* field, so zero rows can only mean
+  `wantedFields()` was empty: no profile values, no CV, no cover-letter file. A
+  page whose fields all went unrecognised reports a row each and lands on
+  `ready`. `FLOW_TEXT.empty` is worded for that and points at Options → Profile;
+  it used to read "No application form was found here", which blamed the site for
+  the one state only the profile can cause — on the very first run the
+  getting-started checklist walks a new user through.
 - **The tone decides where it renders.** `ok`/`warn`/`accent` lead the body in
   both views; the `quiet` resting state rides in the **footer**, above Apply —
   the Job view leads with the posting on purpose, and a fill-status line above
@@ -223,15 +231,17 @@ pure, unit-tested logic):
 - **`src/content`** — the per-page orchestrator (`main.ts` `Controller`). On a
   matching page: wait for slow form (`waitForForm.ts`) → run prep steps
   (`prep.ts`) → classify the posting (`redirectDetect.ts`) → **either** hand off
-  to the external application **or** extract job title/description
-  (`extract.ts`, which walks containers into blocks via `shared/jobText.ts`, and
-  reads the company/location/type chips from the posting's JSON-LD via
-  `shared/jobMeta.ts` — **only** from JSON-LD or a configured selector, never
-  inferred: a chip the posting did not state is not rendered, and there is
-  deliberately no `og:site_name` fallback for the company, because that names the
-  *board* and put "LinkedIn" where the employer should be) →
-  detect fields (`fieldDetect.ts`) → fill high-confidence only, incl. CV via
-  DataTransfer (`fill.ts`) → show modal (`modal/`).
+  to the external application **or** detect fields (`fieldDetect.ts`) → fill
+  high-confidence only, incl. CV via DataTransfer (`fill.ts`) → show modal
+  (`modal/`). The job text is read **inside `showModal`**, not before the fill —
+  `extractJob` has one production call site and the review is what needs it, so a
+  re-render re-reads it and `captureJob` writes it to the archive from there.
+  `extract.ts` walks containers into blocks via `shared/jobText.ts`, and reads the
+  company/location/type chips from the posting's JSON-LD via `shared/jobMeta.ts` —
+  **only** from JSON-LD or a configured selector, never inferred: a chip the
+  posting did not state is not rendered, and there is deliberately no
+  `og:site_name` fallback for the company, because that names the *board* and put
+  "LinkedIn" where the employer should be.
   `picker.ts` = click/tap-to-pick override.
 - **`src/background/service_worker.ts`** — opens options, handles the `SUBMITTED`
   message (mark URL applied + optional tab close), and owns the two-step redirect
@@ -471,7 +481,16 @@ does not require reading JSON to find out what a site will do. Pure, unit-tested
 both shadow roots and the light-DOM pages; `.cf-help*` lives in primitives.css.
 Disclosure, never `title=` tooltips — a hover tooltip does not exist on a phone.
 `settings.helpSeen` records that the legend was dismissed, and also retires the
-options getting-started checklist.
+options getting-started checklist — and it is **shared with the options
+getting-started card**, which writes the same flag, so dismissing either retires
+both and moves where the wizard opens.
+
+**`richText` renders backticks and nothing else.** It splits on `` ` `` and makes
+the odd pieces `<code>`; there is no bold, no italic, no links. A `**word**` in a
+catalog body ships as two literal asterisks on every surface that renders it, and
+nothing fails — not `npm run typecheck`, not `help.test.ts`, which only asserts
+that a body is non-empty and longer than its title. Emphasis in this copy is
+done with “quotes” or by rewording.
 
 The `?` is a **masked icon** (`--icon-help`), not a `?` typeset inside a bordered
 pill. The pill was filled with `--surface`, which is *darker* than the card in
@@ -1064,6 +1083,27 @@ needs no `downloads` permission, and an MV3 service worker has no
 - **Never make the sync merge depend on `now`, or on which argument came first.**
   Both break the properties two-way sync rests on. Pruning belongs at the storage
   edge, tie-breaks must be symmetric.
+- **Only a refusal from Google throws the refresh token away.** `accessToken()`
+  disconnects on `SyncAuthRevokedError` — `invalid_grant`/`invalid_client`, i.e.
+  a grant that will never work again — and on nothing else. An unconditional
+  `catch` there is the same bug twice over: `postToken` also throws when the
+  machine is offline or a proxy answers with an HTML 502 (which is why it reads
+  the body as *text* and parses defensively, rather than `res.json()` on the way
+  past), and `syncOnStartup` runs on `chrome.runtime.onStartup` — precisely when
+  a resuming laptop has no network. Disconnecting there costs a full trip
+  through the consent screen to repair nothing.
+- **Upload what `applySnapshot` stored, not what `mergeJobs` returned.** It
+  returns the pruned snapshot for exactly this reason: writing the unpruned
+  merge back meant the remote `jobs.json` never shed a tombstone or an orphaned
+  capture and grew for the life of the account, carrying job text for postings
+  that no longer exist. Both ends hold the same answer when a sync returns.
+- **The file's write token is `version`, and there is no other.** Drive v3
+  dropped resource etags; an `If-Match` built from the *list* response describes
+  the query, not the file, and honouring it would 412 every write on a single
+  device. `If-Match: '*'` ("as long as it still exists") is all that header may
+  ever say here. Relatedly, `authed()` retries once on 401 with a forced
+  refresh: expiry is judged on this machine's clock alone, so Drive is the only
+  thing that knows a token has really died.
 - **`successSelector` becoming VISIBLE is the ONLY "actually sent" signal.**
   Not merely present — sites pre-render hidden success nodes; the
   `MutationObserver` in `main.ts` watches `style`/`class`/`hidden` flips. There is

@@ -83,16 +83,19 @@ chrome.runtime.onMessage.addListener((msg: Message, _sender, sendResponse) => {
     skipUrl(msg.url, _sender.tab?.id).then(sendResponse).catch((e) => sendResponse({ error: String(e) }));
     return true;
   }
+  // The Sync tab renders these straight into its status line, so they are the
+  // message and not `String(e)` — which prefixes a literal "Error: " that the
+  // wording next to it (all of it written as a sentence to the user) does not.
   if (msg.type === MSG.SYNC_STATE) {
-    syncState().then(sendResponse).catch((e) => sendResponse({ error: String(e) }));
+    syncState().then(sendResponse).catch((e) => sendResponse({ error: (e as Error).message }));
     return true;
   }
   if (msg.type === MSG.SYNC_CONNECT) {
-    connectAccount().then(sendResponse).catch((e) => sendResponse({ error: String(e) }));
+    connectAccount().then(sendResponse).catch((e) => sendResponse({ error: (e as Error).message }));
     return true;
   }
   if (msg.type === MSG.SYNC_DISCONNECT) {
-    disconnectAccount().then(sendResponse).catch((e) => sendResponse({ error: String(e) }));
+    disconnectAccount().then(sendResponse).catch((e) => sendResponse({ error: (e as Error).message }));
     return true;
   }
   if (msg.type === MSG.SYNC_SET_CLIENT) {
@@ -102,7 +105,7 @@ chrome.runtime.onMessage.addListener((msg: Message, _sender, sendResponse) => {
     return true;
   }
   if (msg.type === MSG.SYNC_NOW) {
-    syncNow(msg.confirmed).then(sendResponse).catch((e) => sendResponse({ error: String(e) }));
+    syncNow(msg.confirmed).then(sendResponse).catch((e) => sendResponse({ error: (e as Error).message }));
     return true;
   }
   if (msg.type === MSG.OPEN_OPTIONS) {

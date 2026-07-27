@@ -8,7 +8,6 @@ export const DEFAULT_PROFILE: Profile = {
 
 export const DEFAULT_SETTINGS: Settings = {
   autoRunOnLoad: true,
-  autoFillLowConfidence: false,
   closeTabOnSubmit: false,
   // On by default, unlike closeTabOnSubmit: skipping *is* the decision to be
   // done with a posting, so leaving its tab open only makes work. Submitting is

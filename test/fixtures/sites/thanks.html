@@ -12,9 +12,10 @@
   </head>
   <body>
     <!--
-      Where ats-nav.html lands after submitting. The extension has already
-      reported SUBMITTED from the submit event on the previous page — nothing
-      here needs to signal anything.
+      Where ats-nav.html lands after submitting. This page IS the confirmation:
+      the seeded `nav-thanks` config points `successSelector` at `#thanks`, so the
+      fresh content script here reports SUBMITTED, and the background files it
+      against the posting the tab was filling rather than against this URL.
 
       The search box is not decoration: the config auto-created for this origin
       carries the template's `waitFor: 'form'`, and without a form on the page

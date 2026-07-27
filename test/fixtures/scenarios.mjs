@@ -207,7 +207,7 @@ export const SCENARIOS = [
     flow: 'destination',
     title: 'NavATS — submits by full-page navigation',
     url: ATS_NAV_URL,
-    expect: 'no successSelector, so the submit event is the "sent" signal',
+    expect: 'the confirmation is on the NEXT page (thanks.html), and the posting — not that page — is what gets marked applied',
   },
   {
     id: 'hop',

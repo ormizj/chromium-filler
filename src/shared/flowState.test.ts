@@ -172,11 +172,28 @@ describe('flowBanner', () => {
     expect(b.help).toBe('apply');
   });
 
-  it('reports an unrecognised form as empty rather than as ready to apply', () => {
+  /**
+   * `total` is the number of *rows in the report*, and `main.ts` builds one row
+   * per field it has something to fill with (`wantedFields`) — so zero rows means
+   * an empty profile, never a page with no form. A page whose fields all went
+   * unrecognised still reports one row each and lands on `ready`.
+   *
+   * The banner used to say "No application form was found here", which blamed
+   * the site for a state only the profile can cause — and it is reachable on the
+   * first run the getting-started checklist walks a new user through.
+   */
+  it('blames the empty profile, not the page, when there is nothing to fill with', () => {
     const b = flowBanner({ ...base, filled: 0, total: 0, applyState: 'ready' });
     expect(b.key).toBe('empty');
     expect(b.tone).toBe('quiet');
-    expect(b.title).toMatch(/nothing to fill/i);
+    expect(b.title).not.toMatch(/this page|found here/i);
+    expect(`${b.title} ${b.detail}`).toMatch(/profile/i);
+  });
+
+  // The other side of the same rule: rows that matched nothing are still rows.
+  it('is ready, not empty, when the page was read but nothing matched', () => {
+    const b = flowBanner({ ...base, filled: 0, total: 12, applyState: 'ready' });
+    expect(b.key).toBe('ready');
   });
 
   it('never returns a key without words for it', () => {

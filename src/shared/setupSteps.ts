@@ -207,6 +207,12 @@ function kind(s: SetupSnapshot): Part {
 function fields(s: SetupSnapshot): Part {
   if (!s.fields.length) return { tone: 'none', todo: 0, summary: 'nothing to set' };
   const cv = s.fields.find((r) => r.key === 'resume');
+  // Both are work, and they are not the same sentence. `low` is the ordinary
+  // outcome of the unlabelled-file-input fallback and of a saved `cvUpload`
+  // pointing at a wrapper — an upload *was* found, it just cannot be relied on.
+  // This string is the rail node's whole accessible name, so calling that "no CV
+  // upload found" told a screen-reader user the page had none.
+  if (cv?.status === 'low') return { tone: 'warn', todo: 1, summary: 'CV upload needs checking' };
   if (!cv || cv.status !== 'high') return { tone: 'warn', todo: 1, summary: 'no CV upload found' };
   const matched = s.fields.filter((r) => r.status === 'high').length;
   return { tone: 'ok', todo: 0, summary: `${matched} matched` };

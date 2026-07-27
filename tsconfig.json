@@ -18,5 +18,18 @@
     "verbatimModuleSyntax": true,
     "noEmit": true
   },
-  "include": ["src", "test", "manifest.config.ts", "vite.config.ts", "vitest.config.ts"]
+  // `dev` is in because the harness renders the *real* modal and setup panel
+  // from hand-written fixture data, so it drifts against `ModalData`/`SetupData`
+  // silently — and did: a required field was added to `SyncState` and the
+  // harness's mock went on claiming to return one. `e2e` is deliberately out;
+  // it is Node code and would need `@types/node` plus a declaration for the
+  // `.mjs` scenario catalog to compile here.
+  "include": [
+    "src",
+    "test",
+    "dev",
+    "manifest.config.ts",
+    "vite.config.ts",
+    "vitest.config.ts"
+  ]
 }

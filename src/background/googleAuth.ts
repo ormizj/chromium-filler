@@ -33,6 +33,17 @@ interface StoredAuth {
 export class SyncAuthError extends Error {}
 
 /**
+ * Google has refused the grant itself — revoked consent, or a client that no
+ * longer exists. Distinguished from every other failure because it is the only
+ * one where forgetting the refresh token is the right answer: retrying will
+ * never work, and saying so beats replaying a dead token for ever.
+ */
+export class SyncAuthRevokedError extends SyncAuthError {}
+
+/** The OAuth error codes that mean exactly that. */
+const DEAD_GRANT = new Set(['invalid_grant', 'invalid_client', 'unauthorized_client']);
+
+/**
  * The user's OAuth client, refused rather than sent half-filled.
  *
  * Read on every call instead of once at load: the service worker outlives the
@@ -106,17 +117,34 @@ interface TokenResponse {
   error_description?: string;
 }
 
+/**
+ * Read as text and parse defensively, rather than `res.json()` on the way past.
+ *
+ * Not every answer on this endpoint comes from Google: a captive portal or a
+ * proxy returns an HTML 502, and parsing that first threw a `SyntaxError` that
+ * carried no status and — because the caller could not tell it apart from a
+ * refusal — used to cost the user their refresh token.
+ */
 async function postToken(body: Record<string, string>): Promise<TokenResponse> {
   const res = await fetch(TOKEN_ENDPOINT, {
     method: 'POST',
     headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
     body: new URLSearchParams(body).toString(),
   });
-  const data = (await res.json()) as TokenResponse;
-  if (!res.ok || data.error) {
-    throw new SyncAuthError(data.error_description ?? data.error ?? `Token request failed (${res.status})`);
+
+  const raw = await res.text();
+  let data: TokenResponse | undefined;
+  try {
+    data = raw ? (JSON.parse(raw) as TokenResponse) : {};
+  } catch {
+    /* not JSON — something between here and Google answered instead. */
   }
-  return data;
+
+  if (res.ok && data && !data.error) return data;
+
+  const detail = data?.error_description ?? data?.error ?? `Token request failed (${res.status})`;
+  if (data?.error && DEAD_GRANT.has(data.error)) throw new SyncAuthRevokedError(detail);
+  throw new SyncAuthError(detail);
 }
 
 /**
@@ -142,7 +170,16 @@ export async function connect(): Promise<string | undefined> {
     prompt: 'consent select_account',
   })}`;
 
-  const redirect = await chrome.identity.launchWebAuthFlow({ url, interactive: true });
+  // Closing the window *rejects* under the MV3 promise API rather than
+  // resolving undefined, so this — not the falsy check below — is the branch a
+  // cancelled authorization really takes. Left in place for the callback-style
+  // shim, where it resolves empty instead.
+  let redirect: string | undefined;
+  try {
+    redirect = await chrome.identity.launchWebAuthFlow({ url, interactive: true });
+  } catch (e) {
+    throw new SyncAuthError(`Authorization was cancelled. (${(e as Error).message})`);
+  }
   if (!redirect) throw new SyncAuthError('Authorization was cancelled.');
 
   const returned = new URL(redirect).searchParams;
@@ -178,11 +215,21 @@ export async function disconnect(): Promise<void> {
   await chrome.storage.local.remove(KEY);
 }
 
-/** A usable access token, refreshed if the cached one has run out. */
-export async function accessToken(): Promise<string> {
+/**
+ * A usable access token, refreshed if the cached one has run out.
+ *
+ * `forceRefresh` is for the caller that has been *told* the token is no good —
+ * Drive answering 401 — because expiry is judged on this machine's clock alone,
+ * and a clock running fast (or a token Google retired early) stays "valid" here
+ * long after it has stopped working.
+ */
+export async function accessToken(forceRefresh = false): Promise<string> {
   const auth = await read();
   if (!auth?.refreshToken) throw new SyncAuthError('Not connected to a Google account yet.');
-  if (auth.accessToken && auth.expiresAt && auth.expiresAt - EXPIRY_MARGIN_MS > Date.now()) {
+  if (
+    !forceRefresh
+    && auth.accessToken && auth.expiresAt && auth.expiresAt - EXPIRY_MARGIN_MS > Date.now()
+  ) {
     return auth.accessToken;
   }
 
@@ -199,8 +246,18 @@ export async function accessToken(): Promise<string> {
     // A refresh token dies when consent is revoked — and, if the consent screen
     // was left in Testing, after seven days. Neither is recoverable here, and
     // saying so beats retrying a token that will never work again.
-    await disconnect();
-    throw new SyncAuthError(`Google sign-in expired — connect again. (${(e as Error).message})`);
+    //
+    // **Only Google saying so ends the connection.** Offline, a proxy's HTML
+    // error page and a 500 are all temporary, and `syncOnStartup` runs on
+    // `chrome.runtime.onStartup` — the one moment a resuming laptop is most
+    // likely to hit exactly those. Forgetting the token there sent the user
+    // back through the consent screen to repair something that was never broken.
+    if (e instanceof SyncAuthRevokedError) {
+      await disconnect();
+      throw new SyncAuthError(`Google sign-in expired — connect again. (${e.message})`);
+    }
+    if (e instanceof SyncAuthError) throw e;
+    throw new SyncAuthError(`Could not reach Google to refresh the sign-in. (${(e as Error).message})`);
   }
   if (!token.access_token) throw new SyncAuthError('Google did not return an access token.');
 

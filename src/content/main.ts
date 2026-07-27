@@ -52,7 +52,11 @@ const CONTAINER_LABELS: Record<ContainerKey, string> = {
   jobRequirements: 'Requirements',
 };
 
-/** Redirect-classification selectors, in the order the setup panel lists them. */
+/**
+ * Redirect-classification selectors. This is the row *set*, not the order they
+ * appear in — the panel regroups them by the verdict each argues for
+ * (`REDIRECT_GROUPS` in `setupPanel.ts`), and quick apply leads there.
+ */
 const REDIRECT_ROWS: Array<{ key: RedirectSelectorKey; label: string }> = [
   { key: 'applySelector', label: 'External apply link' },
   { key: 'quickApplySelector', label: 'Quick-apply marker' },
@@ -683,7 +687,11 @@ class Controller {
    */
   private pick(field: FieldKey): void {
     this.cancelPicker?.();
-    const label = field;
+    // The name the report row shows, not the storage key. This passed the bare
+    // `FieldKey`, so the picker's toolbar read `Click the "coverLetter" field` —
+    // the one place in the extension that spelled a field the way the code does.
+    // `pickFieldForSetup` has always used `FIELD_LABELS`; this is its twin.
+    const label = FIELD_LABELS[field] ?? field;
     this.modal?.setHidden(true);
     const restore = () => this.modal?.setHidden(false);
     this.cancelPicker = startPicker(async (el) => {

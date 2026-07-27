@@ -17,9 +17,12 @@
       navigation to thanks.html, with NO in-page confirmation to watch for.
 
       It has no site config until a tracked handoff creates one, and the created
-      template has no `successSelector` — so this is the page that exercises the
-      `submit`-event fallback. The tab leaves before any banner could render, so
-      the submit event is genuinely all there is.
+      template has no `successSelector` — nothing here can ever be read back as
+      sent, because the tab leaves before any banner could render. There is no
+      `submit`-event fallback (see `setupSubmitDetection` in content/main.ts): the
+      confirmation is matched on thanks.html instead, by the seeded `nav-thanks`
+      config, and the background attributes it to the posting this tab was
+      filling. That attribution is what this fixture exercises.
 
       Served from the third origin (127.0.0.1:5200) on purpose: the employer-host
       config an earlier handoff creates matches `*://127.0.0.1:5199/*` and would

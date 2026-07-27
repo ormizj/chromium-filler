@@ -433,10 +433,17 @@ function initHelp(): void {
     'You save your details and your CV once, here.',
     'You open a job posting — by hand, or from the queue.',
     'The extension checks whether one of your site configs matches that URL.',
-    'It waits for the form, runs that site’s setup steps, and works out whether the '
+    // "Page actions", the wizard's own name for the list (SETUP_STEP_TITLES.prep).
+    // "Setup steps" collides with the wizard's numbered steps, which is the one
+    // synonym `describeConfig` is written to keep out of the vocabulary.
+    'It waits for the form, runs that site’s page actions, and works out whether the '
       + 'posting applies here or on the employer’s own site.',
     'It fills every field it is confident about, CV included, and shows you a review.',
-    'You check the review, fix anything it flagged, and press the site’s own Send.',
+    // Apply, not "the site's own Send" — ours is the button the user presses and
+    // the site's is the one it presses for them, which is the whole distinction
+    // `labels.ts` exists to hold. This step had them the wrong way round.
+    'You check the review, fix anything it flagged, and press Apply — which presses the '
+      + 'site’s own Send button for you.',
   ];
   $('help-flow').replaceChildren(...flow.map((text) => {
     const li = document.createElement('li');
@@ -457,9 +464,15 @@ function initHelp(): void {
   const trouble: HelpEntry[] = [
     {
       title: 'Nothing was filled at all',
+      // The two halves are fixed in two different places, and saying so matters:
+      // the wizard has no `waitFor` row — it is one of the keys only the JSON
+      // editor reaches, which `SETUP_STEP_HELP.site.rows` already says — so
+      // sending both errands to the panel left the second one unfindable.
       body: 'Either no site config matches this URL — the popup says “no config” — or '
-        + 'the form had not loaded yet. Open the posting, press “Set up this site”, and '
-        + 'check the URL pattern, then give the site a `waitFor` selector.',
+        + 'the form had not loaded yet. For the first, open the posting, press “Set up '
+        + 'this site” and widen the URL pattern on step 1. For the second, give the site '
+        + 'a `waitFor` selector: it has no row in the wizard, so use “Advanced (JSON)” '
+        + 'there, or edit the config under Sites here.',
     },
     {
       title: 'One field stayed grey',
@@ -469,15 +482,26 @@ function initHelp(): void {
     },
     {
       title: 'It navigated away from a posting I wanted to fill',
-      body: 'It classified the posting as applying on the employer’s site. Press “Fill '
-        + 'this page instead” in the modal, then set a quick-apply marker under '
-        + 'Application type so the same board is judged correctly next time.',
+      // Not "open the ⋯ menu and press Fill this page instead": under the default
+      // “new tab, closing the posting” the source tab is closed shortly after the
+      // handoff settles, so that menu is gone by the time anyone reads this. The
+      // route below is the one that still exists afterwards — the setup panel
+      // holds the handoff open for as long as it is on screen.
+      body: 'It classified the posting as applying on the employer’s site, and followed '
+        + 'it. If you catch it in time, the review modal’s ⋯ menu has “Fill this page '
+        + 'instead” — but under the default “new tab, closing the posting” that tab '
+        + 'closes itself, so the way back is: turn off “Auto-run when a matching page '
+        + 'loads” in Settings, re-open the posting, and press “Set up this site”. With '
+        + 'auto-run off nothing is classified or followed until you ask, so the posting '
+        + 'stays put. Then set a quick-apply marker under Application type so the same '
+        + 'board is judged correctly from then on.',
     },
     {
       title: 'It never marked a posting applied',
       body: 'Applied is only recorded once the site’s own confirmation becomes visible. '
-        + 'Give that site a `successSelector` pointing at its thank-you element — '
-        + 'without one, only a full-page-navigation submit counts.',
+        + 'Give that site a `successSelector` pointing at its thank-you element — there '
+        + 'is no other way of telling, so without one Apply stays greyed out and nothing '
+        + 'on that site can ever be recorded as applied.',
     },
     {
       title: 'The queue opened far too many tabs',
@@ -538,6 +562,19 @@ async function initSettings(): Promise<void> {
   attachRowHelp(keepInBrowser, SETTINGS_HELP.keepInBrowser);
   attachRowHelp(redirectTarget, SETTINGS_HELP.redirectTarget);
   attachRowHelp(modalFullscreen, SETTINGS_HELP.modalFullscreen);
+
+  // The two-step subsection's intro, from the catalog for the same reason as the
+  // queue's: it restated `CONCEPT_HELP.twoStep` in different words, and the full
+  // explanation now sits behind the `?` on the heading itself.
+  attachHelp($('twostep-heading'), CONCEPT_HELP.twoStep);
+  $('twostep-hint').textContent = CONCEPT_HELP.twoStep.short ?? '';
+
+  // What the stored rectangle *is* — that both sheets share it, that a drag on a
+  // job page does not write it, that it is desktop-only. The two hint paragraphs
+  // below are the simulator's own operating instructions (which handle does what,
+  // Shift for 10px, what a lit edge means) and stay where they are; this is the
+  // setting behind them, and until now nothing rendered its entry at all.
+  attachHelp($('panels-heading'), SETTINGS_HELP.modalLayout);
 
   await initModalLayout(settings.modalLayout);
 }
@@ -1067,7 +1104,11 @@ async function renderQueue(): Promise<void> {
     const empty = document.createElement('li');
     empty.className = 'empty';
     empty.style.border = 'none';
-    empty.textContent = list.length === 0
+    // Which of the two it is turns on whether anything is *there*, not on how
+    // long the stored list is: removed postings stay as tombstones, so after
+    // Clear all the raw list is still full and this read "Nothing matches this
+    // filter." to someone who had not set one.
+    empty.textContent = visibleUrls(list).length === 0
       ? 'No postings yet — paste some links under “Import URLs”.'
       : 'Nothing matches this filter.';
     ul.replaceChildren(empty);
@@ -1290,6 +1331,14 @@ async function initSession(): Promise<void> {
     if (settings.sessionBatchSize > 2) batch.placeholder = '2 suggested on mobile';
   }
 
+  // The one setting on this page with no `?` — its catalog entry has been written
+  // since the session landed and nothing rendered it. Not `attachRowHelp`: this
+  // control is not in a `.setrow`, it is a bare labelled input in the session
+  // card. The panel goes after that whole card, because the anchor sits inside a
+  // `<label>` and a panel there would be part of the input's click target.
+  attachHelp($('batch-label'), SETTINGS_HELP.sessionBatchSize,
+    (panel) => $('session-panel').after(panel));
+
   batch.addEventListener('change', async () => {
     const size = Math.min(20, Math.max(1, Number(batch.value) || 1));
     batch.value = String(size);
@@ -1314,6 +1363,12 @@ async function initSession(): Promise<void> {
 /* ---------------- Queue actions ---------------- */
 
 async function initUrls(): Promise<void> {
+  // The section's own intro, from the catalog rather than written into the
+  // markup — the hand-written version had drifted into calling our action
+  // "submit", which is the site's control, not ours.
+  attachHelp($('urls-heading'), CONCEPT_HELP.sessions);
+  $('urls-section').querySelector('.hint')!.textContent = CONCEPT_HELP.sessions.short ?? '';
+
   $('extract-urls').addEventListener('click', () => {
     const raw = ($('urls-paste') as HTMLTextAreaElement).value;
     previewUrls = extractUrls(raw);
@@ -1349,9 +1404,14 @@ async function initUrls(): Promise<void> {
     // The saved postings go with it, and that is the half worth warning about:
     // the queue can be re-imported from the board, the archive cannot be re-read
     // once the postings are down.
+    // With sync on this is not a local delete: the entries are tombstoned so the
+    // other browser does not resurrect them, which means it clears there too.
+    const shared = (await getSettings()).syncEnabled
+      ? ' Sync is on, so this also clears the other browser at the next sync.'
+      : '';
     $('clear-confirm-label').textContent =
       `Delete all ${list.length} posting(s), their history and the saved job archive? `
-      + 'Export first if you want to keep it. This cannot be undone.';
+      + `Export first if you want to keep it. This cannot be undone.${shared}`;
     confirmBox.hidden = false;
   });
   $('clear-cancel').addEventListener('click', () => { confirmBox.hidden = true; });
@@ -1369,6 +1429,13 @@ async function initUrls(): Promise<void> {
 
   $('export-jobs').addEventListener('click', () => void exportJobs());
   attachHelp($('archive-heading'), CONCEPT_HELP.exportJobs);
+  // What the ticks mean and how a selection survives the schema growing — the
+  // entry existed and nothing rendered it. The panel goes after the whole
+  // `<details>`, not after the anchor: the anchor is inside the `<summary>`, and
+  // an explanation folded away with the disclosure it explains is unreachable
+  // until you open the thing you were asking about.
+  attachHelp($('export-options-label'), SETTINGS_HELP.exportOptions,
+    (panel) => $('export-options').after(panel));
   await renderExportOptions();
 
   document.addEventListener('click', () => closeAllMenus());
@@ -1575,7 +1642,11 @@ async function initSync(): Promise<void> {
 
   async function renderSync(state?: SyncState): Promise<void> {
     const s = state ?? (await sendBg<SyncState>(MSG.SYNC_STATE));
-    const connected = !!s?.account;
+    // The refresh token decides this, not the account label. An account line can
+    // be blank — the email comes from the id_token and a consent screen without
+    // the `email` claim returns none — and inferring "not connected" from that
+    // disabled Disconnect on the one state that most needs clearing.
+    const connected = s?.connected === true;
     $<HTMLButtonElement>('sync-connect').textContent = connected ? 'Switch account' : 'Connect';
     // Disabled rather than hidden: `.btn` sets a `display`, which beats the UA
     // stylesheet's `[hidden]`, so a hidden button here is simply a visible one.
@@ -1591,7 +1662,9 @@ async function initSync(): Promise<void> {
       showAccount('Sync needs a Google OAuth client — add one under “Google OAuth client” below', true);
     } else if (connected) {
       const when = s.lastSyncAt ? `last synced ${fmtDate(s.lastSyncAt)}` : 'not synced yet';
-      showAccount(`Syncing through ${s.account} — ${when}`);
+      // Google did not say which account, so the honest thing is to say so
+      // rather than print "undefined" where the email goes.
+      showAccount(`Syncing through ${s.account ?? 'a Google account'} — ${when}`);
     } else {
       showAccount('Not connected to a Google account');
     }
@@ -1642,15 +1715,31 @@ async function initSync(): Promise<void> {
   });
 
   $('sync-redirect-copy').addEventListener('click', async () => {
-    await navigator.clipboard.writeText(redirect.value);
-    setStatus(clientStatus, 'Copied — paste it into the OAuth client in Google Cloud', 'ok');
+    // The clipboard refuses when the document is not focused — trivially the
+    // case with devtools open — and an unhandled rejection here left the user
+    // with no message at all beside a field that had not been copied. This is
+    // the one value setup cannot proceed without, so a failure has to say so
+    // and point at the field they can select by hand.
+    try {
+      await navigator.clipboard.writeText(redirect.value);
+      setStatus(clientStatus, 'Copied — paste it into the OAuth client in Google Cloud', 'ok');
+    } catch {
+      redirect.select();
+      setStatus(clientStatus, 'Could not reach the clipboard — the URI is selected, copy it with ⌘/Ctrl+C', 'err');
+    }
   });
 
   $('sync-connect').addEventListener('click', async () => {
     setStatus(status, 'Waiting for Google…');
     const s = await sendBg<SyncState>(MSG.SYNC_CONNECT);
     if (!s || 'error' in s) return setStatus(status, String((s as { error?: string })?.error), 'err');
-    setStatus(status, 'Connected. Press Sync now to combine the two databases.', 'ok');
+    // The toggle, not the account, is what makes Sync now pressable — and it is
+    // off by default, so the account most likely to have just been connected is
+    // one that cannot sync yet. Naming the disabled button was the last step of
+    // a walkthrough that then did nothing.
+    setStatus(status, toggle.checked
+      ? 'Connected. Press Sync now to combine the two databases.'
+      : 'Connected. Switch “Sync the job database” on above to start syncing.', 'ok');
     await renderSync(s);
   });
 
@@ -1667,6 +1756,13 @@ async function initSync(): Promise<void> {
     setStatus(status, 'Syncing…');
     const s = await sendBg<SyncState>(MSG.SYNC_NOW, { confirmed });
     if (!s) return setStatus(status, 'No answer from the extension', 'err');
+    // Same check as Connect and Save client beside it. Without it a throw from
+    // outside `syncNow`'s own catch arrives as `{error}`, which carries no
+    // `lastError` — so the run below reported "Synced", in green, for a sync
+    // that did not happen, next to an account line that read "Not connected".
+    if ('error' in s) {
+      return setStatus(status, String((s as { error?: string }).error), 'err');
+    }
     if (s.pending) {
       // The one check before the first merge: connecting the wrong account would
       // fold a stranger's job list into this one, and only the counts show it.

@@ -22,7 +22,9 @@ import type { FieldMatch } from '../src/shared/types';
 import type { SessionState } from '../src/shared/messages';
 import type { JobBlock } from '../src/shared/jobText';
 import { DEFAULT_MODAL_LAYOUT } from '../src/shared/modalLayout';
-import { FillerModal, type ModalData, type ModalView } from '../src/content/modal/modal';
+import {
+  FillerModal, type ModalCallbacks, type ModalData, type ModalView,
+} from '../src/content/modal/modal';
 import { SetupPanel, type SetupData } from '../src/content/setupPanel';
 import { SETUP_STEP_ORDER, type SetupStepKey } from '../src/shared/setupSteps';
 
@@ -129,7 +131,7 @@ const BASE_MODAL: ModalData = {
   // Invented fixture values, like everything else on this fake posting — the
   // extension never derives these. `shared/jobMeta.ts` reads all three off the
   // page's own `JobPosting` JSON-LD or a configured selector, and renders nothing
-  // where the posting states nothing (see `state=empty`, whose chip row is
+  // where the posting states nothing (see `state=listing`, whose chip row is
   // absent). `Remote (Berlin, DE)` is the one composed value, and both halves are
   // still stated facts: `jobLocationType: TELECOMMUTE` plus the `jobLocation`.
   meta: { company: 'Acme', location: 'Remote (Berlin, DE)', employmentType: 'Full-time' },
@@ -178,8 +180,8 @@ const LONG_DESCRIPTION: JobBlock[] = [
 /**
  * One entry per flow the modal can be in. `redirect`/`redirect-followed` are the
  * two-step posting (no report at all — a notice and "Fill this page instead"),
- * `landed` is the destination of a handoff, and `empty` is an ambiguous listing
- * page where there was genuinely nothing to fill.
+ * `landed` is the destination of a handoff, `empty` is the empty-profile banner
+ * and `listing` is a results page whose fields all went unrecognised.
  */
 const MODAL_STATES: Record<string, Partial<ModalData>> = {
   default: {},
@@ -273,15 +275,32 @@ const MODAL_STATES: Record<string, Partial<ModalData>> = {
     appliedAt: Date.UTC(2026, 4, 12),
     redirect: { host: 'ats.acme.test', reason: 'Apply link leaves for ats.acme.test', followed: false },
   },
+  /**
+   * The `empty` flow banner, which nothing here used to reach: this state was a
+   * listing page with six unmatched rows and `noConfirmation`, so it rendered the
+   * *blocked* banner and the one it is named after was unscreenshottable.
+   *
+   * `empty` fires on an empty **report**, and `main.ts` builds one row per field
+   * it has something to fill with — so the only way to get here is an empty
+   * profile. Hence a perfectly ordinary posting with no rows at all.
+   */
   empty: {
+    matches: [],
+    applyState: 'ready',
+  },
+  /**
+   * The listing page the state above used to be. Worth keeping on its own: it is
+   * the posting that states none of the three meta facts, so the chip row is
+   * absent entirely — the case that proves the row is never rendered empty — and
+   * it is the shape `noConfirmation` really appears on.
+   */
+  listing: {
     siteName: 'ListingBoard',
     jobTitle: 'Platform engineering jobs',
     jobDescription: [
       { kind: 'para', text: '3 results. Each employer takes applications on its own site.' },
     ],
     jobRequirements: undefined,
-    // A listing page states none of the three facts, so the chip row is absent
-    // entirely — the case that proves the row is never rendered empty.
     meta: undefined,
     matches: ['fullName', 'email', 'phone', 'coverLetter', 'city', 'resume']
       .map((f) => match(f as FieldMatch['field'], 'none', false)),
@@ -302,6 +321,11 @@ function modalCallbacks(self: () => FillerModal | undefined): ModalCallbacks {
     onFollow: () => console.log('[harness] follow'),
     onFillAnyway: () => console.log('[harness] fill anyway'),
     onSkip: () => console.log('[harness] skip'),
+    // The overflow's two ways out of a posting. Both open another surface for
+    // real, so here they are only logged — but they have to exist, or the menu
+    // in the harness is two dead items.
+    onOpenSetup: () => console.log('[harness] open setup'),
+    onOpenOptions: () => console.log('[harness] open options'),
     onClose: () => self()?.minimize(),
     onFold: (c) => console.log('[harness] modal folded', c),
     onLayoutChange: (l) => console.log('[harness] layout', l),

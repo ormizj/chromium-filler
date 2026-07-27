@@ -136,8 +136,11 @@ function classify(input: FlowInput): FlowKey {
   // dead-looking control unexplained, which is the failure this whole banner
   // exists to prevent.
   if (input.applyState !== 'ready') return input.applyState;
-  // So `empty` is the narrower case it should always have been: a page the
-  // extension *could* apply on, whose fields it did not recognise.
+  // `total` is the number of rows in the report, and `main.ts` builds one per
+  // field it has something to fill *with* (`wantedFields`) — so this is not "the
+  // page had no form". It is "the profile is empty": a page whose fields all went
+  // unrecognised still reports a row each and falls through to `ready` below.
+  // `FLOW_TEXT.empty` is worded for that, and only that.
   if (input.total === 0) return 'empty';
   return 'ready';
 }

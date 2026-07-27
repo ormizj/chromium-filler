@@ -130,11 +130,15 @@ export interface SiteConfig {
   redirect?: RedirectConfig;
   /**
    * Selector for the site's "submitted successfully" confirmation element
-   * (e.g. a thank-you banner). This is the AUTHORITATIVE "actually sent" signal:
-   * when present, auto-close + mark-applied fire only once this element appears,
-   * never merely on a submit attempt (which can fail). Omit it only for
-   * full-page-navigation flows, where the tab leaves before a confirmation can
-   * render and the form `submit` event is used as a fallback.
+   * (e.g. a thank-you banner). This is the ONLY "actually sent" signal: auto-close
+   * + mark-applied fire once this element becomes *visible*, never merely on a
+   * submit attempt (which can fail).
+   *
+   * There is deliberately no `submit`-event fallback — the event fires before the
+   * server answers, and a site that validates in JS sees it and *then* rejects the
+   * form, which recorded applications that never happened. So this is required
+   * rather than optional: without it `Controller.applyState` reads `noConfirmation`
+   * and Apply refuses to press Send at all.
    */
   successSelector?: string;
 }
@@ -227,8 +231,6 @@ export type { ExportSelection } from './jobExport';
 export interface Settings {
   /** Auto-run the full flow when a matching page finishes loading. */
   autoRunOnLoad: boolean;
-  /** Confidence threshold below which matches are reported but not auto-filled. */
-  autoFillLowConfidence: boolean;
   /** Close the tab automatically once a submission is detected. */
   closeTabOnSubmit: boolean;
   /**

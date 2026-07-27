@@ -47,12 +47,12 @@
         </section>
 
         <section id="urls-section">
-          <h2>Job queue</h2>
-          <p class="hint">
-            A session keeps a fixed number of job tabs open and opens the next one
-            as soon as you submit, skip, or close one — so a big import never
-            becomes a wall of tabs.
-          </p>
+          <h2 id="urls-heading">Job queue</h2>
+          <!-- Filled from CONCEPT_HELP.sessions by options.ts, with the full
+               explanation behind the `?` on the heading. Written out here it was
+               a second, differently-worded copy of the catalog entry — and the
+               copy that still called our action "submit". -->
+          <p class="hint"></p>
 
           <div id="url-stats" class="cf-stats"></div>
 
@@ -61,8 +61,11 @@
               <b id="session-lead">Not running</b>
               <small id="session-sub"></small>
             </div>
+            <!-- The label's text is a span so the `?` can hang off the words
+                 rather than off the <label>: inside the label, a click anywhere on
+                 the help button would also be a click on the number input. -->
             <label class="batch">
-              Tabs at once
+              <span id="batch-label">Tabs at once</span>
               <input type="number" id="batch-size" min="1" max="20" step="1" />
             </label>
             <button id="session-toggle" class="primary">Start session</button>
@@ -92,7 +95,7 @@
                column or a status added to the model has to become a checkbox on
                its own, or a selection saved today quietly outlives the schema. -->
           <details id="export-options" class="reference">
-            <summary>What to export</summary>
+            <summary><span id="export-options-label">What to export</span></summary>
             <div class="reference-body">
               <fieldset class="checkgroup">
                 <legend>Columns</legend>
@@ -205,7 +208,7 @@
               <label class="switch"><input type="checkbox" id="close-on-submit" class="switch-input" /><span class="switch-track" aria-hidden="true"><i></i></span></label>
             </div>
             <div class="setrow">
-              <div class="setrow-text"><h5>Auto-close the tab after I skip a posting</h5></div>
+              <div class="setrow-text"><h5>Auto-close the tab after I skip</h5></div>
               <label class="switch"><input type="checkbox" id="close-on-skip" class="switch-input" /><span class="switch-track" aria-hidden="true"><i></i></span></label>
             </div>
             <!-- A value on the right of its own row, as the reference's "Batch size"
@@ -213,19 +216,18 @@
                  body while everything around it sat on a card. -->
             <div class="setrow">
               <label class="setrow-text" for="close-delay">
-                <span class="setrow-title" id="close-delay-label">Close delay (ms)</span>
+                <!-- "Close delay", matching SETTINGS_HELP.closeTabDelayMs's title;
+                     the unit is in the caption `attachRowHelp` renders under it. -->
+                <span class="setrow-title" id="close-delay-label">Close delay</span>
               </label>
               <input type="number" id="close-delay" class="setrow-value" min="0" step="250" />
             </div>
           </div>
           <p id="settings-status" class="status" role="status" aria-live="polite"></p>
 
-          <h3>Two-step applications</h3>
-          <p class="hint">
-            Postings that apply on the employer's own site are followed automatically,
-            after any “before leaving” steps for that site (e.g. clicking its Save job
-            button). Both the posting and the application it leads to are recorded.
-          </p>
+          <h3 id="twostep-heading">Two-step applications</h3>
+          <!-- Filled from CONCEPT_HELP.twoStep by options.ts. -->
+          <p id="twostep-hint" class="hint"></p>
           <!-- The same size of card as Behavior's, sitting beside its neighbour
                in the same grid column — it was `stacked span`, which forced its
                own full-width row and left a hole beside the switch card. Two
@@ -253,13 +255,16 @@
             </div>
           </div>
 
-          <h3>Review modal — size &amp; position</h3>
+          <!-- "Panels", not "the review modal": one stored rectangle places both
+               on-page sheets, and naming only one of them is why the setup panel
+               reads as unconfigurable. Same for the row and the labels below. -->
+          <h3 id="panels-heading">On-page panels — size &amp; position</h3>
           <!-- Above the simulator, because it overrides it: reading the drag
                instructions first and only then learning the card is fullscreen
                anyway is the wrong order. Caption comes from SETTINGS_HELP. -->
           <div class="settings-list">
             <div class="setrow">
-              <div class="setrow-text"><h5>Open the modal fullscreen</h5></div>
+              <div class="setrow-text"><h5>Fullscreen panels</h5></div>
               <label class="switch"><input type="checkbox" id="modal-fullscreen" class="switch-input" /><span class="switch-track" aria-hidden="true"><i></i></span></label>
             </div>
           </div>
@@ -267,17 +272,18 @@
             Drag the card to move it; drag its top-left corner to resize, or its left
             or top edge to resize one direction only. Edges snap to the screen edge
             and to the default gutter, and an edge that has run out of room lights up
-            — indigo against the screen, amber at the smallest usable size. With the
+            — clay against the screen, amber at the smallest usable size. With the
             keyboard, focus the card and use the arrow keys (hold Shift for 10px);
             focus a handle to resize with them instead.
           </p>
           <p class="hint">
             The frame below is your screen to scale — the display minus the space your
             browser's own tab strip, address bar and bookmarks bar take, measured when
-            this page loaded — so what you set here is what the modal gets on a real
+            this page loaded — so what you set here is what a panel gets on a real
             posting. Resizing this window does not change it. This applies on desktop
-            only: under 640px wide the modal is always a full-width bottom sheet, so on
-            a phone the frame stands in for a desktop screen rather than for this one.
+            only: at 640px wide and under, a panel is always a full-width bottom sheet,
+            so on a phone the frame stands in for a desktop screen rather than for this
+            one.
           </p>
           <div id="sim" class="sim">
             <!-- A stand-in posting, so the card is judged against a page rather
@@ -297,14 +303,14 @@
             <span class="sim-guide bottom" aria-hidden="true"></span>
             <span class="sim-guide left" aria-hidden="true"></span>
             <div id="sim-card" class="sim-card" role="application" tabindex="0"
-                 aria-label="Review modal position and size. Drag or use the arrow keys to move it; use the corner, left-edge and top-edge handles to resize.">
+                 aria-label="On-page panel position and size. Drag or use the arrow keys to move it; use the corner, left-edge and top-edge handles to resize.">
               <span class="sim-card-head" aria-hidden="true"></span>
               <span class="sim-card-body" aria-hidden="true"></span>
               <span class="sim-card-foot" aria-hidden="true"></span>
               <span id="sim-size" class="sim-size" aria-hidden="true"></span>
-              <button id="sim-edge-x" class="sim-handle x" aria-label="Resize the modal's width"></button>
-              <button id="sim-edge-y" class="sim-handle y" aria-label="Resize the modal's height"></button>
-              <button id="sim-grip" class="sim-grip" aria-label="Resize the modal"></button>
+              <button id="sim-edge-x" class="sim-handle x" aria-label="Resize the panel's width"></button>
+              <button id="sim-edge-y" class="sim-handle y" aria-label="Resize the panel's height"></button>
+              <button id="sim-grip" class="sim-grip" aria-label="Resize the panel"></button>
             </div>
           </div>
           <p class="status sim-readout" role="status" aria-live="polite">
@@ -333,9 +339,11 @@
         <section id="configs-section">
           <h2>Site configurations</h2>
           <p class="hint">
-            Per-site rules as JSON (array of configs). Detection, prep steps, extract
-            selectors, field overrides, CV upload selector, submit-CV steps. Most sites
-            are easier to set up visually — open a posting and use “Set up this site”.
+            Per-site rules as JSON (array of configs). Detection, page actions, extract
+            selectors, field overrides, CV upload selector, the CV-confirmation steps,
+            and the two keys Apply depends on — the Send button and the confirmation
+            element. Most sites are easier to set up visually — open a posting and use
+            “Set up this site”.
           </p>
           <!-- Every key, explained. Without this the JSON below is the only
                documentation there is, and it documents nothing. -->
@@ -363,12 +371,12 @@
       <div id="panel-sync" role="tabpanel" aria-labelledby="tab-sync" hidden>
         <section id="sync-section">
           <h2 id="sync-heading">Sync</h2>
-          <p class="hint">
-            Keeps the job database the same in two browsers — which postings you have
-            applied to, which you skipped, and the job text saved with them. Only that:
-            your profile, CV, site configurations and settings stay on this device.
-            Neither side overwrites the other, the two are combined.
-          </p>
+          <!-- No section hint here on purpose. This section is one setting, and
+               that setting's row already carries the one-line form as its caption
+               (`attachRowHelp`) with the full text behind the `?` on both. The
+               hand-written paragraph that used to sit here was a third copy of the
+               same paragraph, and rendering it from the catalog instead simply put
+               the caption on screen twice, thirty pixels apart. -->
           <div class="settings-list">
             <div class="setrow">
               <div class="setrow-text"><h5>Sync the job database</h5></div>

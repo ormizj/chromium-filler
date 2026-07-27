@@ -1116,6 +1116,13 @@ button.cf-btn.primary[aria-disabled='true'] {
   white-space: pre;
 }
 
+/* The same example, one level in. An entry-level example follows the whole panel
+   and earns --space-3 to separate it from everything above; inside a row it
+   belongs to the line it is an example *of*, so it sits closer to it. */
+.cf-help-rows .cf-help-example {
+  margin-top: var(--space-2);
+}
+
 /* Inline `code spans` inside help copy — the catalog writes selectors in backticks. */
 .cf-help code {
   font: 0.95em var(--mono);

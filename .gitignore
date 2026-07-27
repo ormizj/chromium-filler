@@ -9,3 +9,8 @@ playwright-report
 .pkgtmp
 .claude/settings.local.json
 .playwright-mcp
+# Screenshots taken while checking a surface. Root-level only — design/ and any
+# fixture image are still tracked. `undefined/` is where they land when the
+# output path is left unset.
+/*.png
+undefined/

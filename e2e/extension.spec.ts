@@ -45,8 +45,13 @@ test.describe.configure({ mode: 'serial' });
 
 test.beforeAll(async () => {
   test.setTimeout(120_000);
+  // Loudly, not `test.skip`. Skipping meant a run with no `dist/` reported
+  // "0 passed" as success — a green E2E that executed nothing, which is the one
+  // failure mode this suite must never have, since it *is* the confidence signal.
   if (!fs.existsSync(path.join(DIST, 'manifest.json'))) {
-    test.skip(true, 'Build first: `npm run build`');
+    throw new Error(
+      `No built extension at ${DIST}. Run \`npm run build\` before \`npm run test:e2e\`.`,
+    );
   }
 
   // Extensions need the full Chrome-for-Testing binary (the headless *shell*
@@ -76,7 +81,7 @@ test.beforeAll(async () => {
         profile,
         siteConfigs: configs,
         settings: {
-          autoRunOnLoad: true, autoFillLowConfidence: false,
+          autoRunOnLoad: true,
           closeTabOnSubmit: true, closeTabDelayMs: 200,
           redirectTarget: 'newTabCloseSource',
         },
@@ -1728,6 +1733,44 @@ test('Setup: picking a field leaves you where you were in the list', async () =>
   }
 });
 
+/**
+ * The picker's toolbar has to name the field the way the row that launched it
+ * does. The review modal's Pick passed the bare `FieldKey`, so the one surface
+ * the user is looking at while they aim at an input read `Click the
+ * "coverLetter" field` — the storage key, in the only place in the extension
+ * that ever spelled a field that way. The setup panel's Pick has always used
+ * `FIELD_LABELS`; the two are the same gesture and must read the same.
+ *
+ * Asserted against the row's own label rather than a literal, so renaming a
+ * field in `FIELD_LABELS` cannot make this pass while the two disagree.
+ */
+test('Modal: the picker names the field the way the report row does', async () => {
+  const page = await context.newPage();
+  try {
+    await page.goto(urlFor('quick-plain'));
+    const card = page.locator('.cf-card[data-sheet="review"]');
+    await expect(card).toBeVisible({ timeout: 20_000 });
+
+    // The report lives behind the Fields tab; Job is the default.
+    await card.locator('.cf-view').nth(1).click();
+    const row = card.locator('.cf-report .cf-row').first();
+    const label = (await row.locator('.cf-field b').textContent())!.trim();
+    // A key would be one lower-case word; every real label is capitalised.
+    expect(label).toMatch(/^[A-ZÉ]/);
+
+    await row.getByRole('button', { name: 'Pick', exact: true }).click();
+
+    // The toolbar is drawn on the host page's own light DOM, not in the sheet.
+    const bar = page.locator('[data-cf-picker="bar"]');
+    await expect(bar).toBeVisible();
+    await expect(bar).toContainText(`"${label}"`);
+
+    await bar.getByRole('button', { name: 'Cancel' }).click();
+  } finally {
+    await page.close();
+  }
+});
+
 test('Sheets: the setup panel is a bottom sheet on a phone, like the modal', async () => {
   // The regression that hid in the cascade: `setupPanel.css` is inlined after
   // `primitives.css` at equal specificity, so its own `.cf-card { top; width }`
@@ -1838,4 +1881,288 @@ test("Setup: the verdict's dot lines up with the rows it argues about", async ()
   } finally {
     await page.close();
   }
+});
+
+/* ==================================================================
+ * Surfaces that had no coverage at all.
+ *
+ * The Sync tab's network half is proved against a fake Google in
+ * `src/background/*.test.ts`; what belongs here is everything reachable
+ * *without* Google — which is the whole of the setup the user has to get right
+ * before Connect will work, and the backup file that exists for people who
+ * would rather not connect anything.
+ * ================================================================== */
+
+/** Press an anchor-download button and read the blob instead of writing a file. */
+async function downloadedText(page: Page, buttonId: string): Promise<string> {
+  return page.evaluate(async (id) => {
+    let blob: Blob | null = null;
+    const realCreate = URL.createObjectURL;
+    const realClick = HTMLAnchorElement.prototype.click;
+    URL.createObjectURL = (b: Blob | MediaSource) => { blob = b as Blob; return realCreate.call(URL, b); };
+    HTMLAnchorElement.prototype.click = function () { /* don't actually download */ };
+    try {
+      document.getElementById(id)!.click();
+      await new Promise((r) => setTimeout(r, 500));
+      return blob ? await (blob as Blob).text() : '';
+    } finally {
+      URL.createObjectURL = realCreate;
+      HTMLAnchorElement.prototype.click = realClick;
+    }
+  }, buttonId);
+}
+
+/** Replace the job database outright. */
+async function seedJobUrls(entries: JobUrlEntry[]): Promise<void> {
+  await onExtensionPage((page) => page.evaluate(
+    async (list) => { await chrome.storage.local.set({ jobUrls: list }); },
+    entries,
+  ));
+}
+
+function jobEntry(url: string, over: Partial<JobUrlEntry> = {}): JobUrlEntry {
+  const at = Date.now();
+  return {
+    id: url, url, status: 'new', addedAt: at, updatedAt: at,
+    history: [{ status: 'new', at }], ...over,
+  };
+}
+
+test('Sync: the redirect URI is this browser\'s, and Connect waits for a client', async () => {
+  await onExtensionPage(async (page) => {
+    await page.click('#tab-sync');
+
+    // Derived from the extension ID, so it cannot be printed in the help text —
+    // which is exactly why the field exists.
+    await expect(page.locator('#sync-redirect-uri')).toHaveValue(
+      new RegExp(`^https://${extId}\\.chromiumapp\\.org/?$`),
+    );
+
+    // Nothing to authorize against yet, and the account line says where to go
+    // rather than letting Connect fail at Google.
+    await expect(page.locator('#sync-connect')).toBeDisabled();
+    await expect(page.locator('#sync-account')).toContainText('OAuth client');
+    // Never connected, so neither of these can do anything.
+    await expect(page.locator('#sync-now')).toBeDisabled();
+    await expect(page.locator('#sync-disconnect')).toBeDisabled();
+  });
+});
+
+test('Sync: saving a client enables Connect, and clearing the id takes the secret with it', async () => {
+  await onExtensionPage(async (page) => {
+    await page.click('#tab-sync');
+
+    await page.fill('#sync-client-id', 'not-a-client');
+    await page.fill('#sync-client-secret', 'GOCSPX-secret');
+    await page.click('#sync-client-save');
+    // Checked here rather than at Google, where every one of these comes back
+    // as an indistinguishable `invalid_client`.
+    await expect(page.locator('#sync-client-status')).toContainText('client ID');
+    await expect(page.locator('#sync-connect')).toBeDisabled();
+
+    await page.fill('#sync-client-id', '1234.apps.googleusercontent.com');
+    await page.fill('#sync-client-secret', 'GOCSPX-secret');
+    await page.click('#sync-client-save');
+    await expect(page.locator('#sync-client-status')).toContainText('Press Connect');
+    await expect(page.locator('#sync-connect')).toBeEnabled();
+
+    // The secret is write-only: it never comes back into the field, so a
+    // screen-share does not carry it.
+    await expect(page.locator('#sync-client-secret')).toHaveValue('');
+    await expect(page.locator('#sync-client-secret')).toHaveAttribute('placeholder', /Stored/);
+
+    const stored = await page.evaluate(async () =>
+      (await chrome.storage.local.get('syncClient')).syncClient);
+    expect(stored).toMatchObject({ clientId: '1234.apps.googleusercontent.com' });
+
+    // Emptying the id is how the credential comes off this machine — leaving the
+    // secret behind would read as a configured-but-broken client.
+    await page.fill('#sync-client-id', '');
+    await page.click('#sync-client-save');
+    await expect(page.locator('#sync-client-status')).toContainText('removed');
+    expect(await page.evaluate(async () =>
+      (await chrome.storage.local.get('syncClient')).syncClient)).toBeUndefined();
+  });
+});
+
+test('Sync: a backup file round-trips, and combines rather than replacing', async () => {
+  await seedJobUrls([jobEntry('https://backup.example/1')]);
+
+  const text = await onExtensionPage(async (page) => {
+    await page.click('#tab-sync');
+    return downloadedText(page, 'sync-export');
+  });
+
+  const snapshot = JSON.parse(text);
+  expect(snapshot.jobUrls.map((e: JobUrlEntry) => e.url)).toEqual(['https://backup.example/1']);
+
+  // A different posting is here now. Importing must not put the machine back to
+  // how it was — the file is combined in, exactly as syncing would.
+  await seedJobUrls([jobEntry('https://backup.example/2')]);
+
+  await onExtensionPage(async (page) => {
+    await page.click('#tab-sync');
+    await page.setInputFiles('#sync-import-input', {
+      name: 'job-database-test.json', mimeType: 'application/json', buffer: Buffer.from(text),
+    });
+    await expect(page.locator('#sync-file-status')).toContainText('Combined');
+  });
+
+  expect((await readJobUrls()).map((e) => e.url).sort())
+    .toEqual(['https://backup.example/1', 'https://backup.example/2']);
+});
+
+test('Sync: an unreadable backup is refused without touching the database', async () => {
+  await seedJobUrls([jobEntry('https://keep.example/1')]);
+
+  await onExtensionPage(async (page) => {
+    await page.click('#tab-sync');
+    await page.setInputFiles('#sync-import-input', {
+      name: 'holiday-photo.json', mimeType: 'application/json', buffer: Buffer.from('not json at all'),
+    });
+    await expect(page.locator('#sync-file-status')).toContainText('not a job database backup');
+  });
+
+  // Refusing is the safe failure: merging is all-or-nothing.
+  expect((await readJobUrls()).map((e) => e.url)).toEqual(['https://keep.example/1']);
+});
+
+test('Options: the importer extracts URLs from a mess, and counts what it already had', async () => {
+  await seedJobUrls([jobEntry('https://board.example/jobs/1')]);
+
+  await onExtensionPage(async (page) => {
+    await page.click('#tab-queue');
+    await page.fill('#urls-paste', [
+      'Have a look at https://board.example/jobs/1 today',
+      'and https://board.example/jobs/2 — plus https://board.example/jobs/2 again',
+      'nothing here',
+    ].join('\n'));
+    await page.click('#extract-urls');
+
+    // Deduped on the way in; the URL is the unique key.
+    await expect(page.locator('#urls-preview')).toContainText('2 URL(s) found');
+    await page.click('#urls-preview button');
+
+    // One was already in the queue, and saying so is the difference between
+    // "nothing happened" and "nothing needed to happen".
+    await expect(page.locator('#extract-status')).toContainText('Added 1 new URL(s)');
+    await expect(page.locator('#extract-status')).toContainText('1 already in the queue');
+  });
+
+  expect((await readJobUrls()).map((e) => e.url).sort()).toEqual([
+    'https://board.example/jobs/1', 'https://board.example/jobs/2',
+  ]);
+});
+
+test('Options: nothing link-shaped in the box says so, rather than adding nothing', async () => {
+  await onExtensionPage(async (page) => {
+    await page.click('#tab-queue');
+    await page.fill('#urls-paste', 'just some prose with no links in it');
+    await page.click('#extract-urls');
+    await expect(page.locator('#extract-status')).toContainText('No URLs found');
+  });
+});
+
+test('Options: the queue filters and searches, and Remove can be undone', async () => {
+  await seedJobUrls([
+    jobEntry('https://alpha.example/jobs/1'),
+    jobEntry('https://beta.example/jobs/2', { status: 'applied' }),
+  ]);
+
+  await onExtensionPage(async (page) => {
+    await page.click('#tab-queue');
+    await expect(page.locator('#urls-list li')).toHaveCount(2);
+
+    // Filter chips carry their own counts, so the filter is legible before it
+    // is pressed.
+    await page.click('#url-filters button:has-text("Applied")');
+    await expect(page.locator('#urls-list li')).toHaveCount(1);
+    await expect(page.locator('#urls-list')).toContainText('beta.example');
+
+    await page.click('#url-filters button:has-text("All")');
+    await page.fill('#url-search', 'alpha');
+    await expect(page.locator('#urls-list li')).toHaveCount(1);
+    await expect(page.locator('#urls-list')).toContainText('alpha.example');
+    await page.fill('#url-search', '');
+
+    await page.click('#urls-list li:has-text("alpha.example") button:has-text("Remove")');
+    await expect(page.locator('#urls-list li')).toHaveCount(1);
+
+    // The undo is a real re-instatement, not a re-add: the entry keeps its history.
+    await page.click('#toast-action');
+    await expect(page.locator('#urls-list li')).toHaveCount(2);
+  });
+});
+
+test('Options: Clear all confirms, then tombstones rather than emptying the list', async () => {
+  await seedJobUrls([
+    jobEntry('https://gone.example/jobs/1'),
+    jobEntry('https://gone.example/jobs/2'),
+  ]);
+
+  await onExtensionPage(async (page) => {
+    await page.click('#tab-queue');
+    await page.click('#clear-urls');
+    // Named count, and a warning that the archive goes too — this one is not undoable.
+    await expect(page.locator('#clear-confirm-label')).toContainText('2');
+
+    await page.click('#clear-cancel');
+    await expect(page.locator('#urls-list li')).toHaveCount(2);
+
+    await page.click('#clear-urls');
+    await page.click('#clear-really');
+    // Cleared, not filtered — the tombstones left behind must not make the queue
+    // claim a filter is hiding them.
+    await expect(page.locator('#urls-list li.empty')).toContainText('No postings yet');
+    await expect(page.locator('#urls-list li:not(.empty)')).toHaveCount(0);
+  });
+
+  // A splice would come straight back on the next sync — a union can only grow.
+  const raw = await readJobUrls();
+  expect(raw).toHaveLength(2);
+  expect(raw.every((e) => e.status === 'deleted')).toBe(true);
+});
+
+test('Options: the profile saves, and only the fields it owns', async () => {
+  await onExtensionPage(async (page) => {
+    await page.click('#tab-profile');
+    await page.fill('#profile-fields [data-field="city"]', 'Edinburgh');
+    await expect(page.locator('#profile-savebar')).toBeVisible();
+    await page.click('#save-profile');
+    await expect(page.locator('#profile-status')).toContainText('Saved');
+
+    const profile = await page.evaluate(async () =>
+      (await chrome.storage.local.get('profile')).profile as { values: Record<string, string> });
+    expect(profile.values.city).toBe('Edinburgh');
+    // The rest of the profile is still there.
+    expect(profile.values.email).toBe('ada@example.com');
+  });
+
+  // Put it back for anything that follows.
+  await onExtensionPage((page) => page.evaluate(async () => {
+    const { profile } = await chrome.storage.local.get('profile');
+    profile.values.city = 'London';
+    await chrome.storage.local.set({ profile });
+  }));
+});
+
+test('Options: a broken site config is named and refused, not saved', async () => {
+  await onExtensionPage(async (page) => {
+    await page.click('#tab-sites');
+    const before = await page.evaluate(async () =>
+      (await chrome.storage.local.get('siteConfigs')).siteConfigs.length);
+
+    await page.fill('#configs-json', '[{ "urlPatterns": ["*://x/*"], "extract": {} }]');
+    await page.click('#save-configs');
+    // A config with no id cannot be matched, saved against, or explained.
+    await expect(page.locator('#configs-status')).toContainText('id');
+
+    await page.fill('#configs-json', 'not json');
+    await page.click('#save-configs');
+    await expect(page.locator('#configs-status')).not.toHaveText('Saved');
+
+    const after = await page.evaluate(async () =>
+      (await chrome.storage.local.get('siteConfigs')).siteConfigs.length);
+    expect(after).toBe(before);
+  });
 });

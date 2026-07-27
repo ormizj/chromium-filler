@@ -27,10 +27,18 @@ export async function buildSnapshot(): Promise<JobSnapshot> {
  * tombstone only has to outlive the other device's next sync, and a capture is
  * worth keeping only while its posting is.
  */
-export async function applySnapshot(snapshot: JobSnapshot, now: number = Date.now()): Promise<void> {
+export async function applySnapshot(
+  snapshot: JobSnapshot,
+  now: number = Date.now(),
+): Promise<JobSnapshot> {
   const jobUrls = pruneTombstones(snapshot.jobUrls, now);
   const jobDetails = pruneDetails(snapshot.jobDetails, jobUrls.map((e) => e.url));
   await Promise.all([saveJobUrls(jobUrls), saveJobDetails(jobDetails)]);
+  // Returned, not just stored: the far side wants the same answer this device
+  // just settled on. Writing the *unpruned* merge back instead meant the remote
+  // file never shed a tombstone or an orphaned capture, and grew for the life of
+  // the account carrying job text belonging to postings that no longer exist.
+  return { ...snapshot, jobUrls, jobDetails };
 }
 
 /**
@@ -39,9 +47,7 @@ export async function applySnapshot(snapshot: JobSnapshot, now: number = Date.no
  * symmetric and both ends want the same answer.
  */
 export async function mergeIntoLocal(incoming: JobSnapshot): Promise<JobSnapshot> {
-  const merged = mergeJobs(await buildSnapshot(), incoming);
-  await applySnapshot(merged);
-  return merged;
+  return applySnapshot(mergeJobs(await buildSnapshot(), incoming));
 }
 
 export class UnsupportedSnapshotError extends Error {

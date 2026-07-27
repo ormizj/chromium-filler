@@ -223,12 +223,20 @@ describe('form-fields step', () => {
   });
 
   // Found but not fillable is not found: a `low` CV row cannot be relied on.
+  //
+  // It still must not be *described* as nothing found. `low` is the ordinary
+  // outcome of the unlabelled-file-input fallback (`fieldDetect.ts`) and of a
+  // saved `cvUpload` pointing at a wrapper, so a page that plainly has an upload
+  // was telling a screen-reader user — this string is the rail node's whole
+  // accessible name — that there was none.
   it('counts a CV upload that only weakly matched', () => {
     const s = state(snapshot({
       fields: [row({ key: 'resume', status: 'low' }), row({ key: 'email' })],
     }), 'fields');
     expect(s.todo).toBe(1);
     expect(s.tone).toBe('warn');
+    expect(s.summary).toMatch(/cv/i);
+    expect(s.summary).not.toMatch(/no cv|not found/i);
   });
 
   // A page with no file input at all has no `resume` row to look at, and that is

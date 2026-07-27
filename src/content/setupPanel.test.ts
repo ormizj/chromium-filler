@@ -9,7 +9,7 @@
  */
 import { describe, it, expect, afterEach } from 'vitest';
 import { SetupPanel, type SetupCallbacks, type SetupData } from './setupPanel';
-import { SETUP_STEP_HELP, SETUP_STEP_TITLES } from '../shared/help';
+import { REDIRECT_HELP, SETUP_STEP_HELP, SETUP_STEP_TITLES } from '../shared/help';
 import { SETUP_STEP_ICONS, SETUP_STEP_ORDER } from '../shared/setupSteps';
 
 const noop = () => {};
@@ -345,6 +345,22 @@ describe('setup wizard help', () => {
     for (const row of SETUP_STEP_HELP.kind.rows ?? []) {
       expect(help?.textContent).toContain(row.label);
     }
+  });
+
+  /**
+   * The reference has to reach the panel *with* its concrete selector. The step
+   * is where you press Pick, and a rule with no example of what to pick sent the
+   * user to the Options page to find one.
+   */
+  it('shows a row’s example beside it', () => {
+    const shadow = render(data());
+    panel!.setStep('kind');
+    shadow.querySelector<HTMLButtonElement>('.cf-step-head .cf-help-btn')!.click();
+
+    const example = REDIRECT_HELP.quickApplySelector.example!;
+    const li = [...shadow.querySelectorAll('.cf-help-rows > li')]
+      .find((el) => el.textContent?.includes('Quick-apply marker'));
+    expect(li?.querySelector('.cf-help-example')?.textContent).toBe(example);
   });
 
   it('presses ? again to close', () => {

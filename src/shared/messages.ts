@@ -92,6 +92,13 @@ export interface StatusResponse {
 export interface SyncState {
   /** This device has an OAuth client id at all — the first setup step. */
   configured: boolean;
+  /**
+   * A refresh token is held. Reported separately from `account` because that is
+   * only a *label*: it comes out of the id_token, and a consent that returned no
+   * `email` claim left a perfectly good connection looking unauthorized — with
+   * Disconnect disabled, so it could not even be cleared from the Sync tab.
+   */
+  connected: boolean;
   /** The client id itself, so the options form can show what is stored. */
   clientId?: string;
   /** The Google account this browser is syncing through, once authorized. */
