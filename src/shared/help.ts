@@ -175,10 +175,16 @@ export const CONFIG_HELP: Record<keyof SiteConfig, HelpEntry> = {
       + 'applied and triggers auto-close. It counts only once that element is on '
       + 'screen, never merely present in the page\'s HTML, because sites routinely '
       + 'ship a hidden success node and reveal it when the server answers.',
+    // Two ways in, not one. `applyStatusChain` walks `sourceUrl`, so a board
+    // whose postings apply on an employer's site has them recorded when *that*
+    // site confirms — no confirmation element of its own, and nobody editing a
+    // status by hand. Naming only the manual edit made that flow read as broken.
     when: 'Always. There is no second way of telling that an application went in, so a '
       + 'site without one cannot use Apply at all — it stays greyed out, and nothing '
-      + 'there is ever recorded as applied on its own. Setting a posting\'s status by '
-      + 'hand in Options → Queue is the only way in.',
+      + 'there is ever recorded as applied on its own. Two things still are, and '
+      + 'neither is this site\'s doing: a posting that applies on the employer\'s own '
+      + 'site is marked applied when that site\'s own confirmation appears, and any '
+      + 'posting\'s status can be set by hand in Options → Queue.',
     example: '.application-success',
   },
 };
@@ -616,13 +622,25 @@ export const CONCEPT_HELP: Record<ConceptKey, HelpEntry> = {
   dots: {
     title: 'What the dots mean',
     short: 'Green is done, yellow is worth a look, grey means nothing was found.',
-    body: 'Green: matched and handled. Yellow: found something, but it is a guess worth '
-      + 'checking — or a selector you saved that no longer resolves on this page, which '
-      + 'is how a form field, a redirect selector and the Send button each report one. '
-      + 'Two rows answer that differently: the confirmation element stays green while it '
-      + 'is only saved, because it does not exist until an application has gone through, '
-      + 'and a Job info row whose saved selector stops matching goes grey rather than '
-      + 'yellow — its own line still reads "saved selector · no match". The third '
+    // What yellow is *actually* drawn for, per row type. It used to say a saved
+    // selector that stops resolving is "how a form field, a redirect selector and
+    // the Send button each report one", and only the redirect row does that: a
+    // stale `fieldOverrides` selector is skipped by `detectFields` and the
+    // guessing simply takes over, and `findSubmitControl` falls back to the label
+    // heuristic. So the copy sent someone whose field row had gone grey hunting
+    // for a yellow dot that cannot appear, and said nothing about the one thing
+    // that does change under them silently.
+    body: 'Green: matched and handled. Yellow: found something, but it is not settled — a '
+      + 'guess the keyword matching is unsure of, a Send button recognised only by its '
+      + 'label, or a selector you saved that resolves to something that cannot be filled, '
+      + 'which the row spells out as "not a form field — re-pick". A redirect selector you '
+      + 'saved that stops matching altogether is yellow too, and says "saved selector · no '
+      + 'match". Three rows treat a stale save differently: the confirmation element stays '
+      + 'green while it is only saved, because it does not exist until an application has '
+      + 'gone through; a Job info row whose saved selector stops matching goes grey rather '
+      + 'than yellow — its own line still reads "saved selector · no match"; and on a form '
+      + 'field it is quieter than either, because the guessing takes back over, so the row '
+      + 'simply reads "auto ·" again, or "not found". The third '
       + 'state is "nothing found", and it is drawn twice over: grey with a dash in the '
       + 'setup panel, where "not set" is an ordinary answer, and red with a cross in the '
       + 'fill report, where an unmatched field is a gap in what would be sent. The glyph '
