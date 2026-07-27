@@ -155,9 +155,9 @@ export const CONFIG_HELP: Record<keyof SiteConfig, HelpEntry> = {
       + 'and only the selectors you saved yourself fill anything — your '
       + '`fieldOverrides` and `cvUpload` — with no field guessed. It '
       + 'stops there, though: the Send button is still found by its label, the '
-      + 'posting\'s own JobPosting data is still read for the title and chips, and '
-      + 'whether a posting applies here or elsewhere has its own switch, '
-      + '`redirect.autoDetect`.',
+      + 'posting is still read for the title and description — and its own JobPosting '
+      + 'data for the chips — and whether a posting applies here or elsewhere has its '
+      + 'own switch, `redirect.autoDetect`.',
     when: 'A site is so unusual that guessing does more harm than good. Rare.',
     example: 'true',
   },
@@ -764,7 +764,7 @@ export const CONCEPT_HELP: Record<ConceptKey, HelpEntry> = {
       + 'postings — the ones you applied to, by default, but the text of a skipped one '
       + 'is kept too — and whether the file is JSON or a CSV for a spreadsheet. The text '
       + 'is saved automatically for every posting the extension reads and reports on, '
-      + 'so the file covers applications made long after the tab was closed. A '
+      + 'so the file covers applications whose tabs were closed long ago. A '
       + 'two-step posting is one '
       + 'entry, not two — the board\'s description travels with the application it '
       + 'handed off to.',
