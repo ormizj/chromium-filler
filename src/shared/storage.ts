@@ -5,6 +5,7 @@
 
 import type { JobUrlEntry, Profile, Settings, SiteConfig, StoredState } from './types';
 import type { JobDetailsMap } from './jobDetails';
+import type { ConfigPatch } from './recording';
 import { DEFAULT_PROFILE, DEFAULT_SETTINGS } from './defaults';
 import { normalizeEntry } from './jobUrls';
 import { configTemplate } from './configTemplate';
@@ -73,6 +74,44 @@ export async function mutateSiteConfig(
     await saveSiteConfigs(configs);
   }
   return configs;
+}
+
+/**
+ * Write what a recording compiled to into a site config.
+ *
+ * The rule throughout is **a patch only ever speaks about what it saw**. Recording a
+ * site a second time to mark the description you forgot must not wipe the Send
+ * button you got right the first time, and re-recording the quick-apply half of a
+ * board must not delete the handoff steps from a two-step posting on the same site.
+ * So:
+ *
+ * - maps (`extract`, `fieldOverrides`) **merge**, key by key;
+ * - sequences (`prep`, `submitCv`, `beforeFollow`) **replace, but only when the
+ *   recording produced one** — a sequence is an ordering, and half of two recordings
+ *   interleaved is not a thing anyone meant;
+ * - single selectors overwrite only when the patch has one.
+ *
+ * The same forward-compatible instinct as `resolveExport`: absence means "no
+ * opinion", never "clear it".
+ */
+export async function applyConfigPatch(configId: string, patch: ConfigPatch): Promise<void> {
+  await mutateSiteConfig(configId, (c) => {
+    c.extract = { ...c.extract, ...patch.extract };
+    if (Object.keys(patch.fieldOverrides).length) {
+      c.fieldOverrides = { ...c.fieldOverrides, ...patch.fieldOverrides };
+    }
+    if (patch.cvUpload) c.cvUpload = patch.cvUpload;
+    if (patch.prep.length) c.prep = patch.prep;
+    if (patch.submitCv.length) c.submitCv = patch.submitCv;
+    if (patch.submitSelector) c.submitSelector = patch.submitSelector;
+    if (patch.successSelector) c.successSelector = patch.successSelector;
+
+    if (patch.redirect) {
+      const { beforeFollow, ...selectors } = patch.redirect;
+      c.redirect = { ...c.redirect, ...selectors };
+      if (beforeFollow?.length) c.redirect.beforeFollow = beforeFollow;
+    }
+  });
 }
 
 /** Save an override selector for one field of a config, creating the map as needed. */

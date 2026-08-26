@@ -18,6 +18,7 @@
 
 import { normalizeAttr } from './fieldKeys';
 import { isDisplayed } from './visible';
+import { query } from './query';
 
 export interface SubmitControl {
   element: HTMLElement | null;
@@ -86,6 +87,21 @@ function sourcesFor(el: HTMLElement): Array<[string, number]> {
   ];
 }
 
+/**
+ * Whether a label, on its own, means "this sends the application".
+ *
+ * The same veto-beats-match policy as `score`, over one string instead of an
+ * element's five. It exists for the recorder's compiler, which sees a label and a
+ * selector and no DOM: an unbound click that reads "Submit application" must never
+ * be replayed as a prep step, because prep runs automatically on every later visit.
+ */
+export function looksLikeSend(label: string): boolean {
+  const text = normalizeAttr(label);
+  if (!text) return false;
+  if (NEVER_PATTERNS.some((re) => re.test(text))) return false;
+  return SEND_PATTERNS.some((re) => re.test(text));
+}
+
 function isSubmitType(el: HTMLElement): boolean {
   if (el instanceof HTMLInputElement) return el.type === 'submit' || el.type === 'image';
   if (el instanceof HTMLButtonElement) return el.type === 'submit';
@@ -146,12 +162,8 @@ export function findSubmitControl(
   within: HTMLElement[] = [],
 ): SubmitControl {
   if (override) {
-    let el: HTMLElement | null = null;
-    try {
-      el = root.querySelector(override) as HTMLElement | null;
-    } catch {
-      el = null; // a malformed saved selector falls through to the heuristic
-    }
+    // A malformed saved selector resolves to null and falls through to the heuristic.
+    const el = query(root, override);
     // A saved selector is the user's own answer, so it is taken as given — no
     // label check, no veto. It is deliberately not required to be *visible*:
     // some sites reveal the button only as the form is completed, and a saved

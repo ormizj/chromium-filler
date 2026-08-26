@@ -5,7 +5,12 @@
  * different tab, reached through tracker/302 hops.
  */
 
-import { MSG, type FollowRedirectResponse, type Message } from '../shared/messages';
+import {
+  MSG, type FollowRedirectResponse, type Message, type RecordingResponse,
+} from '../shared/messages';
+import {
+  bindLastStep, getRecording, inheritRecording, popStep, pushStep, startRecording, stopRecording,
+} from './recordings';
 import { getSettings, mutateJobUrls } from '../shared/storage';
 import { applyStatusChain, linkRedirect } from '../shared/jobUrls';
 import { isExternalUrl } from '../shared/redirect';
@@ -59,6 +64,42 @@ chrome.runtime.onMessage.addListener((msg: Message, _sender, sendResponse) => {
     noteApplying(msg.url, _sender.tab?.id)
       .then(() => sendResponse({ ok: true }))
       .catch((e) => sendResponse({ ok: false, error: String(e) }));
+    return true;
+  }
+  if (msg.type === MSG.RECORD_START) {
+    startRecording(_sender.tab?.id, msg.flow, msg.postingUrl)
+      .then(() => sendResponse({ ok: true }))
+      .catch((e) => sendResponse({ ok: false, error: String(e) }));
+    return true;
+  }
+  if (msg.type === MSG.RECORD_PUSH) {
+    pushStep(_sender.tab?.id, msg.step)
+      .then(() => sendResponse({ ok: true }))
+      .catch((e) => sendResponse({ ok: false, error: String(e) }));
+    return true;
+  }
+  if (msg.type === MSG.RECORD_BIND) {
+    bindLastStep(_sender.tab?.id, msg.bind)
+      .then((recording) => sendResponse({ recording } satisfies RecordingResponse))
+      .catch(() => sendResponse({} satisfies RecordingResponse));
+    return true;
+  }
+  if (msg.type === MSG.RECORD_UNDO) {
+    popStep(_sender.tab?.id)
+      .then((recording) => sendResponse({ recording } satisfies RecordingResponse))
+      .catch(() => sendResponse({} satisfies RecordingResponse));
+    return true;
+  }
+  if (msg.type === MSG.RECORD_GET) {
+    getRecording(_sender.tab?.id)
+      .then((recording) => sendResponse({ recording } satisfies RecordingResponse))
+      .catch(() => sendResponse({} satisfies RecordingResponse));
+    return true;
+  }
+  if (msg.type === MSG.RECORD_STOP) {
+    stopRecording(_sender.tab?.id)
+      .then((recording) => sendResponse({ recording } satisfies RecordingResponse))
+      .catch(() => sendResponse({} satisfies RecordingResponse));
     return true;
   }
   if (msg.type === MSG.FOLLOW_REDIRECT) {
@@ -195,8 +236,15 @@ async function handleSubmitted(reportedUrl: string, tabId: number | undefined): 
   await onSubmitted(tabId);
 
   // Optionally close the tab after a short delay so the request completes.
+  //
+  // Never while a recording is running, though. The application really was sent, so
+  // marking it applied above is right — but the confirmation appearing is the exact
+  // moment the user has to mark it, and it is the one selector that cannot be
+  // captured at any other time. Tidying the tab away here would close the page out
+  // from under the last step of the setup that whole recording exists to produce.
+  const recording = await getRecording(tabId);
   const settings = await getSettings();
-  if (settings.closeTabOnSubmit && tabId != null) {
+  if (settings.closeTabOnSubmit && tabId != null && !recording) {
     const delay = Math.max(0, settings.closeTabDelayMs ?? 1500);
     setTimeout(() => chrome.tabs.remove(tabId).catch(() => {}), delay);
   }
@@ -295,14 +343,21 @@ async function followRedirect(
   return { opened: true };
 }
 
-/** A tab opened by a watched tab inherits its watch (target=_blank apply links). */
+/**
+ * A tab opened by a watched tab inherits its watch (target=_blank apply links) — and
+ * a tab opened by a *recording* tab inherits the recording, which is what lets a
+ * two-step posting be set up in one pass: the employer's form usually opens in a new
+ * tab, and the tab that knew about the recording is often closed behind it.
+ */
 chrome.tabs.onCreated.addListener((tab) => {
   const opener = tab.openerTabId;
   if (opener == null || tab.id == null) return;
+  const tabId = tab.id;
   void (async () => {
     const watches = await getWatches();
     const parent = watches[String(opener)];
-    if (parent) await armWatch(tab.id!, parent);
+    if (parent) await armWatch(tabId, parent);
+    await inheritRecording(opener, tabId);
   })();
 });
 

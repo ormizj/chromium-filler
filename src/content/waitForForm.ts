@@ -3,17 +3,19 @@
  * form/file-input heuristic is satisfied), or after a timeout.
  */
 
+import { query } from '../shared/query';
+
 export function waitForSelector(
   selector: string,
   timeoutMs = 15000,
   root: ParentNode = document,
-): Promise<Element | null> {
-  const existing = safeQuery(root, selector);
+): Promise<HTMLElement | null> {
+  const existing = query(root, selector);
   if (existing) return Promise.resolve(existing);
 
   return new Promise((resolve) => {
     let done = false;
-    const finish = (el: Element | null) => {
+    const finish = (el: HTMLElement | null) => {
       if (done) return;
       done = true;
       observer.disconnect();
@@ -22,21 +24,13 @@ export function waitForSelector(
     };
 
     const observer = new MutationObserver(() => {
-      const el = safeQuery(root, selector);
+      const el = query(root, selector);
       if (el) finish(el);
     });
     observer.observe(document.documentElement, { childList: true, subtree: true });
 
-    const timer = setTimeout(() => finish(safeQuery(root, selector)), timeoutMs);
+    const timer = setTimeout(() => finish(query(root, selector)), timeoutMs);
   });
-}
-
-function safeQuery(root: ParentNode, selector: string): Element | null {
-  try {
-    return root.querySelector(selector);
-  } catch {
-    return null;
-  }
 }
 
 /** Generic readiness: a form containing at least one editable control. */

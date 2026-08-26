@@ -12,7 +12,8 @@ import type {
 } from '../shared/types';
 import { statusForUrl } from '../shared/jobUrls';
 import { findMatchingConfig } from '../shared/matcher';
-import { generateSelector } from '../shared/selector';
+import { generateSelector, pickSelector } from '../shared/selector';
+import { query } from '../shared/query';
 import { isExternalUrl } from '../shared/redirect';
 import { DEFAULT_SETTINGS } from '../shared/defaults';
 import {
@@ -20,15 +21,21 @@ import {
   saveExtractSelector, clearExtractSelector, ensureConfigForUrl, mutateSiteConfig,
   saveRedirectSelector, clearRedirectSelector, type RedirectSelectorKey,
   saveSubmitSelector, clearSubmitSelector, saveSuccessSelector, clearSuccessSelector,
-  mutateJobDetails,
+  mutateJobDetails, applyConfigPatch,
 } from '../shared/storage';
 import { captureDetails, type JobDetails } from '../shared/jobDetails';
+import {
+  compileRecording,
+  type BindKey, type CompiledSetup, type RecordFlow, type RecordLeg,
+  type Recording, type RecordedStep,
+} from '../shared/recording';
 import { BUILD_ID } from '../shared/buildId';
 import { getDoc, cvFileToFile } from '../shared/cvStore';
 import { TEXT_FIELDS, FIELD_LABELS, orderFields } from '../shared/fieldKeys';
 import { matchStatus, orderReport } from '../shared/fieldStatus';
 import {
-  MSG, type FollowRedirectResponse, type Message, type SessionState, type StatusResponse,
+  MSG, type FollowRedirectResponse, type Message, type RecordingResponse,
+  type SessionState, type StatusResponse,
 } from '../shared/messages';
 import { hostOf } from '../shared/url';
 import { isRendered } from '../shared/visible';
@@ -40,6 +47,8 @@ import { detectFields } from './fieldDetect';
 import { detectRedirect, type RedirectDetection } from './redirectDetect';
 import { fillTextField, fillFileInput, highlight, clearHighlights } from './fill';
 import { startPicker } from './picker';
+import { startRecording, type RecorderHandle } from './recorder';
+import { RecorderBar, bindLabel } from './recorderBar';
 import { FillerModal, type ApplyState } from './modal/modal';
 import {
   SetupPanel,
@@ -127,6 +136,17 @@ class Controller {
   /** The last posting text written to the archive, so re-renders don't rewrite it. */
   private capturedSignature?: string;
 
+  /* --- Recording a site by applying to one job --- */
+
+  /** The recording in progress or awaiting review; the background holds the truth. */
+  private recording?: Recording;
+  /** What it compiled to — computed once on stop, then again after every review edit. */
+  private compiled?: CompiledSetup;
+  private recorder?: RecorderHandle;
+  private recorderBar?: RecorderBar;
+  /** Which page of the recording this one is — the bar orders its menu by it. */
+  private recordingLeg: RecordLeg = 'posting';
+
   async init(): Promise<void> {
     console.info(`${LOG} content script ready — v${chrome.runtime.getManifest().version} · build ${BUILD_ID}`);
     const state = await getState();
@@ -139,6 +159,12 @@ class Controller {
       this.handleMessage(msg, sendResponse);
       return true; // async response
     });
+
+    // A recording may already be under way — this page could be the employer's
+    // site, reached by a handoff, in a tab that was opened seconds ago. Resuming
+    // before anything else matters: `run()` must not fill a form the user is about
+    // to fill themselves.
+    await this.resumeRecording();
 
     if (this.config) {
       this.setupSubmitDetection();
@@ -187,7 +213,7 @@ class Controller {
 
     // Wait for the confirmation element to be VISIBLE, not merely present.
     const check = () => {
-      const el = safeQuery(selector);
+      const el = query(document, selector);
       if (el && isRendered(el)) { report(); return true; }
       return false;
     };
@@ -274,6 +300,11 @@ class Controller {
    * gets handed off (and recorded) instead.
    */
   async run(): Promise<void> {
+    // While a recording is live the user is applying by hand. Filling the form
+    // underneath them would rewrite the answers they are typing, click prep steps
+    // they are in the middle of, and record a sequence that mixes their gestures
+    // with ours — so the whole flow stands down until the recording stops.
+    if (this.recorder) return;
     if (!this.config) return;
     const config = this.config;
 
@@ -442,7 +473,7 @@ class Controller {
     });
     // Resume override lives on cvUpload.
     if (config.cvUpload) {
-      const el = safeQuery(config.cvUpload);
+      const el = query(document, config.cvUpload);
       const resume = detected.find((d) => d.field === 'resume');
       if (el && resume) { resume.element = el; resume.source = 'override'; resume.confidence = 'high'; resume.selectorUsed = config.cvUpload; }
     }
@@ -508,8 +539,17 @@ class Controller {
 
   /** Ask the background where this posting sits in the queue session, if any. */
   private async fetchSession(): Promise<SessionState | undefined> {
+    return this.ask<SessionState>({ type: MSG.SESSION_STATE });
+  }
+
+  /**
+   * Ask the background something and tolerate it not answering. The worker can be
+   * asleep, mid-restart, or gone entirely on an extension reload while a page is
+   * still open — none of which is a reason for the page to throw.
+   */
+  private async ask<T>(message: Message): Promise<T | undefined> {
     try {
-      return await chrome.runtime.sendMessage({ type: MSG.SESSION_STATE });
+      return await chrome.runtime.sendMessage(message);
     } catch {
       return undefined;
     }
@@ -709,6 +749,221 @@ class Controller {
     }, String(label), restore);
   }
 
+  /* ---------------- Recording a site by applying to one job ---------------- */
+
+  /**
+   * Begin. The panel folds to its pill rather than closing, because the user is
+   * about to need the whole page — and because a destroyed panel is a lost place in
+   * the wizard they will come straight back to.
+   */
+  private async startRecording(flow: RecordFlow): Promise<void> {
+    if (this.recorder) return;
+    this.config = await ensureConfigForUrl(location.href);
+    await chrome.runtime.sendMessage({
+      type: MSG.RECORD_START, flow, postingUrl: location.href,
+    } satisfies Message);
+    this.recording = { flow, startedAt: Date.now(), postingUrl: location.href, steps: [] };
+    this.setupPanel?.minimize();
+    this.attachRecorder('posting');
+  }
+
+  /**
+   * Pick a recording back up on a page that knows nothing about it.
+   *
+   * This is the two-step case, and the reason the recording lives in the background:
+   * the user pressed "Apply on company site", the browser left for the employer's
+   * ATS, and under the default `newTabCloseSource` the tab they started in was
+   * closed behind them. This content script is a fresh one on a different origin.
+   */
+  private async resumeRecording(): Promise<void> {
+    const answer = await this.ask<RecordingResponse>({ type: MSG.RECORD_GET });
+    const recording = answer?.recording;
+    if (!recording) return;
+    this.recording = recording;
+    // Which config this page's steps belong to. The posting is whatever the
+    // recording started on; anything on another host is the employer's side.
+    const leg: RecordLeg = isExternalUrl(recording.postingUrl, location.href)
+      ? 'destination'
+      : 'posting';
+
+    // The handoff itself, recorded from the only place that can see it happened.
+    //
+    // No click knows it is going to be the one that leaves, and the background is
+    // told nothing until a step arrives from the far side — so the navigation is
+    // noticed *here*, on arrival, by a content script comparing where it woke up
+    // with where the recording began. It is stamped `posting` on purpose: it is the
+    // last thing that happened on the board, and `compileRecording` reads it there
+    // to work out which click was the apply link.
+    if (leg === 'destination' && !recording.destinationUrl) {
+      await this.onRecordedStep({
+        id: `n${Date.now().toString(36)}`,
+        at: Math.max(0, Date.now() - recording.startedAt),
+        leg: 'posting',
+        url: recording.postingUrl,
+        action: 'navigate',
+        label: '',
+        to: location.href,
+      });
+    }
+
+    this.attachRecorder(leg);
+  }
+
+  private attachRecorder(leg: RecordLeg): void {
+    const recording = this.recording;
+    if (!recording || this.recorder) return;
+    this.recordingLeg = leg;
+
+    this.recorder = startRecording({
+      leg,
+      startedAt: recording.startedAt,
+      onStep: (step) => void this.onRecordedStep(step),
+    });
+    this.recorderBar = new RecorderBar({
+      onBindLast: (bind) => void this.rebindLast(bind),
+      onBindPick: (bind) => this.pickForBind(bind, leg),
+      onUndo: () => void this.undoStep(),
+      onDone: () => void this.stopRecording(),
+    });
+    this.paintBar();
+  }
+
+  private async onRecordedStep(step: RecordedStep): Promise<void> {
+    this.recording?.steps.push(step);
+    this.paintBar();
+    await chrome.runtime.sendMessage({ type: MSG.RECORD_PUSH, step } satisfies Message);
+  }
+
+  private async rebindLast(bind: BindKey | null): Promise<void> {
+    const answer = await this.ask<RecordingResponse>({ type: MSG.RECORD_BIND, bind });
+    if (answer?.recording) this.recording = answer.recording;
+    this.paintBar();
+  }
+
+  private async undoStep(): Promise<void> {
+    const answer = await this.ask<RecordingResponse>({ type: MSG.RECORD_UNDO });
+    if (answer?.recording) this.recording = answer.recording;
+    this.paintBar();
+  }
+
+  /**
+   * Mark something that is not what just happened — the description two screens up,
+   * the confirmation banner that has just appeared. It goes through the same picker
+   * every other override does, and produces a step like any other so the review can
+   * show and undo it.
+   */
+  private pickForBind(bind: BindKey, leg: RecordLeg): void {
+    this.cancelPicker?.();
+    this.cancelPicker = startPicker((element) => {
+      const recording = this.recording;
+      if (!recording) return;
+      void this.onRecordedStep({
+        id: `p${Date.now().toString(36)}`,
+        at: Math.max(0, Date.now() - recording.startedAt),
+        leg,
+        url: location.href,
+        action: 'click',
+        target: pickSelector(element),
+        label: clip(element.textContent ?? '', 60).trim(),
+        bind,
+        bindSource: 'user',
+      });
+      highlight(element as HTMLElement, 'high');
+    }, bindLabel(bind));
+  }
+
+  private paintBar(): void {
+    const recording = this.recording;
+    if (!this.recorderBar || !recording) return;
+    this.recorderBar.render({
+      flow: recording.flow,
+      leg: this.recordingLeg,
+      stepCount: recording.steps.length,
+      last: recording.steps[recording.steps.length - 1],
+      bound: recording.steps.map((s) => s.bind).filter((b): b is BindKey => !!b),
+    });
+  }
+
+  /**
+   * Done applying. The recording is compiled and handed to the panel for review —
+   * nothing is written to the config until Save, because a recording is a proposal
+   * and half of the point of the review is that it can be refused.
+   */
+  private async stopRecording(): Promise<void> {
+    this.cancelPicker?.();
+    this.recorder?.stop();
+    this.recorder = undefined;
+    this.recorderBar?.destroy();
+    this.recorderBar = undefined;
+
+    const answer = await this.ask<RecordingResponse>({ type: MSG.RECORD_STOP });
+    if (answer?.recording) this.recording = answer.recording;
+    if (!this.recording) return;
+    this.compiled = compileRecording(this.recording);
+
+    await this.openSetup();
+    this.setupPanel?.showReview(true);
+  }
+
+  /** Re-decide one step from the review, then recompile: the summary must follow. */
+  private async rebindStep(id: string, bind: BindKey | null): Promise<void> {
+    const step = this.recording?.steps.find((s) => s.id === id);
+    if (!step) return;
+    if (bind) { step.bind = bind; step.bindSource = 'user'; } else { delete step.bind; delete step.bindSource; }
+    await this.recompile();
+  }
+
+  private async removeStep(id: string): Promise<void> {
+    if (!this.recording) return;
+    this.recording.steps = this.recording.steps.filter((s) => s.id !== id);
+    await this.recompile();
+  }
+
+  /** Re-point a step whose selector was only ever its position on the page. */
+  private repickStep(id: string): void {
+    const step = this.recording?.steps.find((s) => s.id === id);
+    if (!step) return;
+    this.cancelPicker?.();
+    this.setupPanel?.setHidden(true);
+    const restore = () => this.setupPanel?.setHidden(false);
+    this.cancelPicker = startPicker((element) => {
+      step.target = pickSelector(element);
+      restore();
+      void this.recompile();
+    }, step.label || 'this step', restore);
+  }
+
+  private async recompile(): Promise<void> {
+    if (this.recording) this.compiled = compileRecording(this.recording);
+    await this.refreshSetup();
+  }
+
+  /**
+   * Write it. Both legs when there are two — `ensureConfigForUrl` is what gives the
+   * employer's ATS a config of its own, which is the same thing a followed handoff
+   * does when it lands somewhere unconfigured.
+   */
+  private async saveRecording(): Promise<void> {
+    const compiled = this.compiled;
+    if (!compiled) return;
+
+    const posting = await ensureConfigForUrl(compiled.posting.url);
+    await applyConfigPatch(posting.id, compiled.posting);
+    if (compiled.destination?.url) {
+      const destination = await ensureConfigForUrl(compiled.destination.url);
+      await applyConfigPatch(destination.id, compiled.destination);
+    }
+    this.discardRecording();
+  }
+
+  /** Leave the review, keeping whatever was already in the config. */
+  private discardRecording(): void {
+    this.recording = undefined;
+    this.compiled = undefined;
+    this.setupPanel?.showReview(false);
+    void this.refreshSetup();
+  }
+
   /* ---------------- On-page Setup mode ---------------- */
 
   /** Enter visual setup: ensure a config exists for this URL, then show the panel. */
@@ -736,6 +991,12 @@ class Controller {
         onPickSuccess: () => this.pickSuccess(),
         onClearSuccess: () => void this.clearSuccess(),
         onRename: (name, pattern) => this.renameConfig(name, pattern),
+        onStartRecording: (flow) => void this.startRecording(flow),
+        onRebindStep: (id, bind) => void this.rebindStep(id, bind),
+        onRepickStep: (id) => this.repickStep(id),
+        onRemoveStep: (id) => void this.removeStep(id),
+        onSaveRecording: () => void this.saveRecording(),
+        onDiscardRecording: () => this.discardRecording(),
         // "Advanced (JSON)" is about *this config*, so it lands on the JSON that
         // holds it. Without `at`/`focus` it opened the options page on whatever
         // tab is default — the queue — and left the user to find the editor.
@@ -801,7 +1062,7 @@ class Controller {
       action: s.action,
       selector: s.selector,
       ms: s.ms,
-      resolves: s.selector ? safeQuery(s.selector) != null : undefined,
+      resolves: s.selector ? query(document, s.selector) != null : undefined,
     }));
     const prep = toPrepRows(config.prep);
     const beforeFollow = toPrepRows(config.redirect?.beforeFollow);
@@ -823,7 +1084,7 @@ class Controller {
 
     const redirectRows: SetupRow[] = REDIRECT_ROWS.map(({ key, label }) => {
       const saved = config.redirect?.[key];
-      const el = saved ? safeQuery(saved) : null;
+      const el = saved ? query(document, saved) : null;
       const usedHere = detection.source === 'override' && key === 'applySelector' && !!detection.href;
       return {
         key,
@@ -865,7 +1126,7 @@ class Controller {
       autoDetect: config.autoDetect !== false,
     });
     if (config.cvUpload) {
-      const el = safeQuery(config.cvUpload);
+      const el = query(document, config.cvUpload);
       const resume = detected.find((d) => d.field === 'resume');
       if (el && resume) { resume.element = el; resume.source = 'override'; resume.confidence = 'high'; resume.selectorUsed = config.cvUpload; }
     }
@@ -931,7 +1192,7 @@ class Controller {
 
     // The confirmation element. Unlike every other row, "not set" is never fine:
     // it is what marks a posting applied, and Apply will not send without it.
-    const successEl = config.successSelector ? safeQuery(config.successSelector) : null;
+    const successEl = config.successSelector ? query(document, config.successSelector) : null;
     if (successEl) highlight(successEl, 'high');
     const successRow: SetupRow = {
       key: 'successSelector',
@@ -960,6 +1221,11 @@ class Controller {
       submit: submitRow,
       success: successRow,
       helpSeen: (await getSettings()).helpSeen,
+      // The review renders from these two; the panel decides whether it is showing
+      // them (`showReview`), because that is a place in a task and not a fact
+      // about the data — the same rule its `step` follows.
+      recording: this.recording,
+      compiled: this.compiled,
       // The same two the review modal renders from, off the same fields: one slot
       // means a panel that opens where the card the user configured opens, at the
       // size they configured it at. A drag on either sheet moves both.
@@ -1239,14 +1505,6 @@ class Controller {
     this.hasRun = false;
     this.modal?.destroy();
     this.modal = undefined;
-  }
-}
-
-function safeQuery(selector: string): HTMLElement | null {
-  try {
-    return document.querySelector(selector);
-  } catch {
-    return null;
   }
 }
 

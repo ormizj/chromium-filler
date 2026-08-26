@@ -10,7 +10,7 @@
  *
  * Prereq: `npm run build` (loads dist/). Extensions require a persistent context.
  */
-import { test, expect, chromium, type BrowserContext, type Page } from '@playwright/test';
+import { test, expect, chromium, type BrowserContext, type Locator, type Page } from '@playwright/test';
 import type { JobUrlEntry } from '../src/shared/types';
 import type { JobDetailsMap } from '../src/shared/jobDetails';
 import type { ExportedJob } from '../src/shared/jobExport';
@@ -1746,6 +1746,30 @@ test('Setup: a saved Send selector that stopped matching says so, and credits th
 });
 
 /**
+ * Drive the click-to-pick toolbar the way a person does now: a click *selects*
+ * and Confirm saves, and because the run of elements at a point starts on the box
+ * around the thing, reaching the element itself means stepping inward until the
+ * toolbar names it. Reads the toolbar's own readout rather than counting presses,
+ * so a fixture growing a wrapper does not silently pick the wrapper.
+ */
+async function pickOnPage(page: Page, target: Locator): Promise<void> {
+  const bar = page.locator('[data-cf-picker="bar"]');
+  const readout = page.locator('[data-cf-picker="readout"]');
+  await expect(bar).toBeVisible({ timeout: 10_000 });
+
+  const want = await target.evaluate((el) =>
+    (el.id ? `${el.tagName.toLowerCase()}#${el.id}` : el.tagName.toLowerCase()));
+  await target.click();
+  for (let i = 0; i < 6; i += 1) {
+    if (((await readout.textContent()) ?? '').trim() === want) break;
+    await bar.getByRole('button', { name: 'Deeper', exact: true }).click();
+  }
+  await expect(readout).toHaveText(want);
+  await bar.getByRole('button', { name: 'Confirm', exact: true }).click();
+  await expect(bar).toHaveCount(0);
+}
+
+/**
  * The rest of "an edit does not start fresh", and the half only a real browser
  * can see: jsdom does no layout, so `scrollTop` there never leaves 0.
  *
@@ -1780,7 +1804,7 @@ test('Setup: picking a field leaves you where you were in the list', async () =>
     // selector is saved, and the panel comes back rebuilt from storage.
     const lastPick = setup.locator('.cf-step-body .cf-row [data-k^="field:"]').last();
     await lastPick.click();
-    await page.locator('input').first().click();
+    await pickOnPage(page, page.locator('input').first());
     await expect(setup).toBeVisible();
     await expect(setup.locator('.cf-step-count')).toHaveText('Step 5 of 6');
 
@@ -1826,6 +1850,58 @@ test('Modal: the picker names the field the way the report row does', async () =
     await expect(bar).toContainText(`"${label}"`);
 
     await bar.getByRole('button', { name: 'Cancel' }).click();
+  } finally {
+    await page.close();
+  }
+});
+
+/**
+ * The two halves of what a pick is now, and neither is visible to jsdom.
+ *
+ * A click used to commit outright on a mouse, so a stray press wrote a selector
+ * into the site config with nothing in between. And it could only ever offer one
+ * element per point — `elementFromPoint` hands back a single node, and on a real
+ * board the thing the user means is the box around it. So a point gives a run of
+ * elements, outermost first, and clicking the same spot again steps inward.
+ *
+ * `#email` sits directly in `#application-form` on this fixture, so the run is
+ * exactly two long: the form, then the input. That is the shape being asserted —
+ * the first click naming something that is *not* what was clicked.
+ */
+test('Modal: a click selects, clicking again goes one level in, and Confirm saves', async () => {
+  const page = await context.newPage();
+  try {
+    await page.goto(urlFor('quick-plain'));
+    const card = page.locator('.cf-card[data-sheet="review"]');
+    await expect(card).toBeVisible({ timeout: 20_000 });
+
+    await card.locator('.cf-view').nth(1).click();
+    await card.locator('.cf-report .cf-row').first()
+      .getByRole('button', { name: 'Pick', exact: true }).click();
+
+    const bar = page.locator('[data-cf-picker="bar"]');
+    const readout = page.locator('[data-cf-picker="readout"]');
+    await expect(bar).toBeVisible();
+
+    // One click on the page commits nothing: the toolbar is still up, waiting.
+    await page.click('#email');
+    await expect(bar).toBeVisible();
+    // And what it proposes is the form around the input, not the input.
+    await expect(readout).toHaveText('form#application-form');
+    await expect(bar).toContainText('1 / 2');
+
+    // The same spot again steps in. This is the whole feature: the element under
+    // the pointer is reachable, and so is every box around it.
+    await page.click('#email');
+    await expect(readout).toHaveText('input#email');
+    await expect(bar).toContainText('2 / 2');
+
+    // Back out again, so the run is walkable in both directions.
+    await bar.getByRole('button', { name: 'Wider', exact: true }).click();
+    await expect(readout).toHaveText('form#application-form');
+
+    await bar.getByRole('button', { name: 'Confirm', exact: true }).click();
+    await expect(bar).toHaveCount(0);
   } finally {
     await page.close();
   }
@@ -2225,4 +2301,128 @@ test('Options: a broken site config is named and refused, not saved', async () =
       (await chrome.storage.local.get('siteConfigs')).siteConfigs.length);
     expect(after).toBe(before);
   });
+});
+
+/* ---------------- Recording a site by applying to one job ---------------- */
+
+/**
+ * Read the site config that matches a URL — what a recording is judged by. The whole
+ * point of the feature is the config that comes out, so these assert that and not
+ * what the panel looked like on the way.
+ */
+async function configFor(url: string): Promise<Record<string, unknown> | undefined> {
+  return onExtensionPage((ext) => ext.evaluate(async (u) => {
+    const { siteConfigs = [] } = await chrome.storage.local.get('siteConfigs');
+    const glob = (p: string) => new RegExp(`^${p.replace(/[.+?^${}()|[\]\\]/g, '\\$&')
+      .replace(/\*/g, '.*')}$`).test(u);
+    return siteConfigs.find((c: { urlPatterns: string[] }) => c.urlPatterns.some(glob));
+  }, url));
+}
+
+/** Forget every config, so a recording is judged on what it wrote and nothing else. */
+async function clearConfigs(): Promise<void> {
+  await onExtensionPage((ext) => ext.evaluate(async () => {
+    await chrome.storage.local.set({ siteConfigs: [] });
+  }));
+}
+
+const bar = (page: Page) => page.locator('[data-cf-recorder="host"] .cf-bar');
+
+/** Choose something from the recorder bar's mark menu. */
+async function mark(page: Page, button: string, item: string): Promise<void> {
+  await bar(page).getByRole('button', { name: button, exact: true }).click();
+  await bar(page).getByRole('menuitem', { name: item, exact: true }).click();
+}
+
+test('Recording: one application on this site becomes the whole config', async () => {
+  await clearConfigs();
+  const page = await context.newPage();
+  try {
+    await page.setViewportSize({ width: 1280, height: 900 });
+    await page.goto(urlFor('record-internal'));
+    await openSetupPanel(page);
+
+    const setup = page.locator('.cf-card[data-sheet="setup"]');
+    await expect(setup).toBeVisible({ timeout: 20_000 });
+    await setup.getByRole('button', { name: 'Apply on this site' }).click();
+    await expect(bar(page)).toBeVisible({ timeout: 10_000 });
+
+    // Apply the way a person would: expand nothing, fill two fields, send it.
+    await page.fill('#email', 'ada@example.com');
+    await page.fill('#first_name', 'Ada');
+    await page.click('#submit');
+    await expect(page.locator('#quick-success')).toBeVisible();
+
+    // The confirmation is the one mark that cannot be the last thing you pressed —
+    // it appears *because* the application went in — so it is marked by picking it.
+    await mark(page, 'Mark another…', 'Confirmation');
+    await pickOnPage(page, page.locator('#quick-success'));
+
+    await bar(page).getByRole('button', { name: 'Done' }).click();
+    await expect(setup.getByText('Check what was recorded')).toBeVisible({ timeout: 10_000 });
+    await setup.getByRole('button', { name: 'Save setup' }).click();
+
+    const config = await configFor(urlFor('record-internal'));
+    // The two rows that gate Apply, which the wizard buried at the end of a queue of
+    // twenty-five and which almost nobody ever set.
+    expect(config?.submitSelector).toBeTruthy();
+    expect(config?.successSelector).toBeTruthy();
+    expect(config?.fieldOverrides).toMatchObject({ email: expect.any(String) });
+
+    // The rule the whole compiler is built around: `prep` runs automatically on every
+    // later visit, so the click that sent this application must not be in it.
+    const prep = JSON.stringify(config?.prep ?? []);
+    expect(prep).not.toContain(config?.submitSelector as string);
+    expect(prep).not.toContain('#submit');
+  } finally {
+    await page.close();
+  }
+});
+
+test('Recording: a handoff is saved as two configs, one per site', async () => {
+  await clearConfigs();
+  const page = await context.newPage();
+  try {
+    await page.setViewportSize({ width: 1280, height: 900 });
+    await page.goto(urlFor('record-external'));
+    await openSetupPanel(page);
+
+    const setup = page.locator('.cf-card[data-sheet="setup"]');
+    await expect(setup).toBeVisible({ timeout: 20_000 });
+    await setup.getByRole('button', { name: 'Apply on the employer’s site' }).click();
+    await expect(bar(page)).toBeVisible({ timeout: 10_000 });
+
+    // The board's own courtesy first, then the handoff the user performs themselves —
+    // `run()` stands down while recording, so nothing follows this on our behalf.
+    await page.click('#save-job');
+    await page.click('#apply-external');
+    await page.waitForURL(/ats-form/, { timeout: 15_000 });
+
+    // The recording survived the navigation to another origin, where the content
+    // script is a brand-new one that has never heard of the posting.
+    await expect(bar(page)).toBeVisible({ timeout: 15_000 });
+
+    await page.fill('#ats-email', 'ada@example.com');
+    await page.click('#ats-submit');
+    await expect(page.locator('#ats-success')).toBeVisible({ timeout: 10_000 });
+    await mark(page, 'Mark another…', 'Confirmation');
+    await pickOnPage(page, page.locator('#ats-success'));
+
+    await bar(page).getByRole('button', { name: 'Done' }).click();
+    const atsSetup = page.locator('.cf-card[data-sheet="setup"]');
+    await expect(atsSetup.getByText('Check what was recorded')).toBeVisible({ timeout: 10_000 });
+    await atsSetup.getByRole('button', { name: 'Save setup' }).click();
+
+    // The board learns how to leave; the employer learns how to be filled and sent.
+    const board = await configFor(urlFor('record-external'));
+    expect((board?.redirect as { applySelector?: string })?.applySelector).toBeTruthy();
+    expect(board?.submitSelector).toBeFalsy();
+
+    const employer = await configFor(ATS_URL);
+    expect(employer?.submitSelector).toBeTruthy();
+    expect(employer?.successSelector).toBeTruthy();
+    expect(employer?.fieldOverrides).toMatchObject({ email: expect.any(String) });
+  } finally {
+    await page.close();
+  }
 });

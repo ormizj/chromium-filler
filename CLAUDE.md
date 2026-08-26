@@ -28,13 +28,22 @@ invisible to a DOM assertion. New MCP servers load on Claude Code restart.
 For UI work also start `npm run dev` and open `http://localhost:5173/dev/`, which
 renders **all four surfaces** against a mocked `chrome.*` — including a **390px
 phone frame**, so the mobile-first layout is what you iterate on rather than an
-afterthought. `dev/frame.html?page=…` takes `popup`, `options`, `modal`, and
-`setup`; the last two render the real shadow-DOM classes over a fake posting,
-because otherwise they are only reachable by loading the built extension and
-driving a real site. `?page=modal&session=1` shows the queue strip and the
+afterthought. `dev/frame.html?page=…` takes `popup`, `options`, `modal`,
+`setup` and `picker`; the middle two render the real shadow-DOM classes over a
+fake posting, because otherwise they are only reachable by loading the built
+extension and driving a real site. `picker` runs the real click-to-pick toolbar
+over a deliberately nested posting — it draws on the host page's own light DOM
+rather than in a shadow root and exists only while a pick is running, so it was
+the one surface with no harness state at all: every `onPick*` elsewhere in the
+harness is a console stub, which renders the *button* and never the toolbar it
+opens. `&label=…` names the field the bar says it is picking. `?page=modal&session=1` shows the queue strip and the
 footer overflow menu.
 
-`&state=…` picks which **flow** the surface is showing — modal: `long`, `redirect`,
+`&state=…` picks which **flow** the surface is showing — setup also has
+`offer` (what a never-configured site opens on — the most-seen screen in the
+panel), `recording` (the bar up, the panel folded to its pill) and `review` /
+`review-external`, which are the two renderings a real page can only reach by
+applying to a job; modal: `long`, `redirect`,
 `redirect-followed`, `app-link`, `landed`, `empty`, `listing`, `failed-fill`, `apply-unset`,
 `apply-unverified`, `applied`, `already-applied`, `already-applied-redirect`,
 `flush`, `fullscreen`; setup: `external`, `help`,
@@ -242,7 +251,8 @@ pure, unit-tested logic):
   posting did not state is not rendered, and there is deliberately no
   `og:site_name` fallback for the company, because that names the *board* and put
   "LinkedIn" where the employer should be.
-  `picker.ts` = click/tap-to-pick override.
+  `picker.ts` = click/tap-to-pick override: click to select, click the same spot
+  again to step one level in, Confirm to save (`shared/elementChain.ts`).
 - **`src/background/service_worker.ts`** — opens options, handles the `SUBMITTED`
   message (mark URL applied + optional tab close), and owns the two-step redirect
   watcher (below). `session.ts` owns the queue session (below).
@@ -647,6 +657,168 @@ own. Narrow does: inline styles are cleared there, so `.cf-card.cf-full` lifts t
 not a `draggedLayout`-style page-lifetime override: a drag is a nudge, this is a
 preference, and it holds until it is pressed again. Dragging is disabled while it
 is on, or the card would move out from under the flag.
+
+### Recording a site
+**The front door to Site setup is recording, not the wizard.** The user applies to
+one job while the extension watches, and the config is compiled from what they did.
+The six-step wizard is still there, and is where a recording is corrected — but it is
+the long way round now, not the way in.
+
+The problem it replaces: setting a site up meant answering ~25 questions one at a
+time, and the two that actually gate Apply (`submitSelector`, `successSelector`) were
+last in the queue, so on most sites they never got set. `successSelector` is the
+sharper case — it does not exist until an application has really gone in, so the only
+moment it can be captured is during one, which the wizard had no way to be present
+for.
+
+Three pieces, and the split matters: **`src/shared/recording.ts`** is pure and holds
+every rule about what a recording *means*; **`src/content/recorder.ts`** watches the
+page; **`src/content/recorderBar.ts`** is the HUD that carries the one decision.
+
+A recording is a flat, ordered `RecordedStep[]`. Each step is either something the
+user *did* (`click` / `input` / `navigate`) or carries a **bind** — "this is the
+description", "that is the Send button", "that banner is the confirmation". Binds are
+the whole point: without them a recording is a macro, and a macro cannot tell the
+description from the sidebar.
+
+**The recorder is the inverse of `picker.ts`.** Both listen to the same events in the
+capture phase; the picker cancels every one and the recorder may cancel none — the
+user is really applying, and the page must behave exactly as it would with the
+extension absent. Three consequences, each with a test:
+
+- **It records where things are and never what was typed.** `RecordedStep` has no
+  value field. `labelFor` reads an `<input>`'s `value` only for the four types where
+  that is a label (`submit`/`button`/`reset`/`image`); reading it unconditionally put
+  the email address someone had just typed into the recording.
+- **A click is named by `closest(INTERACTIVE)`, not by what was hit.** A click lands
+  on whatever `<span>` a button wraps its label in, and a span has nothing to
+  identify it by — which is exactly what forces the structural path.
+- **It stands down while a picker is running** (`[data-cf-picker]` present in the
+  DOM), or marking the confirmation banner also records a click on it. Read off the
+  marker element rather than a flag, so it is right for every picker entry point.
+
+Two gestures raise two events each and must count once: a **label** and the click the
+browser then raises on the control it names (containment within `SAME_GESTURE_MS`),
+and a **checkbox**, whose `change` is skipped entirely because the click already
+records it — a tick is never a profile field, so the second copy arrives as an unbound
+`input` step, which the compiler drops, and "I agree to the terms" silently would not
+be in the config.
+
+**`Controller.run()` returns early while a recording is live**, and
+`closeTabOnSubmit` is suppressed in `handleSubmitted`. The second is not tidiness: the
+confirmation appearing is the exact moment it has to be marked, and closing the tab
+would take the page away at the last step of the setup the recording exists to
+produce. The posting is still marked applied — the user really did apply.
+
+#### The compiler
+`compileRecording` slices the timeline into the existing `SiteConfig` shape, so
+nothing downstream changes. Ten rules, one `describe` each in `recording.test.ts`:
+
+1. **Legs decide which config a step lands in**, and what happened outranks the flow
+   the user picked — in both directions. The choice only ever shaped what the bar
+   asked for.
+2. **A bound step is never also a prep click.** The click that opened the file dialog
+   is dropped once the upload is bound: the extension attaches the CV with a
+   DataTransfer, so replaying it would pop an OS dialog over a page nobody is looking
+   at.
+3. **Nothing that sends an application reaches a prep list.** This is *"Never submit
+   unprompted"* expressed where a recording could break it — `prep` runs
+   automatically on every later visit, so a Send click in it would submit
+   applications on page load. A bound `submit` sets `submitSelector` only; an
+   **unbound** click whose label reads like a send (`looksLikeSend`, exported from
+   `submitDetect` so the veto list is the same one) is *adopted* as the Send button
+   rather than replayed. That second case is the dangerous one: the user pressed Send
+   and never said so.
+4. **Internal split**: clicks before the CV bind → `prep`, clicks after it and before
+   `submit` → `submitCv`, clicks after `submit` → dropped.
+5. **External split**: the handoff click → `redirect.applySelector`; clicks before it
+   → `redirect.beforeFollow`, every one `optional: true`; the handoff click itself is
+   **not** also in `beforeFollow`, or the employer's form opens twice.
+6. **A pause becomes the click's own timeout**, not a `waitFor` step — `PrepStep.ms`
+   on a click already *is* the `waitForSelector` timeout `prep.ts` gives it, so a
+   separate step would wait twice for the same element.
+7. Consecutive clicks on the same target collapse to one.
+8. A fragile target compiles but warns.
+9. No confirmation marked warns — it is the one selector with nowhere else to come
+   from.
+10. **The leg that sends the application owns the sending.** The destination never
+    carries a `redirect` block; a posting that hands off never carries
+    `submitSelector`/`successSelector`.
+
+**The `navigate` step is emitted on *resume*, by the content script that wakes up
+somewhere else.** No click knows in advance that it is the one that will leave, and
+the background is told nothing until a step arrives from the far side — so the
+handoff is noticed on arrival, by comparing where this page is with where the
+recording began. It is stamped `leg: 'posting'` on purpose: it is the last thing that
+happened on the board, and rule 5 reads it there to work out which click was the
+apply link.
+
+`applyConfigPatch` (`storage.ts`) writes the result, and **a patch only ever speaks
+about what it saw**: maps merge key by key, sequences replace only when non-empty,
+single selectors overwrite only when set. Recording a site again to mark the
+description you forgot must not wipe the Send button you got right the first time.
+
+#### The bar
+`src/content/recorderBar.ts` is a **toolbar, not a `Sheet`** — it never takes a
+`--pill-slot`, so "one slot, two sheets" is untouched, and it is the smallest thing
+that can still be pressed, because the page underneath is what the user is working
+in. Placement mirrors `picker.ts`: bottom on a coarse pointer, top on a fine one. At
+≤640px it wraps to **two** rows in a fixed order — state and the exits share the
+first, the decision about the last step takes the second — because left to source
+order Undo/Done moved depending on whether the last step happened to be marked, and
+the two controls that are always there must not move.
+
+The middle is the whole reason it exists: after each thing the user does, is that a
+**step to replay** or **something the extension should know**? Answering it at the end
+from a list means remembering which of nine clicks was which. The extension's own
+guess (`guessField`, exported from `fieldDetect` — same scoring as `detectFields` but
+for one element, since the bar cannot wait for a whole-form assignment) is shown as
+already made, so the common case is *not tapping anything at all*. "Keep as a step"
+leads the mark menu rather than being a third button competing for a 390px row: it is
+one of the answers to the same question.
+
+**`Mark another…` is always offered, and that is load-bearing.** The confirmation
+banner is never the thing you just pressed — it *appears* because the application went
+in — so a bar that could only re-label the last step could not mark the one selector
+that exists for a few seconds and nowhere else.
+
+**The mark menu is re-ordered by leg, never filtered by it.** Ordering is worth doing:
+on the board half of a two-step posting the apply link is what there is to mark.
+Filtering was a bug an E2E caught — keying the list off the *flow* alone left the
+destination leg, the page where the application is actually sent, with no way to mark
+the Send button or the confirmation at all. A mark that is unlikely here costs a line
+in a menu; a mark that is missing costs the recording.
+
+#### Where it is offered
+**The panel has three screens, and a never-configured site opens on the offer** —
+`SetupPanel.mode` is `offer` | `wizard` | `review`, chosen once, on the instance
+(same rule as `step`).
+
+The offer is a screen of its own and not a block on wizard step 1, and that
+distinction is the whole feature working or not. The panel does not *open* on step 1:
+`render` sends anyone with `helpSeen` to `firstStepWithWork`, and a brand-new config
+always has work on `fields` or `send` — so as a block the Record buttons opened four
+presses of Back away from every user who needed them, and Site setup looked exactly
+as it always had. `isUnconfigured` (pure, in `setupSteps.ts`) is what routes it, and
+it tests **saved** selectors only: every heuristic on the page reports itself as a
+match, so counting those would call a fresh site configured on the strength of
+guesses stored nowhere.
+
+Step 1 keeps a smaller version of the lead, worded for **re-recording** a site to
+correct or add to what is saved — and there both Record buttons are secondary, with
+Next keeping the footer's primary. Anyone in the wizard has already chosen that path.
+
+#### Reviewing it
+Stopping compiles and opens the panel's **review**: the timeline, each row carrying
+the *selector's* strength as its dot (not a match status — the row's question is "will
+we find this again"), a per-step "what is this" select, and a Pick on the fragile ones.
+Nothing is written until Save; a recording is a proposal, and half the point of the
+review is that it can be refused.
+
+`SetupPanel.mode` is **on the instance, never in `SetupData`** — same rule as `step`,
+and the same failure if broken: `refreshSetup` re-renders on every edit, so a mode
+derived from the data would throw the user out of the review the first time they
+changed a row.
 
 ### The setup wizard
 "Set up this site" is a **linear wizard**: one step on screen at a time, a
@@ -1174,6 +1346,32 @@ needs no `downloads` permission, and an MV3 service worker has no
   link an installed app has claimed (Android resolves it first) and a page that
   navigates itself from the main world. `declarativeNetRequest` cannot help —
   it matches http/https/ws only — so do not add it or `webNavigation`.
+- **Every stored selector comes out of `pickSelector`, and every candidate it
+  returns is verified.** `shared/selector.ts` is a ranked ladder — id · name · test
+  id · aria-label · text · semantic attribute · class · scoped · path — and a rung
+  only wins if it resolves to exactly one element *and* that element is the one it
+  was given. The old four-rung version checked uniqueness on rungs 1-3 and not on the
+  structural fallback, which therefore could and did match two elements silently.
+  Two rules keep the bottom rung honest: a path is **anchored** at the nearest
+  ancestor that can name itself (`anchorFor`, ≤6 up) and **capped** at `MAX_TAIL`
+  hops from it, so `html > body > div > div:nth-of-type(2) > …` is no longer what a
+  hashed-class SPA produces; and `isStableClass` rejects generated names (a
+  CSS-modules suffix is told from a BEM word by the digit in it) as well as state and
+  layout words, which are real words that are on half the page. `SelectorPick` also
+  carries a `strength`, which is what the recorder's review draws as a dot — "it
+  worked when I picked it" and "it will work next month" are different claims.
+- **Selectors are resolved in exactly one place, `shared/query.ts`.** Six copies of
+  the same guarded `querySelector` had grown across `content/` and `shared/`, and
+  `prep.ts` had none at all — so one malformed saved selector threw out of `runStep`
+  and aborted a whole prep list. That resolver also understands one extension to CSS,
+  `button:-cf-text("Apply now")`, kept to elements whose collapsed text *equals* the
+  literal. CSS cannot say "the button labelled Apply now", and on a board with no
+  ids, hashed classes and a re-render between visits that label is the only durable
+  handle there is. It is **terminal-only and at most one per selector** — which is
+  what keeps the resolver a `split` rather than a parser, and costs nothing because
+  `pickSelector` only ever emits it last. A selector breaking that rule resolves to
+  *nothing*, never to a guess: the elements this names are the ones that send an
+  application.
 - **Never read a job container with `textContent`.** It welds every heading,
   paragraph and bullet into one string and preserves the HTML source's own
   indentation, which is what made the description unreadable. `shared/jobText.ts`
@@ -1183,9 +1381,33 @@ needs no `downloads` permission, and an MV3 service worker has no
 - **Closing the review modal must never destroy it.** `onClose` minimizes to the
   pill (`FillerModal.minimize`); destroying it left "Reset & Re-run" as the only
   way back, which wipes every field just filled.
-- **On touch the picker only commits via Confirm.** A finger has no hover state,
-  so a plain `click` handler commits whatever it happened to land on; `picker.ts`
-  branches on `pointerType`. Mouse still commits on click.
+- **The picker never commits on a click, on any pointer.** A click *selects* and
+  Confirm saves — one flow, no `pointerType` branch. It used to commit outright on
+  a mouse, which wrote a selector into the site config off a stray press with
+  nothing in between; touch already had the safer half of this, for the reason
+  that turns out to hold everywhere: what is under the pointer is not what the
+  user checked.
+- **A point gives a run of elements, not one.** `document.elementFromPoint` hands
+  back a single node and it is routinely not the one meant — the description is
+  the `<div>` around the `<span>` you can see, and the Send button is the
+  `<button>` around the `<span>` the click lands on. `shared/elementChain.ts` is
+  the pure half: the hit-test stack, **outermost first**, with `<html>`/`<body>`
+  and everything the extension drew removed, capped at `MAX_CHAIN` above the
+  innermost. Clicking the same spot again steps one level *in* and wraps; Wider /
+  Deeper and the arrow keys walk it both ways. It reads outermost-first because
+  the outer element is usually the one that can name itself and the inner one is
+  usually an unnamed `<span>` — which is also why the toolbar reads back
+  `describeElement` plus the `pickSelector` strength for the current step: the
+  choice being made is which depth gives a handle that still resolves next month.
+  **A wrapper drawing the same box as its child is dropped**, because that click
+  moves nothing on screen and reads as the picker being broken.
+- **The picker's chrome is created once and repainted, never rebuilt.**
+  `recorder.ts` stands down on `[data-cf-picker]` being in the DOM, and a pick is
+  several gestures long now — a marker that came and went between them would have
+  the recorder logging the user aiming at the confirmation banner as a step in the
+  application. For the same reason the capture-phase suppression covers
+  `pointerdown`/`mousedown`/`mouseup`/`dblclick`/`contextmenu` and not just
+  `click`: a site that acts on `mousedown` would otherwise act once per step.
 - Field matching normalizes attributes with diacritics stripped, so "Résumé"
   matches "resume" (`normalizeAttr` in `src/shared/fieldKeys.ts`).
 - **Playwright must use `channel: 'chromium'`** — the headless shell can't load

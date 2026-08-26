@@ -13,6 +13,7 @@ import type { RedirectConfig } from '../shared/types';
 import { isExternalUrl, looksLikeExternalApply, resolveHref } from '../shared/redirect';
 import { isAppLink } from '../shared/appLink';
 import { normalizeAttr } from '../shared/fieldKeys';
+import { query } from '../shared/query';
 
 // Declared in `shared/redirect.ts` (the setup snapshot carries it), re-exported
 // here so it stays importable from the detector that produces it.
@@ -55,15 +56,6 @@ export interface RedirectDetectOptions {
 }
 
 const CONTROL_SELECTOR = 'a[href], button, [role="button"]';
-
-function safeQuery(root: ParentNode, selector: string | undefined): HTMLElement | null {
-  if (!selector) return null;
-  try {
-    return root.querySelector(selector) as HTMLElement | null;
-  } catch {
-    return null;
-  }
-}
 
 /** Cheap visibility test — layout is unavailable in tests and costly at scale. */
 function isHiddenish(el: HTMLElement): boolean {
@@ -153,15 +145,15 @@ export function detectRedirect(opts: RedirectDetectOptions): RedirectDetection {
   const { root, pageUrl, config, keepInBrowser = true } = opts;
 
   // 1. An explicit quick-apply marker settles it: the form is on this page.
-  const quickApply = safeQuery(root, config?.quickApplySelector);
+  const quickApply = query(root, config?.quickApplySelector);
   if (quickApply) {
     return { kind: 'quickApply', source: 'override', reason: 'quick-apply marker on the page' };
   }
 
-  const applyEl = safeQuery(root, config?.applySelector);
+  const applyEl = query(root, config?.applySelector);
 
   // 2. An "external posting" badge, even when the apply link itself looks internal.
-  const marker = safeQuery(root, config?.markerSelector);
+  const marker = query(root, config?.markerSelector);
   if (marker) {
     return {
       kind: 'redirect',

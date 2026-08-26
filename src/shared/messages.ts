@@ -5,6 +5,7 @@
 
 import type { FieldKey, FieldMatch } from './types';
 import type { QueueProgress } from './queue';
+import type { BindKey, RecordFlow, Recording, RecordedStep } from './recording';
 
 export const MSG = {
   /** popup -> content: run the full detect/prep/fill flow now. */
@@ -42,6 +43,29 @@ export const MSG = {
   SESSION_SKIP: 'CF_SESSION_SKIP',
   /** popup -> content: re-open the minimized review modal without re-running. */
   SHOW_REPORT: 'CF_SHOW_REPORT',
+  /**
+   * The six that let a recording outlive the page it started on.
+   *
+   * Setting up a two-step posting means recording across a handoff: the user presses
+   * "Apply on company site", the browser leaves, and under the default
+   * `newTabCloseSource` the tab they started in is closed behind them. The content
+   * script that resumes on the employer's site is a brand-new one that knows nothing,
+   * so the recording cannot live in it — it lives in `chrome.storage.session` keyed by
+   * tab, exactly like `APPLYING` and the redirect watches, and for the same reason:
+   * the worker can be torn down mid-navigation and tab ids mean nothing after a
+   * restart.
+   */
+  RECORD_START: 'CF_RECORD_START',
+  /** content -> background: one more thing the user did. */
+  RECORD_PUSH: 'CF_RECORD_PUSH',
+  /** content -> background: re-decide the last step — a mark, or `null` to keep it a step. */
+  RECORD_BIND: 'CF_RECORD_BIND',
+  /** content -> background: drop the last step. */
+  RECORD_UNDO: 'CF_RECORD_UNDO',
+  /** content -> background: is this tab in the middle of a recording? */
+  RECORD_GET: 'CF_RECORD_GET',
+  /** content -> background: finished; hand it back and forget it. */
+  RECORD_STOP: 'CF_RECORD_STOP',
   /** options -> background: authorize a Google account to sync the job database with. */
   SYNC_CONNECT: 'CF_SYNC_CONNECT',
   /** options -> background: forget the account and its tokens; the data stays. */
@@ -109,6 +133,11 @@ export interface SyncState {
   pending?: { local: number; remote: number };
 }
 
+/** Background's answer to RECORD_GET / RECORD_STOP: the recording, if there is one. */
+export interface RecordingResponse {
+  recording?: Recording;
+}
+
 /** Background's answer to FOLLOW_REDIRECT: who performs the navigation. */
 export interface FollowRedirectResponse {
   /** The background already opened the destination; the page does nothing. */
@@ -147,6 +176,12 @@ export type Message =
   | { type: typeof MSG.SESSION_STATE }
   | { type: typeof MSG.SESSION_SKIP; url: string }
   | { type: typeof MSG.SHOW_REPORT }
+  | { type: typeof MSG.RECORD_START; flow: RecordFlow; postingUrl: string }
+  | { type: typeof MSG.RECORD_PUSH; step: RecordedStep }
+  | { type: typeof MSG.RECORD_BIND; bind: BindKey | null }
+  | { type: typeof MSG.RECORD_UNDO }
+  | { type: typeof MSG.RECORD_GET }
+  | { type: typeof MSG.RECORD_STOP }
   | { type: typeof MSG.SYNC_CONNECT }
   | { type: typeof MSG.SYNC_DISCONNECT }
   // `confirmed` is the answer to the count prompt shown before the first merge:

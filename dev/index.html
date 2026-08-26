@@ -139,6 +139,15 @@
         <!-- The panel shares the review modal's slot, so it has the modal's
              geometry states too — and `pills` is the arrangement neither surface
              can show alone: both folded, stacked in the rail. -->
+        <!-- Recording is the front door, and every one of these states is
+             reachable on a real page only by applying to a job — so without a link
+             here nobody looks at them. -->
+        <div class="states">
+          <a href="./frame.html?page=setup&amp;state=offer">the offer (a new site)</a>
+          <a href="./frame.html?page=setup&amp;state=recording">recording (bar + pill)</a>
+          <a href="./frame.html?page=setup&amp;state=review">review a recording</a>
+          <a href="./frame.html?page=setup&amp;state=review-external">review a two-step recording</a>
+        </div>
         <div class="states">
           <a href="./frame.html?page=setup">quick apply (opens on the work left)</a>
           <a href="./frame.html?page=setup&amp;state=help">first run (legend)</a>
@@ -152,6 +161,20 @@
           <a href="./frame.html?page=setup&amp;pills=1">both folded (pills)</a>
         </div>
         <iframe src="./frame.html?page=setup" title="Setup panel harness, phone width"></iframe>
+      </div>
+      <div class="panel phone picker">
+        <h2>Picker · phone</h2>
+        <!-- The click-to-pick toolbar draws on the host page's light DOM rather
+             than in a shadow root, so it is the one surface with no fixture data
+             to render from — it only exists while a pick is running. The posting
+             below is nested on purpose: a click lands on a `span` and the thing
+             worth saving is the `section` three levels out, which is the whole
+             subject of the two-row bar. -->
+        <div class="states">
+          <a href="./frame.html?page=picker">pick the description</a>
+          <a href="./frame.html?page=picker&amp;label=Send%20button">pick the Send button</a>
+        </div>
+        <iframe src="./frame.html?page=picker" title="Element picker harness, phone width"></iframe>
       </div>
       <div class="panel options">
         <h2>Options · desktop</h2>

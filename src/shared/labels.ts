@@ -16,6 +16,8 @@
 
 import type { JobUrlStatus, MatchConfidence } from './types';
 import type { ExportField } from './jobExport';
+import type { ConfigBindKey } from './recording';
+import type { SelectorStrength } from './selector';
 
 export interface StatusText {
   /** Capitalised, for the stat-tile caption: "Filled" / "To check" / "Unmatched". */
@@ -132,7 +134,10 @@ export type ActionKey =
   | 'rerun'
   | 'confirm'
   | 'confirmed'
+  | 'cancel'
   | 'pick'
+  | 'wider'
+  | 'deeper'
   | 'done'
   | 'openOptions'
   | 'more'
@@ -141,7 +146,16 @@ export type ActionKey =
   | 'fillAnyway'
   | 'siteSetup'
   | 'fullscreen'
-  | 'exitFullscreen';
+  | 'exitFullscreen'
+  | 'record'
+  | 'recordExternal'
+  | 'stopRecording'
+  | 'bind'
+  | 'bindPick'
+  | 'keepAsClick'
+  | 'undo'
+  | 'saveRecording'
+  | 'discardRecording';
 
 export const ACTION_LABELS: Record<ActionKey, string> = {
   apply: 'Apply',
@@ -155,7 +169,17 @@ export const ACTION_LABELS: Record<ActionKey, string> = {
   // when a single row is confirmed, so this label is the only thing on the card
   // that says the press landed.
   confirmed: 'Confirmed ✓',
+  // The picker's own way out. It had been a string literal in `picker.ts` since the
+  // beginning, which left the one toolbar the user reads while aiming at a page
+  // outside the catalog this file exists to be.
+  cancel: 'Cancel',
   pick: 'Pick',
+  // Travelling through the elements at one point: the picker starts on the box
+  // around the thing and steps inward. Named for what changes — how much of the
+  // page the selection covers — rather than for the direction of the arrow, which
+  // is up on a rail and down in a tree depending on who is drawing it.
+  wider: 'Wider',
+  deeper: 'Deeper',
   done: 'Done',
   // One word, like every other secondary action. "Open options" named the verb
   // as well as the destination, which nothing else in the menu does — every item
@@ -173,6 +197,66 @@ export const ACTION_LABELS: Record<ActionKey, string> = {
   // which is exactly why they belong here and not inline as a string literal.
   fullscreen: 'Fullscreen',
   exitFullscreen: 'Exit fullscreen',
+  // The two ways to set a site up by doing it once. They name *where the
+  // application gets made*, not what the extension will do, because that is the
+  // question the user can actually answer while looking at the posting.
+  record: 'Apply on this site',
+  recordExternal: 'Apply on the employer’s site',
+  // "Done", not "Stop": the user has finished applying, which is a thing they did,
+  // not a recording they are operating.
+  stopRecording: 'Done',
+  bind: 'Mark as…',
+  // The other half of marking, and it needs its own verb because it answers a
+  // different question. "Mark as…" is about the thing you just did; this one goes
+  // and finds something you did *not* do — which is the only way to mark the
+  // confirmation banner, since it appears rather than being pressed.
+  bindPick: 'Mark another…',
+  // The other half of the same decision, and worded as the outcome rather than as a
+  // refusal — keeping a step is a perfectly good answer, and most steps are that.
+  keepAsClick: 'Keep as a step',
+  undo: 'Undo',
+  saveRecording: 'Save setup',
+  discardRecording: 'Discard',
+};
+
+/* ---------------- What a recorded element can be marked as ---------------- */
+
+/**
+ * The names of the things a recording can point at. `Record<ConfigBindKey, …>`, so a
+ * new slot in the model cannot ship without a word for it — the same rule as
+ * `ACTION_LABELS` and for the same reason: this is read in the recorder's menu, in
+ * the review timeline and in the setup panel, and three spellings of "the button
+ * that sends it" is exactly the confusion the vocabulary rule exists to stop.
+ *
+ * The profile fields are not here: they already have `FIELD_LABELS` in
+ * `fieldKeys.ts`, and a second list of the same sixteen words would be the drift
+ * this file prevents everywhere else.
+ */
+export const BIND_LABELS: Record<ConfigBindKey, string> = {
+  jobTitle: 'Job title',
+  jobDescription: 'Description',
+  jobRequirements: 'Requirements',
+  company: 'Company',
+  location: 'Location',
+  employmentType: 'Employment type',
+  // The extension's action is "Apply"; the site's control is "the Send button". Two
+  // objects, and the distinction is load-bearing everywhere else in the product.
+  submit: 'Send button',
+  success: 'Confirmation',
+  applySelector: 'External apply link',
+  quickApplySelector: 'Quick-apply marker',
+  markerSelector: 'External marker',
+};
+
+/**
+ * How much a selector is worth, in words. A strength is drawn as a status dot, and
+ * status is never colour alone — so each one needs a word for the row and a fuller
+ * phrase for the dot's accessible name, exactly like `STATUS_TEXT`.
+ */
+export const SELECTOR_STRENGTH_TEXT: Record<SelectorStrength, { word: string; aria: string }> = {
+  strong: { word: 'reliable', aria: 'reliable — identified by name' },
+  ok: { word: 'usable', aria: 'usable — identified by where it sits' },
+  fragile: { word: 'fragile', aria: 'fragile — identified only by its position' },
 };
 
 /* ---------------- The archive's columns and statuses ---------------- */

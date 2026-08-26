@@ -11,6 +11,10 @@ import { describe, it, expect, afterEach } from 'vitest';
 import { SetupPanel, type SetupCallbacks, type SetupData } from './setupPanel';
 import { REDIRECT_HELP, SETUP_STEP_HELP, SETUP_STEP_TITLES } from '../shared/help';
 import { SETUP_STEP_ICONS, SETUP_STEP_ORDER } from '../shared/setupSteps';
+import { ACTION_LABELS, SELECTOR_STRENGTH_TEXT } from '../shared/labels';
+import {
+  RECORDING_WARNINGS, compileRecording, type CompiledSetup, type Recording,
+} from '../shared/recording';
 
 const noop = () => {};
 
@@ -21,6 +25,8 @@ function callbacks(over: Partial<SetupCallbacks> = {}): SetupCallbacks {
     onPickField: noop, onClearField: noop, onPickRedirect: noop, onClearRedirect: noop,
     onPickSubmit: noop, onClearSubmit: noop, onPickSuccess: noop, onClearSuccess: noop,
     onRename: noop, onOpenOptions: noop, onClose: noop, onDismissHelp: noop,
+    onStartRecording: noop, onRebindStep: noop, onRepickStep: noop, onRemoveStep: noop,
+    onSaveRecording: noop, onDiscardRecording: noop,
     ...over,
   };
 }
@@ -292,11 +298,19 @@ describe('setup wizard rail', () => {
 
 describe('where the wizard opens', () => {
   // What the old auto-opening sections were reaching for: the work that is left.
+  // A site that *has* been taught something — a saved field — but whose
+  // confirmation never got marked. The shape a recording leaves when one mark was
+  // missed, and the reason this opens on the wizard rather than on the offer.
+  const taughtButUnfinished = () => data({
+    fields: [
+      { key: 'resume', label: 'CV / Résumé', status: 'high', note: 'saved · #cv', hasSave: true },
+      { key: 'email', label: 'Email', status: 'high', note: 'auto · #email', hasSave: false },
+    ],
+    success: { key: 'successSelector', label: 'Confirmation element', status: 'none', note: 'not set', hasSave: false },
+  });
+
   it('opens on the earliest step that still needs something', () => {
-    const shadow = render(data({
-      success: { key: 'successSelector', label: 'Confirmation element', status: 'none', note: 'not set', hasSave: false },
-    }));
-    expect(shown(shadow)).toBe(SETUP_STEP_TITLES.send);
+    expect(shown(render(taughtButUnfinished()))).toBe(SETUP_STEP_TITLES.send);
   });
 
   it('opens on step 1 when the site is fully configured', () => {
@@ -308,10 +322,7 @@ describe('where the wizard opens', () => {
    * someone who has never seen the panel into step 6 explains nothing.
    */
   it('opens on step 1 for a user who has never used it', () => {
-    const shadow = render(data({
-      helpSeen: false,
-      success: { key: 'successSelector', label: 'Confirmation element', status: 'none', note: 'not set', hasSave: false },
-    }));
+    const shadow = render({ ...taughtButUnfinished(), helpSeen: false });
     expect(shown(shadow)).toBe(SETUP_STEP_TITLES.site);
   });
 });
@@ -597,5 +608,231 @@ describe('setup panel legend', () => {
     panel!.setStep('fields');
     expect(shadow.querySelector('.cf-legend')).toBeNull();
     expect(shadow.querySelector('.cf-intro')).toBeNull();
+  });
+});
+
+/* ---------------- Recording ---------------- */
+
+/** A finished recording and what it compiled to, as the Controller hands them over. */
+function recorded(over: Partial<Recording> = {}): { recording: Recording; compiled: CompiledSetup } {
+  const recording: Recording = {
+    flow: 'internal',
+    startedAt: 0,
+    postingUrl: 'https://acme.com/job/1',
+    steps: [
+      {
+        id: 's1', at: 100, leg: 'posting', url: 'https://acme.com/job/1', action: 'click',
+        label: 'Show more', target: { selector: '#more', strength: 'strong', strategy: 'id' },
+      },
+      {
+        id: 's2', at: 900, leg: 'posting', url: 'https://acme.com/job/1', action: 'input',
+        label: 'Email', bind: 'field:email', bindSource: 'auto',
+        target: { selector: '#email', strength: 'strong', strategy: 'id' },
+      },
+      {
+        id: 's3', at: 1800, leg: 'posting', url: 'https://acme.com/job/1', action: 'click',
+        label: 'Next', target: { selector: 'body > div > div:nth-of-type(3)', strength: 'fragile', strategy: 'path' },
+      },
+    ],
+    ...over,
+  };
+  return { recording, compiled: compileRecording(recording) };
+}
+
+describe('the record lead', () => {
+  /**
+   * The front door. It is on the first step because that is where the panel opens
+   * for anyone who has not set this site up — and the five steps after it exist to
+   * correct what recording produces, not to be walked through instead.
+   */
+  it('offers both flows on the first step, for re-recording a known site', () => {
+    const started: string[] = [];
+    const s = render(data(), callbacks({ onStartRecording: (f) => started.push(f) }));
+    const buttons = [...s.querySelectorAll<HTMLButtonElement>('.cf-record-actions .cf-btn')];
+    expect(buttons.map((b) => b.textContent)).toEqual([
+      ACTION_LABELS.record, ACTION_LABELS.recordExternal,
+    ]);
+
+    buttons[0].click();
+    buttons[1].click();
+    expect(started).toEqual(['internal', 'external']);
+  });
+
+  /**
+   * Still exactly one primary, and in the wizard it is Next. The offer screen is the
+   * front door, so anyone who has reached step 1 has already chosen this path — and a
+   * second coral button beside Next is the two-primaries bug the design-system
+   * guardrail caught when Record first landed here.
+   */
+  it('is secondary in the wizard, where Next is the next action', () => {
+    const s = render(data());
+    expect(s.querySelectorAll('.cf-btn.primary')).toHaveLength(1);
+    expect(nextBtn(s).classList).toContain('primary');
+    expect(s.querySelector('.cf-record-actions .cf-btn')!.classList).not.toContain('primary');
+  });
+
+  it('is not on the other steps, which are about correcting what it produced', () => {
+    const s = render(data());
+    nextBtn(s).click();
+    expect(s.querySelector('.cf-record-lead')).toBeNull();
+    expect(s.querySelectorAll('.cf-btn.primary')).toHaveLength(1);
+  });
+});
+
+describe('reviewing a recording', () => {
+  it('shows nothing of the review until it is asked for', () => {
+    const { recording, compiled } = recorded();
+    const s = render(data({ recording, compiled }));
+    expect(s.querySelector('.cf-rail')).not.toBeNull();
+    expect(s.querySelector('[data-k="rec:s1:bind"]')).toBeNull();
+  });
+
+  it('lists what the user did, in order', () => {
+    const { recording, compiled } = recorded();
+    const s = render(data({ recording, compiled }));
+    panel!.showReview(true);
+    const rows = [...s.querySelectorAll('.cf-row b')].map((b) => b.textContent);
+    expect(rows).toEqual(['Clicked Show more', 'Filled in Email', 'Clicked Next']);
+  });
+
+  /**
+   * The panel re-renders on every edit — `refreshSetup` runs after each one — so a
+   * mode derived from `SetupData` would throw the user out of the review the first
+   * time they changed a row. Same rule, and same failure, as `step`.
+   */
+  it('stays in the review across a re-render', () => {
+    const { recording, compiled } = recorded();
+    const s = render(data({ recording, compiled }));
+    panel!.showReview(true);
+    panel!.render(data({ recording, compiled }));
+    expect(s.querySelector('[data-k="rec:s1:bind"]')).not.toBeNull();
+  });
+
+  it('re-marks a step through the callback rather than deciding itself', () => {
+    const seen: Array<[string, string | null]> = [];
+    const { recording, compiled } = recorded();
+    const s = render(
+      data({ recording, compiled }),
+      callbacks({ onRebindStep: (id, bind) => seen.push([id, bind]) }),
+    );
+    panel!.showReview(true);
+
+    const select = s.querySelector<HTMLSelectElement>('[data-k="rec:s1:bind"]')!;
+    select.value = 'submit';
+    select.dispatchEvent(new Event('change'));
+    expect(seen).toEqual([['s1', 'submit']]);
+  });
+
+  it('shows a guessed mark as already made, so the common case needs no tap', () => {
+    const { recording, compiled } = recorded();
+    const s = render(data({ recording, compiled }));
+    panel!.showReview(true);
+    expect(s.querySelector<HTMLSelectElement>('[data-k="rec:s2:bind"]')!.value).toBe('field:email');
+  });
+
+  /**
+   * A step identified only by where it sits on the page is the thing most likely to
+   * stop working silently, so it is the one row that offers a re-pick — and it says
+   * so in a word, not only in the dot's colour.
+   */
+  it('offers a re-pick only on a step it could not identify properly', () => {
+    const { recording, compiled } = recorded();
+    const s = render(data({ recording, compiled }));
+    panel!.showReview(true);
+    expect(s.querySelector('[data-k="rec:s3:pick"]')).not.toBeNull();
+    expect(s.querySelector('[data-k="rec:s1:pick"]')).toBeNull();
+    const note = [...s.querySelectorAll('.cf-row small')].map((n) => n.textContent);
+    expect(note[2]).toContain(SELECTOR_STRENGTH_TEXT.fragile.word);
+  });
+
+  it('says what the compiler could not settle', () => {
+    const { recording, compiled } = recorded();
+    const s = render(data({ recording, compiled }));
+    panel!.showReview(true);
+    const notes = [...s.querySelectorAll('.cf-flow-detail')].map((n) => n.textContent);
+    expect(notes).toContain(RECORDING_WARNINGS.noSuccess);
+    expect(notes).toContain(RECORDING_WARNINGS.fragileTargets);
+  });
+
+  it('offers Save and Discard, with Save the only primary', () => {
+    let saved = 0;
+    const { recording, compiled } = recorded();
+    const s = render(data({ recording, compiled }), callbacks({ onSaveRecording: () => { saved += 1; } }));
+    panel!.showReview(true);
+
+    expect(s.querySelectorAll('.cf-btn.primary')).toHaveLength(1);
+    const save = s.querySelector<HTMLButtonElement>('.cf-footer .cf-btn.primary')!;
+    expect(save.textContent).toBe(ACTION_LABELS.saveRecording);
+    save.click();
+    expect(saved).toBe(1);
+  });
+
+  it('warns when the recording contradicted the flow the user chose', () => {
+    const { recording } = recorded({
+      flow: 'internal',
+      destinationUrl: 'https://ats.test/apply',
+    });
+    recording.steps.push({
+      id: 's4', at: 2500, leg: 'destination', url: 'https://ats.test/apply', action: 'click',
+      label: 'Start', target: { selector: '#start', strength: 'strong', strategy: 'id' },
+    });
+    const s = render(data({ recording, compiled: compileRecording(recording) }));
+    panel!.showReview(true);
+    expect(s.textContent).toContain('handed off');
+  });
+});
+
+describe('where the panel opens', () => {
+  /** A brand-new config: nothing saved, no page actions. */
+  const fresh = () => data({
+    prep: [],
+    containers: [{ key: 'jobTitle', label: 'Job title', status: 'high', note: 'auto · h1', hasSave: false }],
+    fields: [
+      { key: 'resume', label: 'CV / Résumé', status: 'none', note: 'not found', hasSave: false },
+      { key: 'email', label: 'Email', status: 'high', note: 'auto · #email', hasSave: false },
+    ],
+    submit: { key: 'submitSelector', label: 'Send button', status: 'none', note: 'not found', hasSave: false },
+    success: { key: 'successSelector', label: 'Confirmation element', status: 'none', note: 'not set', hasSave: false },
+  });
+
+  /**
+   * The bug this screen exists for. The record buttons started life as a block on
+   * wizard step 1 — and the panel does not *open* on step 1: `firstStepWithWork`
+   * sends a returning user to the earliest unfinished step, and a brand-new config
+   * always has work on `fields` or `send`. So the one thing a new site wants was
+   * four presses of Back away, and Site setup looked exactly as it always had.
+   */
+  it('opens on the offer to record when nothing has ever been saved', () => {
+    const s = render(fresh());
+    expect(s.querySelector('.cf-record-actions')).not.toBeNull();
+    // Not the wizard: no rail, no step.
+    expect(s.querySelector('.cf-rail')).toBeNull();
+    expect(s.querySelector('.cf-step-title')!.textContent).toBe('Teach the extension this site');
+  });
+
+  it('opens on the wizard once the site has been taught anything', () => {
+    const s = render(data());
+    expect(s.querySelector('.cf-rail')).not.toBeNull();
+  });
+
+  it('gets out of the way when asked, and does not come back on a re-render', () => {
+    const d = fresh();
+    const s = render(d);
+    s.querySelector<HTMLButtonElement>('.cf-footer .cf-btn')!.click();
+    expect(s.querySelector('.cf-rail')).not.toBeNull();
+
+    panel!.render(d);
+    expect(s.querySelector('.cf-rail')).not.toBeNull();
+  });
+
+  it('offers both flows from the offer screen, with Record the only primary', () => {
+    const started: string[] = [];
+    const s = render(fresh(), callbacks({ onStartRecording: (f) => started.push(f) }));
+    expect(s.querySelectorAll('.cf-btn.primary')).toHaveLength(1);
+
+    const buttons = [...s.querySelectorAll<HTMLButtonElement>('.cf-record-actions .cf-btn')];
+    buttons[0].click();
+    buttons[1].click();
+    expect(started).toEqual(['internal', 'external']);
   });
 });

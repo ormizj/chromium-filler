@@ -1,21 +1,31 @@
 /**
- * Click/tap-to-pick element selection. Highlights the element under the pointer;
- * clicking (mouse) or tapping then Confirm (touch) resolves the picked element.
- * Cancels on Escape or the Cancel button.
+ * Click/tap-to-pick element selection: click to *select*, click the same spot
+ * again to step into the element inside it, Confirm to save.
  *
- * The mouse and touch flows are deliberately different. A mouse has a hover
- * state, so the highlight tracks the pointer and a click commits what you can
- * already see. A finger has none — the first you learn of what is under it is
- * after you tap — so a tap only *proposes* an element and Confirm commits it.
- * (This is what the Confirm button was always for; a plain `click` handler used
- * to commit first, so on touch you got whatever you happened to hit.)
+ * Two things this is not any more. It is not one flow for a mouse and another for
+ * a finger — a click used to commit outright on a mouse, so a stray press wrote a
+ * selector into the site config with nothing in between. And it is not one element
+ * per point: `elementFromPoint` hands back a single node, and the thing the user
+ * means is routinely the box around it (the description is the `<div>` around the
+ * `<span>` you can see; the Send button is the `<button>` around the `<span>` the
+ * click lands on). So a point gives a *chain* — see `shared/elementChain.ts` — and
+ * a pick is a position in it.
+ *
+ * The chain runs outermost first, because the outer element is the one that can
+ * usually name itself and the inner one is usually an unnamed `<span>`; clicking
+ * again travels inward, and wraps.
  */
 
+import { elementChain, describeElement, stepChain } from '../shared/elementChain';
+import { ACTION_LABELS, SELECTOR_STRENGTH_TEXT } from '../shared/labels';
+import { pickSelector } from '../shared/selector';
 import { currentPalette, withAlpha } from '../ui/palette';
+import { PICKER_ATTR as OWN_ATTR, isExtensionUi } from './extensionUi';
 
 export type PickHandler = (el: Element) => void;
 
-const OWN_ATTR = 'data-cf-picker';
+/** How far a second click may land from the first and still mean "the same spot". */
+const SAME_SPOT_PX = 8;
 
 export function startPicker(onPick: PickHandler, fieldLabel: string, onCancel?: () => void): () => void {
   const coarse = window.matchMedia?.('(pointer: coarse)').matches ?? false;
@@ -27,7 +37,6 @@ export function startPicker(onPick: PickHandler, fieldLabel: string, onCancel?: 
   box.setAttribute(OWN_ATTR, 'box');
   Object.assign(box.style, {
     position: 'fixed', zIndex: '2147483646', pointerEvents: 'none',
-    border: `2px solid ${p.accent}`, background: withAlpha(p.accent, 0.15),
     borderRadius: '4px', transition: 'all 40ms linear', display: 'none',
   } as CSSStyleDeclaration);
 
@@ -42,95 +51,265 @@ export function startPicker(onPick: PickHandler, fieldLabel: string, onCancel?: 
       : { top: '12px', bottom: 'auto' }),
     transform: 'translateX(-50%)', background: p.ink, color: p.onInk,
     font: '13px/1.4 system-ui, sans-serif', padding: '8px 12px', borderRadius: '10px',
-    display: 'flex', gap: '8px', alignItems: 'center', boxShadow: '0 4px 16px rgba(0,0,0,.35)',
-    maxWidth: '92vw', flexWrap: 'wrap', justifyContent: 'center',
+    display: 'flex', flexDirection: 'column', gap: '8px',
+    boxShadow: '0 4px 16px rgba(0,0,0,.35)',
+    // `left: 50%` leaves a fixed element only half the viewport to shrink into, so
+    // a shrink-to-fit bar came out 195px wide on a 390px screen and wrapped its
+    // four buttons into a 2x2 block. Ask for the content width and cap it instead.
+    width: 'max-content', maxWidth: 'calc(100vw - 24px)',
   } as CSSStyleDeclaration);
 
-  const label = document.createElement('span');
-  label.textContent = coarse
-    ? `Tap the "${fieldLabel}" field, then Confirm`
-    : `Click the "${fieldLabel}" field`;
-  // Confirm is the primary — accent fill; Cancel is a neutral chip on the bar.
-  const confirmBtn = mkButton('Confirm', p.accent, p.onStatus, coarse);
-  const cancelBtn = mkButton('Cancel', p.neutral, p.ink, coarse);
-  confirmBtn.style.display = 'none';
-  bar.append(label, confirmBtn, cancelBtn);
+  // Two rows, in a fixed order, both present from the first frame. The controls
+  // that are always there must not move when a selection appears — the same rule
+  // the recorder bar wraps under, and for the same reason: on a 390px screen the
+  // button under the thumb would otherwise be a different button each press.
+  const rowText = row('space-between');
+  const rowControls = row('space-between');
 
+  const label = document.createElement('span');
+  label.textContent = `Pick the "${fieldLabel}", then ${ACTION_LABELS.confirm}`;
+
+  const readout = document.createElement('code');
+  readout.setAttribute(OWN_ATTR, 'readout');
+  Object.assign(readout.style, {
+    font: '12px/1.4 ui-monospace, SFMono-Regular, Menlo, monospace',
+    color: withAlpha(p.onInk, 0.75), whiteSpace: 'nowrap',
+    overflow: 'hidden', textOverflow: 'ellipsis', maxWidth: '40vw',
+  } as CSSStyleDeclaration);
+
+  // Which selector this depth would get us. The whole reason depth matters: an
+  // outer div with an id is a handle we will find next month, and the span inside
+  // it is a position in a tree that will have moved.
+  const strength = document.createElement('span');
+  strength.setAttribute(OWN_ATTR, 'strength');
+  Object.assign(strength.style, {
+    display: 'inline-flex', alignItems: 'center', gap: '5px',
+    color: withAlpha(p.onInk, 0.75), whiteSpace: 'nowrap',
+  } as CSSStyleDeclaration);
+  const strengthDot = document.createElement('span');
+  Object.assign(strengthDot.style, {
+    width: '8px', height: '8px', borderRadius: '50%', background: p.neutral, flex: '0 0 auto',
+  } as CSSStyleDeclaration);
+  const strengthWord = document.createElement('span');
+  strength.append(strengthDot, strengthWord);
+
+  const position = document.createElement('span');
+  position.setAttribute(OWN_ATTR, 'position');
+  Object.assign(position.style, {
+    color: withAlpha(p.onInk, 0.75), whiteSpace: 'nowrap',
+  } as CSSStyleDeclaration);
+
+  const meta = row('flex-start');
+  meta.append(readout, strength, position);
+  rowText.append(label, meta);
+
+  // One treatment for every chip on the bar; Confirm is the only accent fill.
+  const chip = withAlpha(p.onInk, 0.16);
+  const widerBtn = mkButton(ACTION_LABELS.wider, 'wider', chip, p.onInk, coarse);
+  const deeperBtn = mkButton(ACTION_LABELS.deeper, 'deeper', chip, p.onInk, coarse);
+  const confirmBtn = mkButton(ACTION_LABELS.confirm, 'confirm', p.accent, p.onStatus, coarse);
+  const cancelBtn = mkButton(ACTION_LABELS.cancel, 'cancel', chip, p.onInk, coarse);
+
+  const travel = row('flex-start');
+  travel.append(widerBtn, deeperBtn);
+  const decide = row('flex-end');
+  decide.append(confirmBtn, cancelBtn);
+  rowControls.append(travel, decide);
+
+  bar.append(rowText, rowControls);
   document.body.append(box, bar);
 
-  let candidate: Element | null = null;
-  /** How the in-flight gesture started; a stylus behaves like a finger here. */
-  let gestureIsTouch = coarse;
+  /** The elements at the point that was clicked, outermost first. */
+  let chain: Element[] = [];
+  let index = 0;
+  /** Where the live selection was clicked. `null` means nothing is selected yet. */
+  let anchor: { x: number; y: number } | null = null;
+  let frame = 0;
 
-  const isOwn = (el: Element | null) => !!el?.closest(`[${OWN_ATTR}]`);
+  // Everything the extension draws, not just this toolbar: a review card left on
+  // screen is a card the user can pick *from*.
+  const isOwn = isExtensionUi;
 
-  const setCandidate = (el: Element | null) => {
-    if (!el || isOwn(el)) return;
-    candidate = el;
+  const stackAt = (x: number, y: number): Element[] => {
+    const from = document.elementsFromPoint?.(x, y);
+    if (from?.length) return Array.from(from);
+    // No hit-test stack (jsdom, and very old engines): walk the one node up.
+    const out: Element[] = [];
+    for (let cur = document.elementFromPoint(x, y); cur; cur = cur.parentElement) out.push(cur);
+    return out;
+  };
+
+  const chainAt = (x: number, y: number): Element[] => elementChain(stackAt(x, y), { isOwn });
+
+  const paint = (): void => {
+    const el = chain[index];
+    if (!el) {
+      box.style.display = 'none';
+      setEnabled(false);
+      return;
+    }
+    const selected = anchor !== null;
     const r = el.getBoundingClientRect();
-    box.style.display = 'block';
-    box.style.top = `${r.top}px`;
-    box.style.left = `${r.left}px`;
-    box.style.width = `${r.width}px`;
-    box.style.height = `${r.height}px`;
-    confirmBtn.style.display = 'inline-block';
+    Object.assign(box.style, {
+      display: 'block',
+      top: `${r.top}px`, left: `${r.left}px`, width: `${r.width}px`, height: `${r.height}px`,
+      // A hover is a proposal and a click is a choice, so they must not look alike.
+      border: `2px ${selected ? 'solid' : 'dashed'} ${p.accent}`,
+      background: selected ? withAlpha(p.accent, 0.15) : 'transparent',
+    } as CSSStyleDeclaration);
+
+    readout.textContent = describeElement(el);
+    const s = pickSelector(el).strength;
+    strengthDot.style.background = s === 'strong' ? p.ok : s === 'ok' ? p.warn : p.err;
+    strengthWord.textContent = SELECTOR_STRENGTH_TEXT[s].word;
+    strength.setAttribute('aria-label', SELECTOR_STRENGTH_TEXT[s].aria);
+    position.textContent = `${index + 1} / ${chain.length}`;
+    setEnabled(selected);
   };
 
-  const onMove = (e: PointerEvent) => setCandidate(document.elementFromPoint(e.clientX, e.clientY));
-
-  const onDown = (e: PointerEvent) => {
-    gestureIsTouch = e.pointerType === 'touch' || e.pointerType === 'pen';
+  /**
+   * Unavailable is a state a control is *in*, not a control that half exists — so
+   * the label goes quiet and the fill drops, and nothing is faded out whole. The
+   * blocked primary de-fills for the same reason the modal's does: a translucent
+   * coral reads as broken, and "nothing picked yet" is the ordinary opening state.
+   */
+  const setEnabled = (on: boolean): void => {
+    const off = withAlpha(p.onInk, 0.06);
+    const offInk = withAlpha(p.onInk, 0.45);
+    for (const b of [widerBtn, deeperBtn]) {
+      b.disabled = !on;
+      b.style.background = on ? chip : off;
+      b.style.color = on ? p.onInk : offInk;
+    }
+    confirmBtn.disabled = !on;
+    confirmBtn.style.background = on ? p.accent : off;
+    confirmBtn.style.color = on ? p.onStatus : offInk;
+    // An empty readout is a stray dot and a gap where a line should be.
+    meta.style.display = on || chain.length ? 'flex' : 'none';
   };
 
-  const onClick = (e: MouseEvent) => {
-    const target = e.target as Element;
-    if (isOwn(target)) return; // let toolbar buttons work
+  const travelBy = (dir: 1 | -1): void => {
+    if (!anchor || chain.length < 2) return;
+    index = stepChain(chain.length, index, dir);
+    paint();
+  };
+
+  /* ---------------- Page events ---------------- */
+
+  const onMove = (e: PointerEvent): void => {
+    if (anchor) return; // a selection is live; the highlight is no longer a preview
+    const { clientX: x, clientY: y } = e;
+    if (frame) return;
+    frame = raf(() => {
+      frame = 0;
+      if (anchor) return;
+      const next = chainAt(x, y);
+      if (!next.length) return;
+      chain = next;
+      index = 0;
+      paint();
+    });
+  };
+
+  const onClick = (e: MouseEvent): void => {
+    if (isOwn(e.target as Element)) return; // let the toolbar's own buttons work
     e.preventDefault();
     e.stopPropagation();
-    setCandidate(document.elementFromPoint(e.clientX, e.clientY));
-    // Touch proposes; only Confirm commits. Mouse commits directly, because the
-    // highlight has been following the cursor and the target is already visible.
-    if (candidate && !gestureIsTouch) finish(candidate);
+    const x = e.clientX;
+    const y = e.clientY;
+    const sameSpot = anchor
+      && Math.abs(x - anchor.x) <= SAME_SPOT_PX
+      && Math.abs(y - anchor.y) <= SAME_SPOT_PX;
+    if (sameSpot && chain.length) {
+      index = stepChain(chain.length, index, 1);
+    } else {
+      const next = chainAt(x, y);
+      if (!next.length) return; // nothing of the page's here — only our own chrome
+      chain = next;
+      index = 0;
+      anchor = { x, y };
+    }
+    paint();
   };
 
-  const onKey = (e: KeyboardEvent) => {
-    if (e.key === 'Escape') cancel();
+  /**
+   * The page must not act on any part of a gesture aimed at us. A pick is several
+   * presses long now, so cancelling `click` alone is not enough: a site that acts
+   * on `mousedown` would act once per step of the chain.
+   */
+  const swallow = (e: Event): void => {
+    if (isOwn(e.target as Element)) return;
+    e.preventDefault();
+    e.stopPropagation();
   };
 
-  const cleanup = () => {
+  const onKey = (e: KeyboardEvent): void => {
+    if (e.key === 'Escape') { cancel(); return; }
+    if (!anchor) return;
+    if (e.key === 'ArrowDown' || e.key === 'ArrowRight') { e.preventDefault(); travelBy(1); }
+    else if (e.key === 'ArrowUp' || e.key === 'ArrowLeft') { e.preventDefault(); travelBy(-1); }
+    else if (e.key === 'Enter') { e.preventDefault(); commit(); }
+  };
+
+  // The box is `position: fixed` off a rect read when the click landed, and the
+  // selection now outlives the gesture that made it — so scrolling would leave the
+  // outline behind on an empty patch of page.
+  const reposition = (): void => { if (chain[index]) paint(); };
+
+  const SWALLOWED = ['pointerdown', 'pointerup', 'mousedown', 'mouseup', 'dblclick', 'contextmenu'];
+
+  const cleanup = (): void => {
     document.removeEventListener('pointermove', onMove, true);
-    document.removeEventListener('pointerdown', onDown, true);
     document.removeEventListener('click', onClick, true);
     document.removeEventListener('keydown', onKey, true);
+    for (const type of SWALLOWED) document.removeEventListener(type, swallow, true);
+    document.removeEventListener('scroll', reposition, true);
+    window.removeEventListener('resize', reposition);
     box.remove();
     bar.remove();
   };
 
-  const finish = (el: Element) => { cleanup(); onPick(el); };
-  const cancel = () => { cleanup(); onCancel?.(); };
+  const commit = (): void => {
+    const el = chain[index];
+    if (!anchor || !el) return;
+    cleanup();
+    onPick(el);
+  };
+  const cancel = (): void => { cleanup(); onCancel?.(); };
 
-  confirmBtn.addEventListener('click', (e) => {
-    e.preventDefault();
-    e.stopPropagation();
-    if (candidate) finish(candidate);
-  });
-  cancelBtn.addEventListener('click', (e) => {
-    e.preventDefault();
-    e.stopPropagation();
-    cancel();
-  });
+  const press = (b: HTMLButtonElement, run: () => void) => {
+    b.addEventListener('click', (e) => { e.preventDefault(); e.stopPropagation(); run(); });
+  };
+  press(widerBtn, () => travelBy(-1));
+  press(deeperBtn, () => travelBy(1));
+  press(confirmBtn, commit);
+  press(cancelBtn, cancel);
 
+  setEnabled(false);
   document.addEventListener('pointermove', onMove, true);
-  document.addEventListener('pointerdown', onDown, true);
   document.addEventListener('click', onClick, true);
   document.addEventListener('keydown', onKey, true);
+  for (const type of SWALLOWED) document.addEventListener(type, swallow, true);
+  document.addEventListener('scroll', reposition, { capture: true, passive: true });
+  window.addEventListener('resize', reposition);
 
   return cancel;
 }
 
-function mkButton(text: string, bg: string, fg: string, coarse: boolean): HTMLButtonElement {
+function row(justify: string): HTMLDivElement {
+  const d = document.createElement('div');
+  d.setAttribute(OWN_ATTR, 'row');
+  Object.assign(d.style, {
+    display: 'flex', gap: '8px', alignItems: 'center', justifyContent: justify, flexWrap: 'wrap',
+  } as CSSStyleDeclaration);
+  return d;
+}
+
+function mkButton(
+  text: string, role: string, bg: string, fg: string, coarse: boolean,
+): HTMLButtonElement {
   const b = document.createElement('button');
-  b.setAttribute(OWN_ATTR, 'btn');
+  b.setAttribute(OWN_ATTR, role);
   b.textContent = text;
   Object.assign(b.style, {
     background: bg, color: fg, border: 'none', borderRadius: '8px',
@@ -138,4 +317,10 @@ function mkButton(text: string, bg: string, fg: string, coarse: boolean): HTMLBu
     cursor: 'pointer', minHeight: coarse ? '44px' : '32px',
   } as CSSStyleDeclaration);
   return b;
+}
+
+/** rAF where there is one; the picker still has to work under jsdom. */
+function raf(fn: () => void): number {
+  const g = globalThis as unknown as { requestAnimationFrame?: (cb: () => void) => number };
+  return g.requestAnimationFrame ? g.requestAnimationFrame(fn) : (setTimeout(fn, 16) as unknown as number);
 }

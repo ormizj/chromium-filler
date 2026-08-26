@@ -428,9 +428,9 @@ mode → load the zip.
 Mobile is the priority target, so every surface is touch-first: a 44px minimum
 for every control, the modal and setup panel become full-width bottom sheets,
 status is shown by glyph as well as colour, tap-to-pick proposes a target and
-waits for **Confirm** (a finger has no hover, so committing on first tap picked
-whatever you happened to hit), and the picker toolbar sits at the bottom where
-your thumb is. Because reaching the toolbar popup costs two or three taps through
+waits for **Confirm** (tapping again steps into the element inside the one you
+have, because what is under a finger is rarely what you meant), and the picker
+toolbar sits at the bottom where your thumb is. Because reaching the toolbar popup costs two or three taps through
 the browser menu, the on-page modal carries the session controls too.
 
 ## Site config shape

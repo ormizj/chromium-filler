@@ -5,6 +5,7 @@
  */
 
 import type { PrepStep } from '../shared/types';
+import { query } from '../shared/query';
 import { waitForSelector } from './waitForForm';
 
 const LOG = '[chromium-filler]';
@@ -43,12 +44,12 @@ async function runStep(step: PrepStep): Promise<void> {
     }
 
     case 'scrollIntoView': {
-      const el = step.selector ? document.querySelector(step.selector) : null;
+      const el = query(document, step.selector);
       if (!el) {
         if (step.optional) return;
         throw new Error(`scrollIntoView target not found: ${step.selector}`);
       }
-      (el as HTMLElement).scrollIntoView({ block: 'center' });
+      el.scrollIntoView({ block: 'center' });
       return;
     }
 
@@ -58,7 +59,7 @@ async function runStep(step: PrepStep): Promise<void> {
         if (step.optional) return;
         throw new Error(`click target not found: ${step.selector}`);
       }
-      (el as HTMLElement).click();
+      el.click();
       await delay(150);
       return;
     }

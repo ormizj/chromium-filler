@@ -16,11 +16,16 @@
  */
 
 import type { FieldKey, PrepAction } from '../shared/types';
+import type {
+  BindKey, CompiledSetup, RecordFlow, Recording, RecordedStep,
+} from '../shared/recording';
+import { SELECTOR_STRENGTH_TEXT } from '../shared/labels';
+import { bindLabel } from './recorderBar';
 import {
   CONCEPT_HELP, DOT_LEGEND, SETUP_STEP_HELP, SETUP_STEP_TITLES,
 } from '../shared/help';
 import {
-  SETUP_STEP_ICONS, SETUP_STEP_ORDER, firstStepWithWork, stepStates,
+  SETUP_STEP_ICONS, SETUP_STEP_ORDER, firstStepWithWork, isUnconfigured, stepStates,
   type ContainerKey, type PrepListKey, type PrepRow, type RowStatus, type SetupRow,
   type SetupSnapshot, type SetupStepKey, type SetupVerdict, type StepState,
 } from '../shared/setupSteps';
@@ -39,6 +44,14 @@ export type {
 const DOT: Record<RowStatus, string> = { high: 'ok', low: 'warn', none: 'none' };
 
 export interface SetupData extends SheetData, SetupSnapshot {
+  /**
+   * A finished recording waiting to be reviewed. Its presence is what the
+   * Controller uses to ask for review mode; which mode is actually *shown* stays on
+   * the panel instance, for the same reason `step` does.
+   */
+  recording?: Recording;
+  /** What that recording compiled to — the half of the review that is the outcome. */
+  compiled?: CompiledSetup;
   /**
    * Whether the user has already dismissed the legend. False opens it, so a
    * first-time user is told what the dots and the `auto ·` prefixes mean before
@@ -68,6 +81,16 @@ export interface SetupCallbacks extends SheetCallbacks {
   onPickSuccess(): void;
   onClearSuccess(): void;
   onRename(name: string, urlPattern: string): void;
+  /** Set this site up by doing it once. The flow decides what the bar asks for. */
+  onStartRecording(flow: RecordFlow): void;
+  /** Re-decide one recorded step from the review — `null` keeps it a step. */
+  onRebindStep(id: string, bind: BindKey | null): void;
+  /** Point a recorded step at a different element, for a fragile one. */
+  onRepickStep(id: string): void;
+  onRemoveStep(id: string): void;
+  /** Write the compiled config(s) and hand over to the wizard. */
+  onSaveRecording(): void;
+  onDiscardRecording(): void;
   onOpenOptions(): void;
   /** The legend was dismissed — persist it so the next posting stays quiet. */
   onDismissHelp(): void;
@@ -79,6 +102,19 @@ export interface SetupCallbacks extends SheetCallbacks {
    */
   onClose(): void;
 }
+
+/**
+ * What the review's per-step dropdown offers. The flow and job-info marks, in the
+ * order they come up while applying — the profile fields are deliberately not here:
+ * sixteen of them would bury the five that matter in a control the user is scanning,
+ * and a field is bound from the recorder bar while the cursor is still in it, which
+ * is both easier and the case this list is not for.
+ */
+const BIND_CHOICES: BindKey[] = [
+  'submit', 'success', 'jobDescription', 'jobTitle', 'jobRequirements',
+  'applySelector', 'quickApplySelector', 'markerSelector',
+  'company', 'location', 'employmentType',
+];
 
 const PREP_LABEL: Record<PrepAction, string> = {
   click: 'Click',
@@ -130,6 +166,19 @@ export class SetupPanel extends Sheet<SetupData> {
   private step = 0;
   /** Whether the opening step has been chosen; it is picked once, not per render. */
   private placed = false;
+  /**
+   * Which of the panel's three screens is up. **On the instance, never in
+   * `SetupData`** — same rule as `step`, and the same failure if it is broken:
+   * `refreshSetup` re-renders on every edit, so a mode derived from the data would
+   * throw the user out of the review each time they re-marked a row.
+   *
+   * `offer` is where a site nobody has configured opens: two buttons and a way past
+   * them. It is a screen of its own rather than a block on step 1 because the panel
+   * does not *open* on step 1 — `firstStepWithWork` sends a returning user to the
+   * earliest unfinished step, and a brand-new config always has work on `fields` or
+   * `send`. As a block it was four presses of Back away from anyone who needed it.
+   */
+  private mode: 'offer' | 'wizard' | 'review' = 'wizard';
   /** The `?` explanations the user opened — a re-scan mid-read must not close one. */
   private openHelp = new Set<SetupStepKey>();
   /** The legend, once dismissed, stays folded for the rest of this page too. */
@@ -147,10 +196,38 @@ export class SetupPanel extends Sheet<SetupData> {
     // which is what the old auto-opening sections were reaching for.
     if (!this.placed) {
       this.placed = true;
+      // A site nobody has taught anything gets the offer to record. Everyone else
+      // gets the wizard, at the earliest step that still needs them.
+      if (isUnconfigured(data)) this.mode = 'offer';
       const work = firstStepWithWork(stepStates(data));
       this.step = data.helpSeen && work >= 0 ? work : 0;
     }
     this.paint();
+  }
+
+  /**
+   * Show the review of a finished recording, or go back to the wizard.
+   *
+   * Called by the Controller when a recording stops, and by Save/Discard on the way
+   * out. It is a command rather than a property of the data for the reason `mode`
+   * itself is on the instance: the panel re-renders constantly, and the review must
+   * not reappear every time it does.
+   */
+  showReview(on: boolean): void {
+    this.mode = on ? 'review' : 'wizard';
+    // Coming out of a review lands on the earliest step that still needs anything,
+    // which after a good recording is usually nothing at all.
+    if (!on && this.data) this.step = Math.max(0, firstStepWithWork(stepStates(this.data)));
+    this.repaint();
+  }
+
+  /**
+   * Show the opening offer, or leave it for the wizard. Exposed so the dev harness
+   * can render it and the Controller can put it back after a discarded recording.
+   */
+  showOffer(on: boolean): void {
+    this.mode = on ? 'offer' : 'wizard';
+    this.repaint();
   }
 
   /** Jump to a step by key. Used by the dev harness, so each step is screenshottable. */
@@ -158,6 +235,7 @@ export class SetupPanel extends Sheet<SetupData> {
     const i = SETUP_STEP_ORDER.indexOf(key);
     if (i < 0) return;
     this.placed = true;
+    this.mode = 'wizard';
     this.step = i;
     this.repaint();
   }
@@ -223,6 +301,16 @@ export class SetupPanel extends Sheet<SetupData> {
     header.append(title, full, close);
     this.makeDraggable(card, header);
 
+    if (this.mode === 'review' && data.recording && data.compiled) {
+      card.append(header, this.reviewBody(data.recording, data.compiled), this.reviewFooter());
+      return card;
+    }
+
+    if (this.mode === 'offer') {
+      card.append(header, this.offerBody(), this.offerFooter());
+      return card;
+    }
+
     const states = stepStates(data);
     const current = states[this.step];
 
@@ -251,6 +339,13 @@ export class SetupPanel extends Sheet<SetupData> {
     const last = this.step === SETUP_STEP_ORDER.length - 1;
     // The wizard ends where the old footer's Done did: finishing the last step
     // and finishing with the site are the same act, so they are one button.
+    //
+    // Next keeps the primary on every step, including the first. The offer screen is
+    // the front door now, so by the time anyone is *in* the wizard they have either
+    // recorded the site or chosen to do it by hand — and on that path the next action
+    // really is Next. The re-record buttons on this step are a correction, and a
+    // second coral button beside Next would be the two-primaries bug the guardrail
+    // caught the first time round.
     footer.append(back, last
       ? btn(ACTION_LABELS.done, () => this.cb.onClose(), true)
       : btn('Next ›', () => this.goTo(this.step + 1), true));
@@ -345,11 +440,241 @@ export class SetupPanel extends Sheet<SetupData> {
     return head;
   }
 
+  /**
+   * The front door: set this site up by applying to one job while the extension
+   * watches. Everything below it on this step — and the five steps after it — is the
+   * way to correct what that produced, or to build a config by hand for a site you
+   * would rather not apply to yet.
+   *
+   * Two buttons because there are two shapes of application and the extension cannot
+   * know which this is until the user has already done it. They name **where the
+   * application gets made**, not what the extension will do, because that is the
+   * question someone looking at a posting can actually answer. Getting it wrong
+   * costs nothing: `compileRecording` believes what happened, not what was picked.
+   */
+  private recordLead(isOffer = false): HTMLElement {
+    const wrap = el('div', 'cf-record-lead');
+
+    if (!isOffer) {
+      // On the `site` step this is the way to record a site *again* — to mark the
+      // description you forgot — so it says which of the two it is. The offer screen
+      // has already explained itself in full above.
+      const lead = el('p', 'cf-record-lead-text');
+      lead.textContent = 'Record this site again to correct or add to what is saved. '
+        + 'Nothing already set is lost unless the new recording covers it.';
+      wrap.append(lead);
+    }
+
+    const actions = el('div', 'cf-record-actions');
+    actions.append(
+      btn(ACTION_LABELS.record, () => this.cb.onStartRecording('internal'), isOffer),
+      btn(ACTION_LABELS.recordExternal, () => this.cb.onStartRecording('external')),
+    );
+    wrap.append(actions);
+
+    if (!isOffer) {
+      const or = el('p', 'cf-record-or');
+      or.textContent = 'Or correct it by hand below.';
+      wrap.append(or);
+    }
+    return wrap;
+  }
+
+  /**
+   * The opening screen for a site nobody has set up: what recording is, the two
+   * flows, and one way past to the wizard.
+   *
+   * It is the whole card rather than a block on a step because it is an *offer*, and
+   * an offer competing with a progress rail and six numbered steps reads as the least
+   * of seven things to do. The rail comes back the moment the wizard does.
+   */
+  private offerBody(): HTMLElement {
+    const body = el('div', 'cf-body');
+
+    const head = el('div', 'cf-step-head');
+    const title = el('h2', 'cf-step-title');
+    title.textContent = 'Teach the extension this site';
+    head.append(title);
+
+    const lead = el('p', 'cf-step-lead');
+    lead.append(...richText(CONCEPT_HELP.recording.body));
+    head.append(lead);
+    body.append(head, this.recordLead(true));
+
+    const marking = el('p', 'cf-record-or');
+    marking.textContent = CONCEPT_HELP.marking.short ?? '';
+    body.append(marking);
+    return body;
+  }
+
+  /**
+   * One way out, and it is not a primary: the two Record buttons above it are what
+   * this screen is for, and a coral "Set up by hand" would point at the long way
+   * round on the one screen built to avoid it.
+   */
+  private offerFooter(): HTMLElement {
+    const footer = el('div', 'cf-footer');
+    footer.append(
+      btn('Set up by hand ›', () => this.showOffer(false)),
+      btn(ACTION_LABELS.done, () => this.cb.onClose()),
+    );
+    return footer;
+  }
+
+  /* ---------------- Reviewing a recording ---------------- */
+
+  /**
+   * What was recorded, and what it became.
+   *
+   * The timeline leads because it is the thing the user has memory of — they did it
+   * ninety seconds ago — and every row is editable, because the only decisions worth
+   * re-examining are "what was that?" and "can we find it again?". The compiled
+   * summary follows rather than leads: it is the answer, and the answer is only
+   * checkable against the steps above it.
+   */
+  private reviewBody(recording: Recording, compiled: CompiledSetup): HTMLElement {
+    const body = el('div', 'cf-body');
+
+    const head = el('div', 'cf-step-head');
+    const title = el('h2', 'cf-step-title');
+    title.textContent = 'Check what was recorded';
+    const lead = el('p', 'cf-step-lead');
+    lead.textContent = compiled.flow === 'external'
+      ? 'This posting handed off to the employer’s site, so it is being saved as two: '
+        + 'what to press here, and how to fill the form there.'
+      : 'The whole application happened on this site.';
+    head.append(title, lead);
+    body.append(head);
+
+    // The flow was corrected, or nothing here matches what the user chose — say so
+    // before they read a timeline split in a way they did not ask for.
+    if (compiled.flowCorrected) {
+      body.append(this.reviewNote(compiled.flow === 'external'
+        ? 'You chose "apply on this site", but the posting handed off — it has been '
+          + 'saved as a two-step application.'
+        : 'You chose "apply on the employer’s site", but the application was made '
+          + 'here — it has been saved as a one-step application.'));
+    }
+    for (const warning of compiled.warnings) body.append(this.reviewNote(warning));
+
+    if (!recording.steps.length) {
+      body.append(this.reviewNote('Nothing was recorded.'));
+      return body;
+    }
+
+    body.append(sectionHead('What you did'));
+    for (const step of recording.steps) body.append(this.reviewRow(step));
+    return body;
+  }
+
+  /**
+   * One thing the review has to say out loud.
+   *
+   * All of them are `warn`, and deliberately not graded. The tone is the *dot* as
+   * much as the colour, and the coral `accent` banner has no dot of its own — so
+   * grading the missing confirmation up to accent drew the single most consequential
+   * line on this panel with a grey dash beside it, which reads as decoration. They
+   * are all the same kind of thing anyway: something to look at before Save.
+   */
+  private reviewNote(text: string): HTMLElement {
+    const note = el('div', 'cf-flow warn');
+    const headLine = el('div', 'cf-flow-head');
+    headLine.append(el('span', 'cf-dot warn'));
+    const line = el('div', 'cf-flow-titleline');
+    const detail = el('div', 'cf-flow-detail');
+    detail.textContent = text;
+    line.append(detail);
+    headLine.append(line);
+    note.append(headLine);
+    return note;
+  }
+
+  /**
+   * One recorded step. The dot is the *selector's* strength, not a match status —
+   * this row's question is "will we find this again", and a step identified only by
+   * where it sits on the page is the thing most likely to stop working without
+   * anyone noticing. It is never colour alone: `SELECTOR_STRENGTH_TEXT` puts the
+   * word in the note and the fuller phrase in the dot's accessible name.
+   */
+  private reviewRow(step: RecordedStep): HTMLElement {
+    const row = el('div', 'cf-row');
+    const strength = step.target?.strength ?? 'fragile';
+    const dot = el('span', `cf-dot ${strength === 'strong' ? 'ok' : strength === 'ok' ? 'warn' : 'none'}`);
+    dot.setAttribute('aria-label', SELECTOR_STRENGTH_TEXT[strength].aria);
+
+    const fieldWrap = el('div', 'cf-field');
+    const name = document.createElement('b');
+    name.textContent = step.action === 'input'
+      ? `Filled in ${step.label || 'a field'}`
+      : `Clicked ${step.label || 'an element'}`;
+    const note = document.createElement('small');
+    const where = step.target?.selector ?? 'no target';
+    note.textContent = `${SELECTOR_STRENGTH_TEXT[strength].word} · ${where}`;
+    note.title = where;
+    fieldWrap.append(name, note);
+
+    const actions = el('div', 'cf-actions');
+    actions.append(this.bindSelect(step));
+    if (strength === 'fragile') {
+      actions.append(btn(ACTION_LABELS.pick, () => this.cb.onRepickStep(step.id), false, `rec:${step.id}:pick`));
+    }
+    actions.append(iconBtn('✕', 'Remove step', () => this.cb.onRemoveStep(step.id)));
+
+    row.append(dot, fieldWrap, actions);
+    return row;
+  }
+
+  /**
+   * The same decision the recorder bar offered while this was happening, offered
+   * again now that the whole sequence is visible: is this a step to replay, or is it
+   * something the extension should know?
+   */
+  private bindSelect(step: RecordedStep): HTMLElement {
+    const select = document.createElement('select');
+    select.className = 'cf-input cf-bind-select';
+    select.dataset.k = `rec:${step.id}:bind`;
+    select.setAttribute('aria-label', 'What this is');
+
+    const keep = document.createElement('option');
+    keep.value = '';
+    keep.textContent = ACTION_LABELS.keepAsClick;
+    select.append(keep);
+
+    for (const key of BIND_CHOICES) {
+      const option = document.createElement('option');
+      option.value = key;
+      option.textContent = bindLabel(key);
+      select.append(option);
+    }
+    // A bind the model allows but this list does not offer (a field, most often)
+    // still has to be shown as the current value rather than silently reset.
+    if (step.bind && !BIND_CHOICES.includes(step.bind)) {
+      const option = document.createElement('option');
+      option.value = step.bind;
+      option.textContent = bindLabel(step.bind);
+      select.append(option);
+    }
+    select.value = step.bind ?? '';
+    select.onchange = () => this.cb.onRebindStep(step.id, (select.value || null) as BindKey | null);
+    return select;
+  }
+
+  private reviewFooter(): HTMLElement {
+    const footer = el('div', 'cf-footer');
+    footer.append(
+      btn(ACTION_LABELS.discardRecording, () => this.cb.onDiscardRecording()),
+      btn(ACTION_LABELS.saveRecording, () => this.cb.onSaveRecording(), true),
+    );
+    return footer;
+  }
+
   /** The one step's own controls. Everything else in the wizard is chrome. */
   private stepBody(key: SetupStepKey, data: SetupData): HTMLElement {
     const body = el('div', 'cf-step-body');
 
     if (key === 'site') {
+      body.append(this.recordLead());
+
       const identity = el('div', 'cf-identity');
       const nameInput = input('Name', data.name, 'site:name');
       const patternInput = input('URL pattern', data.urlPattern, 'site:pattern');

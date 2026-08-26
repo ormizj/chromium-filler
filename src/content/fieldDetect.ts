@@ -7,7 +7,8 @@
  */
 
 import type { FieldKey, MatchConfidence, MatchSource } from '../shared/types';
-import { FIELD_KEYWORDS, AUTOCOMPLETE_MAP, normalizeAttr } from '../shared/fieldKeys';
+import { FIELD_KEYWORDS, AUTOCOMPLETE_MAP, TEXT_FIELDS, normalizeAttr } from '../shared/fieldKeys';
+import { query } from '../shared/query';
 
 export interface DetectedField {
   field: FieldKey;
@@ -125,6 +126,35 @@ function fileCandidates(root: ParentNode): HTMLElement[] {
  */
 const UPLOAD_FIELDS: FieldKey[] = ['resume', 'coverLetter'];
 
+/**
+ * Which field one control is, judged on its own.
+ *
+ * `detectFields` answers a different question — it assigns every field across a
+ * whole form at once, so it can stop two fields claiming the same input. The
+ * recorder cannot wait for that: the user has just typed into something and the bar
+ * has to say what it thinks that was, now, with the rest of the form possibly not
+ * even rendered yet. Same scoring, one element.
+ *
+ * A file input with no matching label still comes back as the CV, at `low` — the
+ * same judgement `UPLOAD_FIELDS` already encodes, and the same reason: an unlabelled
+ * upload on an application form is a CV far more often than it is anything else. It
+ * is offered as a guess, so the bar shows it as one and a tap corrects it.
+ */
+export function guessField(el: HTMLElement): { field: FieldKey; confidence: MatchConfidence } | null {
+  const isFile = el.matches('input[type="file"]');
+  const ctx = contextFor(el);
+
+  let best: FieldKey | null = null;
+  let bestWeight = 0;
+  for (const field of isFile ? UPLOAD_FIELDS : TEXT_FIELDS) {
+    const weight = scoreField(ctx, field);
+    if (weight > bestWeight) { best = field; bestWeight = weight; }
+  }
+
+  if (best) return { field: best, confidence: confidenceFor(bestWeight) };
+  return isFile ? { field: 'resume', confidence: 'low' } : null;
+}
+
 export function detectFields(opts: DetectOptions): DetectedField[] {
   const { root, fields, overrides, autoDetect = true } = opts;
   const result = new Map<FieldKey, DetectedField>();
@@ -139,12 +169,7 @@ export function detectFields(opts: DetectOptions): DetectedField[] {
   for (const field of fields) {
     const sel = overrides?.[field];
     if (!sel) continue;
-    let el: HTMLElement | null = null;
-    try {
-      el = root.querySelector(sel) as HTMLElement | null;
-    } catch {
-      el = null;
-    }
+    const el = query(root, sel);
     if (el) {
       result.set(field, {
         field, element: el, source: 'override', confidence: 'high', selectorUsed: sel,

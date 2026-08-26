@@ -24,6 +24,8 @@
  * of HTML rather than only against a live page.
  */
 
+import { query } from './query';
+
 /** What the modal renders as chips. Every field is optional by design. */
 export interface JobMeta {
   company?: string;
@@ -66,13 +68,9 @@ function clean(value: unknown): string | undefined {
 }
 
 function fromSelector(doc: Document, selector: string | undefined): string | undefined {
-  if (!selector) return undefined;
-  try {
-    return clean(doc.querySelector(selector)?.textContent ?? undefined);
-  } catch {
-    // An unparseable selector is a config typo, not a reason to render nothing.
-    return undefined;
-  }
+  // An unparseable selector is a config typo, not a reason to render nothing —
+  // `query` returns null for one rather than throwing.
+  return clean(query(doc, selector)?.textContent ?? undefined);
 }
 
 /** The first entry of a schema.org property that may be a single value or a list. */

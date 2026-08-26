@@ -33,6 +33,7 @@ export const FLOWS = [
   { id: 'destination', title: 'Destinations — reached by a handoff, no config of their own' },
   { id: 'submit-detection', title: 'Submit detection — what counts as "actually sent"' },
   { id: 'session', title: 'Queue session' },
+  { id: 'recording', title: 'Recording — set a site up by applying to one job' },
 ];
 
 const site = (host, file, query = '') => `${host}/sites/${file}.html${query}`;
@@ -44,6 +45,29 @@ export const HOP_URL = site(HOSTS.tracker, 'redirect-hop', `?ms=700&to=${encodeU
 export const TRACKED_URL = `${HOSTS.tracker}/r/302?to=${encodeURIComponent(HOP_URL)}`;
 
 export const SCENARIOS = [
+  /* ---------------- Recording ----------------
+   *
+   * The same two fixtures the fill flow uses, approached from the other end: instead
+   * of loading a config and checking what the extension does, these record a person
+   * doing it by hand and check what config comes out. They share URLs with the
+   * scenarios above on purpose — a recording scenario is a different thing done to
+   * the same page, and that is exactly the comparison worth being able to make.
+   */
+  {
+    id: 'record-internal',
+    flow: 'recording',
+    title: 'QuickBoard — record a one-step application',
+    url: site(HOSTS.board, 'quick-board', '?job=plain'),
+    expect: 'the Send button and the confirmation are saved, and the Send click never reaches prep',
+  },
+  {
+    id: 'record-external',
+    flow: 'recording',
+    title: 'MixedBoard \u2192 employer ATS — record across a handoff',
+    url: site(HOSTS.board, 'redirect-board', '?job=external'),
+    expect: 'the board gets the apply link and its before-leaving step; the ATS gets the fields, Send and confirmation',
+  },
+
   /* ---------------- Quick apply ---------------- */
   {
     id: 'slow-boards',

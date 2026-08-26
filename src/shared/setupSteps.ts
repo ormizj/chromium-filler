@@ -276,3 +276,24 @@ export function stepStates(s: SetupSnapshot): StepState[] {
 export function firstStepWithWork(states: StepState[]): number {
   return states.findIndex((s) => s.todo > 0);
 }
+
+/**
+ * Nobody has ever taught the extension anything about this site.
+ *
+ * This is what decides whether the panel opens on the offer to record or on the
+ * wizard, and it has to be a *saved*-only test. Every heuristic on the page reports
+ * itself as a match — `h1` finds a title, the label scoring finds an email field —
+ * so counting those would call a site configured on the strength of guesses that
+ * were made fresh this second and stored nowhere.
+ *
+ * It is the reason the offer is reachable at all. `firstStepWithWork` sends a
+ * returning user to the earliest unfinished step, and a brand-new config always has
+ * work on `fields` or `send` — so the panel opened on step 5 or 6, four presses of
+ * Back away from the one thing a new site actually wants.
+ */
+export function isUnconfigured(s: SetupSnapshot): boolean {
+  const saved = [...s.containers, ...s.fields, ...s.redirect, s.submit, s.success]
+    .some((row) => row.hasSave);
+  const steps = s.prep.length + s.submitCv.length + s.beforeFollow.length;
+  return !saved && steps === 0;
+}

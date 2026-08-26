@@ -32,6 +32,7 @@ describe('labels — the wording catalog', () => {
     const keys: ActionKey[] = [
       'apply', 'applied', 'skip', 'skipNext', 'rerun', 'confirm', 'pick',
       'done', 'openOptions', 'more', 'openApplication', 'openApplicationAgain', 'fillAnyway',
+      'cancel', 'wider', 'deeper',
     ];
     for (const k of keys) expect(ACTION_LABELS[k].trim(), k).not.toBe('');
   });

@@ -8,7 +8,7 @@
  */
 import { describe, it, expect } from 'vitest';
 import {
-  SETUP_STEP_ORDER, firstStepWithWork, stepStates,
+  SETUP_STEP_ORDER, firstStepWithWork, isUnconfigured, stepStates,
   type SetupRow, type SetupSnapshot,
 } from './setupSteps';
 
@@ -351,5 +351,49 @@ describe('firstStepWithWork', () => {
 
   it('is -1 for a site with nothing left to do', () => {
     expect(firstStepWithWork(stepStates(snapshot()))).toBe(-1);
+  });
+});
+
+/* ---------------- Where the panel opens ---------------- */
+
+describe('isUnconfigured — has anyone taught this site anything?', () => {
+  /**
+   * A brand-new config, straight from `configTemplate`. Every heuristic on the page
+   * still reports itself as a match — `h1` finds a title, label scoring finds an
+   * email — so this must test what is *saved*, not what was found. Counting the
+   * guesses would call a fresh site configured on the strength of work nobody did.
+   */
+  it('is true for a config with nothing saved, however much the page matched', () => {
+    expect(isUnconfigured(snapshot({
+      prep: [],
+      containers: [row({ key: 'jobTitle', status: 'high', note: 'auto · h1' })],
+      fields: [row({ key: 'email', status: 'high', note: 'auto · #email' })],
+      submit: row({ key: 'submitSelector', status: 'low', note: 'auto · Apply' }),
+      success: row({ key: 'successSelector', status: 'none', note: 'not set' }),
+    }))).toBe(true);
+  });
+
+  it('is false once any selector has been saved', () => {
+    expect(isUnconfigured(snapshot({
+      prep: [],
+      success: row({ key: 'successSelector', status: 'high', note: 'saved · .done', hasSave: true }),
+    }))).toBe(false);
+    expect(isUnconfigured(snapshot({
+      prep: [],
+      fields: [row({ key: 'email', status: 'high', note: 'saved · #email', hasSave: true })],
+      success: row({ key: 'successSelector', status: 'none', note: 'not set' }),
+    }))).toBe(false);
+  });
+
+  it('is false once the site has page actions, which only a person can add', () => {
+    const bare = {
+      prep: [], submitCv: [], beforeFollow: [],
+      success: row({ key: 'successSelector', status: 'none', note: 'not set' }),
+    };
+    expect(isUnconfigured(snapshot({ ...bare, prep: [{ action: 'click' as const, selector: '#a' }] }))).toBe(false);
+    expect(isUnconfigured(snapshot({ ...bare, submitCv: [{ action: 'click' as const, selector: '#b' }] }))).toBe(false);
+    expect(isUnconfigured(snapshot({ ...bare, beforeFollow: [{ action: 'click' as const, selector: '#c' }] }))).toBe(false);
+    // …and the control: the same bare snapshot with no page actions is unconfigured.
+    expect(isUnconfigured(snapshot(bare))).toBe(true);
   });
 });

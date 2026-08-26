@@ -1,0 +1,201 @@
+/**
+ * The recorder's bar. Deliberately **not** a `.cf-card` and not a `Sheet`: while it
+ * is up the user is using the site, not reading our card, so it has to be the
+ * smallest thing that can still be pressed. It also never takes a pill slot — the
+ * "one slot, two sheets" arbitration in `content/main.ts` is about the review modal
+ * and the setup panel, and a third docked object would break it.
+ *
+ * Placement follows `picker.ts`'s toolbar for the same reason: a top bar sits under
+ * the mobile URL bar and out of the thumb's reach, so on a coarse pointer it goes to
+ * the bottom, above the home indicator.
+ */
+
+:host {
+  all: initial;
+}
+
+.cf-bar {
+  position: fixed;
+  z-index: 2147483645; /* below the picker, which is used *from* here */
+  left: 50%;
+  top: 12px;
+  transform: translateX(-50%);
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  max-width: min(92vw, 720px);
+  padding: var(--space-2);
+  background: var(--bg);
+  color: var(--fg);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-xl);
+  box-shadow: var(--shadow-2);
+  font: var(--text-sm) / 1.4 var(--font);
+}
+
+@media (pointer: coarse) {
+  .cf-bar {
+    top: auto;
+    bottom: calc(12px + env(safe-area-inset-bottom, 0px));
+  }
+}
+
+/*
+ * Under 640px the bar spans the screen, like the sheets do — a centred pill with
+ * four controls in it wraps into a block at 390px otherwise.
+ *
+ * It wraps into **two** rows, in a deliberate order: what is being recorded and the
+ * way out share the first, and the decision about the last step takes the second.
+ * Left to source order it made three rows and put Undo/Done in a different place
+ * depending on whether the last step happened to be marked — so the two controls
+ * that are always there moved around, which is exactly what a HUD must not do.
+ */
+@media (max-width: 640px) {
+  .cf-bar {
+    left: var(--space-2);
+    right: var(--space-2);
+    transform: none;
+    max-width: none;
+    flex-wrap: wrap;
+    row-gap: var(--space-2);
+  }
+
+  .cf-rec-state { order: 1; }
+  .cf-rec-exits { order: 2; }
+
+  .cf-rec-last {
+    order: 3;
+    flex-basis: 100%;
+    padding: 0;
+    /* The dividers separate three things on one line; on their own row they are a
+       box drawn round the only thing there. */
+    border: none;
+  }
+}
+
+/* The live indicator. A recording is a mode the whole page is in, and the one thing
+   the bar must say even when it is glanced at sideways. */
+.cf-rec-state {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+  white-space: nowrap;
+  font-weight: 500;
+}
+
+.cf-rec-live {
+  width: 10px;
+  height: 10px;
+  min-width: 10px;
+  min-height: 10px;
+  border-radius: 50%;
+  background: var(--err);
+  animation: cf-rec-pulse 1.6s ease-in-out infinite;
+}
+
+/* Reduced motion turns the pulse off; the dot itself still says "recording", so
+   nothing is lost but the movement. */
+@media (prefers-reduced-motion: reduce) {
+  .cf-rec-live {
+    animation: none;
+  }
+}
+
+@keyframes cf-rec-pulse {
+  50% { opacity: 0.35; }
+}
+
+.cf-rec-count {
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+
+/*
+ * The last step, and the decision about it. This is where "bind, or keep as a click"
+ * gets answered without leaving the page — the reason the bar exists at all rather
+ * than a Stop button and a review at the end.
+ */
+.cf-rec-last {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+  flex: 1 1 auto;
+  min-width: 0;
+  padding: 0 var(--space-2);
+  border-left: 1px solid var(--border);
+  border-right: 1px solid var(--border);
+}
+
+.cf-rec-what {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--muted);
+}
+
+.cf-rec-what b {
+  color: var(--fg);
+  font-weight: 500;
+}
+
+.cf-rec-actions {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+  margin-left: auto;
+}
+
+/* The way out, always in the same place. */
+.cf-rec-exits {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+  margin-left: auto;
+}
+
+/*
+ * The bind menu. Opens *upward* on a coarse pointer, where the bar is at the bottom,
+ * and downward otherwise — the same "open away from the edge you are docked to" rule
+ * the modal's overflow menu follows.
+ */
+.cf-rec-menu {
+  position: absolute;
+  right: 0;
+  top: calc(100% + var(--space-1));
+  z-index: 1;
+  max-height: 60vh;
+  overflow-y: auto;
+  min-width: 240px;
+  padding: var(--space-1);
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-card);
+  box-shadow: var(--shadow-2);
+}
+
+@media (pointer: coarse) {
+  .cf-rec-menu {
+    top: auto;
+    bottom: calc(100% + var(--space-1));
+  }
+}
+
+.cf-rec-menu-head {
+  padding: var(--space-1) var(--space-2);
+  color: var(--muted-2);
+  font-size: var(--text-xs);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.cf-rec-menu button {
+  display: block;
+  width: 100%;
+  text-align: left;
+}
+
+.cf-rec-wrap {
+  position: relative;
+  display: flex;
+  align-items: center;
+}

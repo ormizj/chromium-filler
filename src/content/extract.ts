@@ -12,6 +12,7 @@
 import type { SiteConfig } from '../shared/types';
 import { blocksToText, extractBlocks, isContentElement, type JobBlock } from '../shared/jobText';
 import { readJobMeta, type JobMeta } from '../shared/jobMeta';
+import { queryAll } from '../shared/query';
 
 export type ContainerKey = 'jobTitle' | 'jobDescription' | 'jobRequirements';
 
@@ -42,16 +43,8 @@ const FALLBACKS: Record<ContainerKey, string[]> = {
  * the matches and skipping the chrome finds the real container one step later.
  */
 function elFor(selector: string | undefined): HTMLElement | null {
-  if (!selector) return null;
-  try {
-    for (const node of document.querySelectorAll(selector)) {
-      const el = node as HTMLElement;
-      if (isContentElement(el) && el.textContent?.trim()) return el;
-    }
-    return null;
-  } catch {
-    return null;
-  }
+  return queryAll(document, selector)
+    .find((el) => isContentElement(el) && el.textContent?.trim()) ?? null;
 }
 
 function firstMatch(selectors: string[]): HTMLElement | null {

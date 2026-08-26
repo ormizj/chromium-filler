@@ -5,6 +5,12 @@
  *                      popup.ts / options.ts against the mocked `chrome.*`.
  *   modal | setup    — renders the REAL shadow-DOM surface (review modal, setup
  *                      panel) over a fake job posting, with representative data.
+ *   picker           — runs the REAL click-to-pick toolbar over a deliberately
+ *                      nested posting. It draws on the host page's own light DOM
+ *                      rather than in a shadow root, so it was the one surface
+ *                      with no harness state at all: every `onPick*` here is a
+ *                      console stub, which renders the *button* and never the
+ *                      toolbar it opens.
  *
  * The shadow surfaces are here because they are otherwise only reachable by
  * loading the built extension into a browser and driving a real site — which
@@ -26,9 +32,59 @@ import {
   FillerModal, type ModalCallbacks, type ModalData, type ModalView,
 } from '../src/content/modal/modal';
 import { SetupPanel, type SetupData } from '../src/content/setupPanel';
+import { startPicker } from '../src/content/picker';
+import { describeElement } from '../src/shared/elementChain';
 import { SETUP_STEP_ORDER, type SetupStepKey } from '../src/shared/setupSteps';
+import { RecorderBar } from '../src/content/recorderBar';
+import {
+  compileRecording, type RecordFlow, type Recording, type RecordedStep,
+} from '../src/shared/recording';
 
-type Page = 'popup' | 'options' | 'modal' | 'setup';
+/**
+ * A recording that is deliberately *not* perfect, because a clean one shows none of
+ * what the review is for: one step the extension could only identify by its position
+ * on the page, and no confirmation marked — which is the warning that matters most,
+ * since Apply stays greyed out without one.
+ */
+function recordedState(flow: RecordFlow): Partial<SetupData> {
+  const at = (n: number) => n * 900;
+  const strong = (selector: string) =>
+    ({ selector, strength: 'strong' as const, strategy: 'id' as const });
+
+  const steps: RecordedStep[] = [
+    { id: 's1', at: at(1), leg: 'posting', url: 'https://acme.test/job/42', action: 'click', label: 'Show full description', target: strong('#expand') },
+    { id: 's2', at: at(2), leg: 'posting', url: 'https://acme.test/job/42', action: 'click', label: 'Job description', bind: 'jobDescription', bindSource: 'user', target: strong('#posting-body') },
+  ];
+
+  if (flow === 'external') {
+    steps.push(
+      { id: 's3', at: at(3), leg: 'posting', url: 'https://acme.test/job/42', action: 'click', label: 'Apply on company site', bind: 'applySelector', bindSource: 'user', target: strong('#apply-external') },
+      { id: 's4', at: at(4), leg: 'posting', url: 'https://acme.test/job/42', action: 'navigate', label: '', to: 'https://ats.acme.test/apply' },
+      { id: 's5', at: at(5), leg: 'destination', url: 'https://ats.acme.test/apply', action: 'click', label: 'Start application', target: { selector: 'main > div > div:nth-of-type(2) > button', strength: 'fragile', strategy: 'path' } },
+      { id: 's6', at: at(7), leg: 'destination', url: 'https://ats.acme.test/apply', action: 'input', label: 'Email address', bind: 'field:email', bindSource: 'auto', target: strong('#email') },
+      { id: 's7', at: at(8), leg: 'destination', url: 'https://ats.acme.test/apply', action: 'input', label: 'Upload CV', bind: 'field:resume', bindSource: 'auto', target: strong('#cv') },
+      { id: 's8', at: at(9), leg: 'destination', url: 'https://ats.acme.test/apply', action: 'click', label: 'Submit application', bind: 'submit', bindSource: 'user', target: strong('#send') },
+    );
+  } else {
+    steps.push(
+      { id: 's3', at: at(3), leg: 'posting', url: 'https://acme.test/job/42', action: 'click', label: 'Continue', target: { selector: 'body > div > div:nth-of-type(3) > button', strength: 'fragile', strategy: 'path' } },
+      { id: 's4', at: at(5), leg: 'posting', url: 'https://acme.test/job/42', action: 'input', label: 'Email address', bind: 'field:email', bindSource: 'auto', target: strong('#email') },
+      { id: 's5', at: at(6), leg: 'posting', url: 'https://acme.test/job/42', action: 'input', label: 'Upload CV', bind: 'field:resume', bindSource: 'auto', target: strong('#cv') },
+      { id: 's6', at: at(7), leg: 'posting', url: 'https://acme.test/job/42', action: 'click', label: 'Submit application', bind: 'submit', bindSource: 'user', target: strong('#send') },
+    );
+  }
+
+  const recording: Recording = {
+    flow,
+    startedAt: 0,
+    postingUrl: 'https://acme.test/job/42',
+    ...(flow === 'external' ? { destinationUrl: 'https://ats.acme.test/apply' } : {}),
+    steps,
+  };
+  return { recording, compiled: compileRecording(recording) };
+}
+
+type Page = 'popup' | 'options' | 'modal' | 'setup' | 'picker';
 /** Which flow the surface is rendering — see `MODAL_STATES` / `SETUP_STATES`. */
 type State = string;
 
@@ -379,6 +435,12 @@ function bootSetup(): void {
     onPickSuccess: () => console.log('[harness] pick confirmation'),
     onClearSuccess: () => console.log('[harness] clear confirmation'),
     onRename: (n, p) => console.log('[harness] rename', n, p),
+    onStartRecording: (f) => console.log('[harness] start recording', f),
+    onRebindStep: (id, b) => console.log('[harness] rebind step', id, b),
+    onRepickStep: (id) => console.log('[harness] re-pick step', id),
+    onRemoveStep: (id) => console.log('[harness] remove step', id),
+    onSaveRecording: () => console.log('[harness] save recording'),
+    onDiscardRecording: () => console.log('[harness] discard recording'),
     onOpenOptions: () => console.log('[harness] open options'),
     onDismissHelp: () => console.log('[harness] legend dismissed'),
     onClose: () => console.log('[harness] close setup'),
@@ -496,6 +558,37 @@ function bootSetup(): void {
      */
     fullscreen: { fullscreen: true },
     flush: { layout: { right: 0, bottom: 0, width: 460, height: 4000 } },
+    /**
+     * A finished recording, waiting to be looked at. The review is a whole second
+     * rendering of this panel and the only way to reach it on a real page is to
+     * apply to a job — so without this nobody would ever see it in a screenshot.
+     *
+     * It carries a deliberately imperfect recording: one step the extension could
+     * only identify by its position (the red dot and the Pick beside it), and no
+     * confirmation marked, which is the warning that matters most.
+     */
+    /**
+     * What Site setup opens on for a site nobody has configured — which is the state
+     * every new site is in, and so the most-seen screen in the whole panel.
+     */
+    offer: {
+      prep: [],
+      submitCv: [],
+      beforeFollow: [],
+      fields: BASE_SETUP.fields.map((f) => ({ ...f, hasSave: false })),
+      containers: BASE_SETUP.containers.map((c) => ({ ...c, hasSave: false })),
+      redirect: BASE_SETUP.redirect.map((r) => ({ ...r, hasSave: false })),
+      submit: { ...BASE_SETUP.submit, hasSave: false },
+      success: { ...BASE_SETUP.success, status: 'none' as const, note: 'not set', hasSave: false },
+    },
+    review: recordedState('internal'),
+    recording: recordedState('internal'),
+    /**
+     * The same review for a posting that handed off. Two configs come out of it
+     * rather than one, and the lead sentence is different — which is exactly the
+     * kind of thing that goes unnoticed until someone reads it on a phone.
+     */
+    'review-external': recordedState('external'),
     external: {
       name: 'ExternalBoard',
       urlPattern: '*://*/sites/external-board.html*',
@@ -515,6 +608,29 @@ function bootSetup(): void {
   };
 
   panel.render({ ...BASE_SETUP, ...(SETUP_STATES[state] ?? {}) });
+
+  // The two review states are a mode, not data — the panel decides whether it is
+  // showing them, for the same reason it owns which step is open.
+  if (state.startsWith('review')) panel.showReview(true);
+  if (state === 'offer') panel.showOffer(true);
+
+  /**
+   * What the page looks like *during* a recording: the panel folded to its pill and
+   * the bar up. The bar is its own surface and never takes a pill slot, so this is
+   * also the check that it does not land on top of one.
+   */
+  if (state === 'recording') {
+    panel.minimize();
+    panel.setSlot(0);
+    const bar = new RecorderBar({
+      onBindLast: (b) => console.log('[harness] bind last', b),
+      onBindPick: (b) => console.log('[harness] bind by picking', b),
+      onUndo: () => console.log('[harness] undo step'),
+      onDone: () => console.log('[harness] recording done'),
+    });
+    const { steps } = recordedState('internal').recording!;
+    bar.render({ flow: 'internal', leg: 'posting', stepCount: steps.length, last: steps[1], bound: ['field:email'] });
+  }
 
   // `&step=…` opens one of the six wizard steps. Each is a distinct rendering
   // and only one is on screen at a time, so without this five of them are
@@ -540,11 +656,60 @@ function bootSetup(): void {
   }
 }
 
+/* ---------------- The click-to-pick toolbar ---------------- */
+
+/**
+ * A posting whose text is buried on purpose. The picker's whole subject is depth —
+ * a click lands on the `<span>` and the thing worth saving is the `<section>` three
+ * levels out — so a flat page would show the toolbar and none of what it is for.
+ */
+function bootPicker(): void {
+  document.body.style.cssText =
+    'margin:0;padding:20px 20px 140px;font:15px/1.6 system-ui,sans-serif;background:#fff;color:#111827';
+  document.body.innerHTML = `
+    <article id="posting">
+      <section class="job-header">
+        <div class="stack">
+          <h1 class="job-title" style="font-size:24px;margin:0"><span>Staff Platform Engineer</span></h1>
+          <p class="job-company" style="color:#4b5563;margin:4px 0 0"><span>Acme</span> · <span>Remote</span></p>
+        </div>
+      </section>
+      <section class="job-description" style="margin:16px 0">
+        <div class="prose">
+          <p>Own the deployment pipeline end to end, across infrastructure,
+          developer tooling and release engineering.</p>
+          <ul><li><span>Five years of production Kubernetes</span></li></ul>
+        </div>
+      </section>
+      <div class="actions" style="margin-top:16px">
+        <button id="send" style="padding:10px 16px;border-radius:8px;border:1px solid #d1d5db;background:#f9fafb">
+          <span class="btn-label">Send application</span>
+        </button>
+      </div>
+      <p id="picked" role="status" style="margin-top:16px;color:#4b5563"></p>
+    </article>`;
+
+  const said = document.getElementById('picked')!;
+  // Restart it, or the surface being iterated on vanishes the first time anything
+  // is confirmed and the page has to be reloaded to see it again.
+  const again = (note: string) => {
+    said.textContent = note;
+    setTimeout(() => run(), 150);
+  };
+  const run = () => startPicker(
+    (el) => again(`picked ${describeElement(el)}`),
+    params.get('label') || 'Description',
+    () => again('cancelled'),
+  );
+  run();
+}
+
 const BOOT: Record<Page, () => void | Promise<void>> = {
   popup: () => bootPage('popup'),
   options: () => bootPage('options'),
   modal: bootModal,
   setup: bootSetup,
+  picker: bootPicker,
 };
 
 // Resolve the booter BEFORE calling it: `BOOT[page]?.() ?? bootPage('popup')`

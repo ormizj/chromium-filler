@@ -430,11 +430,19 @@ export const SETUP_STEP_TITLES: Record<SetupStepKey, string> = {
 export const SETUP_STEP_HELP: Record<SetupStepKey, GroupHelp> = {
   site: {
     title: 'Which pages this applies to',
-    body: 'A config is matched to a page by its URL pattern. The name is only a label '
-      + 'for you; the pattern is what decides whether the extension acts here at all.',
+    body: 'The quickest way to set this site up is to apply to one job while the '
+      + 'extension watches — everything below, and the five steps after it, is for '
+      + 'correcting what that produced or for building a config by hand. A config is '
+      + 'matched to a page by its URL pattern; the name is only a label for you.',
     when: 'Widen the pattern if a sister page on the same board is not recognised.',
     example: '*://boards.acme.com/jobs/*',
     rows: [
+      {
+        label: 'Apply on this site / on the employer\'s site',
+        body: 'Records one application and writes the config from it. The two differ '
+          + 'only in what the bar asks you to mark; what actually happens wins either '
+          + 'way, so a wrong guess here costs nothing.',
+      },
       { label: 'Name', body: 'What this site is called in the popup and the review modal.' },
       {
         label: 'URL pattern',
@@ -627,9 +635,49 @@ export const SETUP_STEP_HELP: Record<SetupStepKey, GroupHelp> = {
 export type ConceptKey =
   | 'dots' | 'autoVsSaved' | 'todoChip' | 'picker' | 'neverSubmits'
   | 'twoStep' | 'appLink' | 'sessions' | 'urlPattern' | 'successSelector' | 'howItWorks'
-  | 'apply' | 'applyUnverified' | 'alreadyApplied' | 'exportJobs' | 'syncClient' | 'coverLetter';
+  | 'apply' | 'applyUnverified' | 'alreadyApplied' | 'exportJobs' | 'syncClient' | 'coverLetter'
+  | 'recording' | 'marking' | 'selectorStrength';
 
 export const CONCEPT_HELP: Record<ConceptKey, HelpEntry> = {
+  recording: {
+    title: 'Setting a site up by applying once',
+    short: 'Apply to one job as normal; the extension learns the site from what you do.',
+    body: 'You already know how to apply to this job, so do it — press the buttons you '
+      + 'would press, fill in the fields you would fill in — and the extension watches '
+      + 'and writes the site config from what happened. It records where things are, '
+      + 'and never what you typed. Nothing is saved until you have looked at the summary at '
+      + 'the end and pressed Save, and nothing is submitted on your behalf: the '
+      + 'application that goes in during a recording is the one you send yourself.',
+    when: 'Any site you have not set up. The two buttons ask where the application '
+      + 'actually happens — on this site, or on the employer\'s own after a handoff — '
+      + 'and getting it wrong costs nothing, because what really happened wins.',
+  },
+  marking: {
+    title: 'Marking things while you record',
+    short: 'Tell the extension what something is, and it fills that itself next time.',
+    body: 'Every click is kept as a step to replay, unless you say what it was. Mark a '
+      + 'field and the extension fills it from your profile instead of replaying the '
+      + 'click; mark the description and it reads the posting from there; mark the Send '
+      + 'button and Apply presses that one. The bar guesses for you as you go — typing '
+      + 'into a box marks it as the field it looks like — so most of the time there is '
+      + 'nothing to press. "Keep as a step" refuses a guess.',
+    when: 'Two marks are worth going out of your way for, because nothing else can '
+      + 'supply them: the Send button, and the confirmation the site shows once the '
+      + 'application is really in. Mark the confirmation while it is on screen — it is '
+      + 'gone as soon as you leave the page, and without it Apply stays greyed out.',
+  },
+  selectorStrength: {
+    title: 'Reliable, usable, fragile',
+    short: 'How likely the extension is to still find this after the site changes.',
+    body: 'Every recorded step remembers how to find its element again, and some ways '
+      + 'are sturdier than others. "Reliable" means it has a name of its own — an id, a '
+      + 'form field name, a label. "Usable" means it was found by where it sits inside '
+      + 'something named. "Fragile" means the only thing identifying it is its position '
+      + 'on the page, which stops being true the next time the site is redesigned.',
+    when: 'A fragile step still works today, and the row offers a Pick so you can point '
+      + 'at something better. It is worth doing for the Send button and the '
+      + 'confirmation; for an ordinary click it is usually not.',
+  },
   coverLetter: {
     title: 'A cover letter as text or as a file',
     short: 'Fill in either or both — whichever the site asks for is the one used.',
@@ -704,12 +752,19 @@ export const CONCEPT_HELP: Record<ConceptKey, HelpEntry> = {
   },
   picker: {
     title: 'Pick / Re-pick / Clear',
-    short: 'Pick, then tap the real thing on the page. Clear forgets it again.',
-    body: 'Pick hides the panel and lets you tap the real element on the page; the '
-      + 'selector for whatever you tap is saved to this site\'s config. On a touch '
-      + 'screen the tap only proposes a target and you press Confirm, because a finger '
-      + 'has no hover and would otherwise commit to whatever it landed on. Clear throws '
-      + 'the saved selector away.',
+    short: 'Pick, then click the real thing on the page and press Confirm.',
+    body: 'Pick hides the panel and lets you point at the real element on the page. '
+      + 'A click selects rather than saves: the outline shows what you have got, and '
+      + 'nothing is written until you press Confirm. Clicking the same spot again '
+      + 'steps “into” the element you have — the first click lands on the box around '
+      + 'the thing, and each one after that goes one level further in, wrapping back '
+      + 'to the outside at the end. "Wider" and "Deeper" (or the arrow keys) do the '
+      + 'same without having to find the spot again. Clear throws the saved selector '
+      + 'away.',
+    when: 'The heading you can see is usually a `span` inside the box you actually '
+      + 'want, so the element under the pointer is rarely the one to save. The '
+      + 'toolbar names each step and says how reliable a selector for it would be — '
+      + 'stop on the one that is a name rather than a position.',
   },
   /**
    * What the review modal's greyed-out Apply button says when pressed. It has to
