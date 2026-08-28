@@ -41,7 +41,9 @@ footer overflow menu.
 
 `&state=…` picks which **flow** the surface is showing — setup also has
 `offer` (what a never-configured site opens on — the most-seen screen in the
-panel), `recording` (the bar up, the panel folded to its pill) and `review` /
+panel), `recording` and `recording-armed` (the bar up over a page held inert, and
+the same bar with the page live for one gesture — the panel folded to its pill in
+both) and `review` /
 `review-external`, which are the two renderings a real page can only reach by
 applying to a job; modal: `long`, `redirect`,
 `redirect-followed`, `app-link`, `landed`, `empty`, `listing`, `failed-fill`, `apply-unset`,
@@ -660,7 +662,8 @@ is on, or the card would move out from under the flag.
 
 ### Recording a site
 **The front door to Site setup is recording, not the wizard.** The user applies to
-one job while the extension watches, and the config is compiled from what they did.
+one job, saying as they go which of their actions is a step to repeat and which
+element is what, and the config is compiled from that.
 The six-step wizard is still there, and is where a recording is corrected — but it is
 the long way round now, not the way in.
 
@@ -671,9 +674,10 @@ sharper case — it does not exist until an application has really gone in, so t
 moment it can be captured is during one, which the wizard had no way to be present
 for.
 
-Three pieces, and the split matters: **`src/shared/recording.ts`** is pure and holds
-every rule about what a recording *means*; **`src/content/recorder.ts`** watches the
-page; **`src/content/recorderBar.ts`** is the HUD that carries the one decision.
+Four pieces, and the split matters: **`src/shared/recording.ts`** is pure and holds
+every rule about what a recording *means*; **`src/content/recorder.ts`** owns the page
+while one runs; **`src/content/inertPage.ts`** is the suppression it and `picker.ts`
+share; **`src/content/recorderBar.ts`** is the HUD that carries the one decision.
 
 A recording is a flat, ordered `RecordedStep[]`. Each step is either something the
 user *did* (`click` / `input` / `navigate`) or carries a **bind** — "this is the
@@ -681,28 +685,62 @@ description", "that is the Send button", "that banner is the confirmation". Bind
 the whole point: without them a recording is a macro, and a macro cannot tell the
 description from the sidebar.
 
-**The recorder is the inverse of `picker.ts`.** Both listen to the same events in the
-capture phase; the picker cancels every one and the recorder may cancel none — the
-user is really applying, and the page must behave exactly as it would with the
-extension absent. Three consequences, each with a test:
+**Nothing is recorded unless the user asked for it, and the page is inert until they
+do.** The recorder used to be the inverse of `picker.ts` — a passive observer that
+cancelled nothing and watched everything — and that put the cost the wrong way round:
+`prep` replays on every later visit, so every incidental press while *reading* a
+posting became a step replayed for ever, and the decision that matters (*what is
+this*) was asked afterwards about whatever had just happened. So the question is asked
+first, and there are two answers:
 
-- **It records where things are and never what was typed.** `RecordedStep` has no
-  value field. `labelFor` reads an `<input>`'s `value` only for the four types where
-  that is a label (`submit`/`button`/`reset`/`image`); reading it unconditionally put
-  the email address someone had just typed into the recording.
-- **A click is named by `closest(INTERACTIVE)`, not by what was hit.** A click lands
-  on whatever `<span>` a button wraps its label in, and a span has nothing to
-  identify it by — which is exactly what forces the structural path.
-- **It stands down while a picker is running** (`[data-cf-picker]` present in the
-  DOM), or marking the confirmation banner also records a click on it. Read off the
-  marker element rather than a flag, so it is right for every picker entry point.
+- **Interact** arms one gesture. The next click reaches the page and is kept as a
+  step. `RecorderMode` is `idle` | `armed` | `live`, held on the handle and reported
+  through `onMode` — the bar is the only thing on screen that can say which.
+- **Declare…** picks a `BindKey` from the bar's menu and hands off to `startPicker`,
+  so a mark is chosen *before* it is pointed at. It works on anything, not only on
+  what was just done, which is the only way to catch the confirmation banner — that
+  appears because the application went in, and is never the thing you pressed.
 
-Two gestures raise two events each and must count once: a **label** and the click the
-browser then raises on the control it names (containment within `SAME_GESTURE_MS`),
-and a **checkbox**, whose `change` is skipped entirely because the click already
-records it — a tick is never a profile field, so the second copy arrives as an unbound
-`input` step, which the compiler drops, and "I agree to the terms" silently would not
-be in the config.
+Five consequences, each with a test:
+
+- **An arm covers an interaction, not an event.** An armed click that lands in a text
+  control decays to `live`, and keys aimed at *that control* pass until it is done
+  with. Without it a user could not type an email address, so could never reach the
+  Send button or the confirmation — which is the whole reason recording exists.
+- **The permission crosses two listeners by event identity.** The recorder's own
+  `click` reader has to be registered *before* the suppression (which ends in
+  `stopImmediatePropagation`, killing anything registered after it on `document`), and
+  it spends the arm as it goes — so by the time the suppression asks, the mode already
+  reads `idle`. `gestureEvent === e` is what carries it.
+- **A `submit` passes on containment alone, with no time limit.** There is no way to
+  reach one except from a press this recorder allowed, and a site that validates in JS
+  calls `requestSubmit()` seconds later — cancelling that would silently eat the
+  application being sent.
+- **`SAME_GESTURE_MS` is the gesture's tail, not a dedupe.** A `<label>` press makes
+  the browser raise a second click on the control it names, and that one must still
+  *reach the page* or the box never ticks. It only ever covers a **different**
+  element: the same one again is a second press, and one arm is one press.
+- **It stands down completely while a picker is running** (`[data-cf-picker]` in the
+  DOM) — both the recording and the suppression, since `picker.ts` has its own and its
+  `isOwn` is `isExtensionUi`, so the bar stays pressable. Read off the marker element
+  rather than a flag, so it is right for every picker entry point.
+
+Two things that did not change: **it records where things are and never what was
+typed** (`RecordedStep` has no value field; `labelFor` reads an `<input>`'s `value`
+only for the four types where that is a label), and **a click is named by
+`closest(INTERACTIVE)`**, because a click lands on whatever `<span>` a button wraps
+its label in. A **checkbox**'s `change` is still skipped entirely — the armed click
+already recorded it, and the second copy would arrive as an unbound `input` step the
+compiler drops, so "I agree to the terms" would silently not be in the config.
+
+**`inertPage.ts` is where "inert" is defined, once, for both surfaces.** Everything is
+`stopPropagation` + `stopImmediatePropagation` at `document` in the capture phase;
+only `CANCELLED` (`click`, `dblclick`, `auxclick`, `contextmenu`, `keydown`,
+`keypress`, `submit`) is also `preventDefault`ed. The pointer/mouse/touch *down and
+up* events deliberately are not, because their default is **scrolling** and a
+recording runs for minutes on a posting the user has to read. `picker.ts` passes
+`hard: true` and opts back in: a pick lasts seconds, and killing the drag-selection is
+worth more there. `wheel` and `scroll` are in neither list.
 
 **`Controller.run()` returns early while a recording is live**, and
 `closeTabOnSubmit` is suppressed in `handleSubmitted`. The second is not tidiness: the
@@ -737,7 +775,10 @@ nothing downstream changes. Ten rules, one `describe` each in `recording.test.ts
 6. **A pause becomes the click's own timeout**, not a `waitFor` step — `PrepStep.ms`
    on a click already *is* the `waitForSelector` timeout `prep.ts` gives it, so a
    separate step would wait twice for the same element.
-7. Consecutive clicks on the same target collapse to one.
+7. **Consecutive clicks on the same target are kept, not collapsed.** They used to
+   be de-duplicated, because a passive recorder saw a double press as two steps
+   nobody meant. Every click costs a press of Interact now, so a repeat is a
+   repeat and collapsing it drops a step the user paid for twice.
 8. A fragile target compiles but warns.
 9. No confirmation marked warns — it is the one selector with nowhere else to come
    from.
@@ -762,25 +803,36 @@ description you forgot must not wipe the Send button you got right the first tim
 `src/content/recorderBar.ts` is a **toolbar, not a `Sheet`** — it never takes a
 `--pill-slot`, so "one slot, two sheets" is untouched, and it is the smallest thing
 that can still be pressed, because the page underneath is what the user is working
-in. Placement mirrors `picker.ts`: bottom on a coarse pointer, top on a fine one. At
-≤640px it wraps to **two** rows in a fixed order — state and the exits share the
-first, the decision about the last step takes the second — because left to source
-order Undo/Done moved depending on whether the last step happened to be marked, and
-the two controls that are always there must not move.
+in. Placement mirrors `picker.ts`: bottom on a coarse pointer, top on a fine one.
 
-The middle is the whole reason it exists: after each thing the user does, is that a
-**step to replay** or **something the extension should know**? Answering it at the end
-from a list means remembering which of nine clicks was which. The extension's own
-guess (`guessField`, exported from `fieldDetect` — same scoring as `detectFields` but
-for one element, since the bar cannot wait for a whole-form assignment) is shown as
-already made, so the common case is *not tapping anything at all*. "Keep as a step"
-leads the mark menu rather than being a third button competing for a 390px row: it is
-one of the answers to the same question.
+**The middle is the two options, and it is the whole reason the bar exists:**
+`Interact` · `Declare…`. Neither is a default — while neither is chosen a click does
+nothing at all — so the question "is this a step, or is it a thing" is answered
+*before* the user acts rather than reconstructed from a list of nine clicks at the
+end. `Declare…`'s menu is the same `BindKey` list it always was; `Interact` is a
+toggle, because the button holding the page live has to be the way back out of it.
 
-**`Mark another…` is always offered, and that is load-bearing.** The confirmation
-banner is never the thing you just pressed — it *appears* because the application went
-in — so a bar that could only re-label the last step could not mark the one selector
-that exists for a few seconds and nowhere else.
+**The armed state is a mode, and drawn as one.** It does *not* take the primary fill
+— `Done` is the one thing this bar is for, and a second coral beside it makes neither
+mean anything — and it does *not* pulse its own opacity: the live dot can, being a
+10px dot, but a full-width control fading to a third and back is the same muddy
+half-there block a disabled primary used to be, so "waiting for you" would read as
+"not available". The tint holds still and the **ring** moves.
+
+The extension's own guess still runs (`guessField`, exported from `fieldDetect` —
+same scoring as `detectFields` but for one element, since the bar cannot wait for a
+whole-form assignment) on the `input` step an armed click into a field produces. The
+bar no longer carries a control to refuse it: that moved to the review's bind select,
+which is why that select now offers the sixteen profile fields under an `<optgroup>`.
+
+At ≤640px the bar wraps to **three** rows in a fixed order — state and the exits share
+the first, the two options take the second, the readout takes the third — because left
+to source order the options moved with the length of the readout and took Undo/Done
+with them. The two options are **equal halves**, and both are wrapped in an identical
+`.cf-rec-wrap` to make that true: a bare `<button>` beside a `<div>` under
+`flex-basis: 0` adds its own padding on top of its share and comes out 191/169. Those
+narrow overrides live at the **end** of `recorderBar.css`, after the component rules
+they beat — at equal specificity source order is the only thing deciding them.
 
 **The mark menu is re-ordered by leg, never filtered by it.** Ordering is worth doing:
 on the board half of a two-step posting the apply link is what there is to mark.
@@ -814,6 +866,15 @@ the *selector's* strength as its dot (not a match status — the row's question 
 we find this again"), a per-step "what is this" select, and a Pick on the fragile ones.
 Nothing is written until Save; a recording is a proposal, and half the point of the
 review is that it can be refused.
+
+**The "what is this" select carries the profile fields too, under an `<optgroup>`.**
+It deliberately did not, on the grounds that sixteen fields would bury the five that
+matter and a field was corrected from the bar while the cursor was still in it — but
+the bar has no such control any more, and the one bind the extension still guesses for
+itself is exactly a field. This is now the only place a wrong guess can be refused, so
+it has to offer them; grouped, because flat they run straight past the marks above.
+The order comes from `fieldMarks()`, exported from `recorderBar.ts` rather than
+re-listed, which is the same rule the label catalog exists for.
 
 `SetupPanel.mode` is **on the instance, never in `SetupData`** — same rule as `step`,
 and the same failure if broken: `refreshSetup` re-renders on every edit, so a mode

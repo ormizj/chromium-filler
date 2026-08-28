@@ -5,7 +5,7 @@
 
 import type { FieldKey, FieldMatch } from './types';
 import type { QueueProgress } from './queue';
-import type { BindKey, RecordFlow, Recording, RecordedStep } from './recording';
+import type { RecordFlow, Recording, RecordedStep } from './recording';
 
 export const MSG = {
   /** popup -> content: run the full detect/prep/fill flow now. */
@@ -44,7 +44,7 @@ export const MSG = {
   /** popup -> content: re-open the minimized review modal without re-running. */
   SHOW_REPORT: 'CF_SHOW_REPORT',
   /**
-   * The six that let a recording outlive the page it started on.
+   * The five that let a recording outlive the page it started on.
    *
    * Setting up a two-step posting means recording across a handoff: the user presses
    * "Apply on company site", the browser leaves, and under the default
@@ -58,8 +58,6 @@ export const MSG = {
   RECORD_START: 'CF_RECORD_START',
   /** content -> background: one more thing the user did. */
   RECORD_PUSH: 'CF_RECORD_PUSH',
-  /** content -> background: re-decide the last step — a mark, or `null` to keep it a step. */
-  RECORD_BIND: 'CF_RECORD_BIND',
   /** content -> background: drop the last step. */
   RECORD_UNDO: 'CF_RECORD_UNDO',
   /** content -> background: is this tab in the middle of a recording? */
@@ -178,7 +176,6 @@ export type Message =
   | { type: typeof MSG.SHOW_REPORT }
   | { type: typeof MSG.RECORD_START; flow: RecordFlow; postingUrl: string }
   | { type: typeof MSG.RECORD_PUSH; step: RecordedStep }
-  | { type: typeof MSG.RECORD_BIND; bind: BindKey | null }
   | { type: typeof MSG.RECORD_UNDO }
   | { type: typeof MSG.RECORD_GET }
   | { type: typeof MSG.RECORD_STOP }

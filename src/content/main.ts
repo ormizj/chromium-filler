@@ -818,10 +818,14 @@ class Controller {
       leg,
       startedAt: recording.startedAt,
       onStep: (step) => void this.onRecordedStep(step),
+      // The bar is the only thing on screen that says whether the page is inert or
+      // live, so every mode change has to reach it — including the ones it did not
+      // ask for, like an armed click spending itself.
+      onMode: () => this.paintBar(),
     });
     this.recorderBar = new RecorderBar({
-      onBindLast: (bind) => void this.rebindLast(bind),
-      onBindPick: (bind) => this.pickForBind(bind, leg),
+      onInteract: () => this.toggleArmed(),
+      onDeclare: (bind) => this.pickForBind(bind, leg),
       onUndo: () => void this.undoStep(),
       onDone: () => void this.stopRecording(),
     });
@@ -834,10 +838,16 @@ class Controller {
     await chrome.runtime.sendMessage({ type: MSG.RECORD_PUSH, step } satisfies Message);
   }
 
-  private async rebindLast(bind: BindKey | null): Promise<void> {
-    const answer = await this.ask<RecordingResponse>({ type: MSG.RECORD_BIND, bind });
-    if (answer?.recording) this.recording = answer.recording;
-    this.paintBar();
+  /**
+   * Interact. An arm that is already up is cancelled rather than re-armed: the
+   * button is the only thing holding the page live, so it has to be the way back
+   * out of it too.
+   */
+  private toggleArmed(): void {
+    const recorder = this.recorder;
+    if (!recorder) return;
+    if (recorder.mode() === 'idle') recorder.arm();
+    else recorder.disarm();
   }
 
   private async undoStep(): Promise<void> {
@@ -853,6 +863,9 @@ class Controller {
    * show and undo it.
    */
   private pickForBind(bind: BindKey, leg: RecordLeg): void {
+    // Declaring is the other answer to the same question, so it takes the arm down
+    // with it — otherwise the page stays live behind the picker's toolbar.
+    this.recorder?.disarm();
     this.cancelPicker?.();
     this.cancelPicker = startPicker((element) => {
       const recording = this.recording;
@@ -879,6 +892,7 @@ class Controller {
       flow: recording.flow,
       leg: this.recordingLeg,
       stepCount: recording.steps.length,
+      mode: this.recorder?.mode() ?? 'idle',
       last: recording.steps[recording.steps.length - 1],
       bound: recording.steps.map((s) => s.bind).filter((b): b is BindKey => !!b),
     });

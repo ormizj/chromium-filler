@@ -2328,10 +2328,42 @@ async function clearConfigs(): Promise<void> {
 
 const bar = (page: Page) => page.locator('[data-cf-recorder="host"] .cf-bar');
 
-/** Choose something from the recorder bar's mark menu. */
-async function mark(page: Page, button: string, item: string): Promise<void> {
-  await bar(page).getByRole('button', { name: button, exact: true }).click();
+/**
+ * Arm one page action. The page is inert while a recording runs, so *every* gesture
+ * in these specs has to be paid for first — which is the feature, and what makes an
+ * unarmed click below a real assertion rather than a formality.
+ */
+async function interact(page: Page): Promise<void> {
+  await bar(page).getByRole('button', { name: 'Interact', exact: true }).click();
+}
+
+/** Arm, then press something on the page. */
+async function press(page: Page, selector: string): Promise<void> {
+  await interact(page);
+  await page.click(selector);
+}
+
+/**
+ * Arm, click into a field, type, and tab out. `fill()` cannot be used here: it sets
+ * the value without a click, so the arm is never spent on the control and the page
+ * never goes live for it — which is exactly the protection being tested.
+ */
+async function type(page: Page, selector: string, value: string): Promise<void> {
+  await interact(page);
+  await page.click(selector);
+  await page.keyboard.type(value);
+  await page.keyboard.press('Tab');
+}
+
+/** Say what something on the page is, then point at it. */
+async function declare(page: Page, item: string): Promise<void> {
+  await bar(page).getByRole('button', { name: 'Declare…', exact: true }).click();
   await bar(page).getByRole('menuitem', { name: item, exact: true }).click();
+}
+
+/** How many steps the bar says it is holding. */
+async function stepCount(page: Page): Promise<string> {
+  return (await bar(page).locator('.cf-rec-count').textContent()) ?? '';
 }
 
 test('Recording: one application on this site becomes the whole config', async () => {
@@ -2347,15 +2379,24 @@ test('Recording: one application on this site becomes the whole config', async (
     await setup.getByRole('button', { name: 'Apply on this site' }).click();
     await expect(bar(page)).toBeVisible({ timeout: 10_000 });
 
-    // Apply the way a person would: expand nothing, fill two fields, send it.
-    await page.fill('#email', 'ada@example.com');
-    await page.fill('#first_name', 'Ada');
+    // The page is held still until something is armed. Reading a posting means
+    // pressing things, and `prep` replays on every later visit — so a press nobody
+    // asked to record must leave nothing behind and do nothing.
+    const before = await stepCount(page);
+    await page.click('#first_name');
     await page.click('#submit');
+    await expect(page.locator('#quick-success')).toBeHidden();
+    expect(await stepCount(page)).toBe(before);
+
+    // Apply the way a person would, saying so each time.
+    await type(page, '#email', 'ada@example.com');
+    await type(page, '#first_name', 'Ada');
+    await press(page, '#submit');
     await expect(page.locator('#quick-success')).toBeVisible();
 
-    // The confirmation is the one mark that cannot be the last thing you pressed —
-    // it appears *because* the application went in — so it is marked by picking it.
-    await mark(page, 'Mark another…', 'Confirmation');
+    // The confirmation is the one thing that cannot be what you just pressed — it
+    // appears *because* the application went in — so it is declared and pointed at.
+    await declare(page, 'Confirmation');
     await pickOnPage(page, page.locator('#quick-success'));
 
     await bar(page).getByRole('button', { name: 'Done' }).click();
@@ -2394,18 +2435,18 @@ test('Recording: a handoff is saved as two configs, one per site', async () => {
 
     // The board's own courtesy first, then the handoff the user performs themselves —
     // `run()` stands down while recording, so nothing follows this on our behalf.
-    await page.click('#save-job');
-    await page.click('#apply-external');
+    await press(page, '#save-job');
+    await press(page, '#apply-external');
     await page.waitForURL(/ats-form/, { timeout: 15_000 });
 
     // The recording survived the navigation to another origin, where the content
     // script is a brand-new one that has never heard of the posting.
     await expect(bar(page)).toBeVisible({ timeout: 15_000 });
 
-    await page.fill('#ats-email', 'ada@example.com');
-    await page.click('#ats-submit');
+    await type(page, '#ats-email', 'ada@example.com');
+    await press(page, '#ats-submit');
     await expect(page.locator('#ats-success')).toBeVisible({ timeout: 10_000 });
-    await mark(page, 'Mark another…', 'Confirmation');
+    await declare(page, 'Confirmation');
     await pickOnPage(page, page.locator('#ats-success'));
 
     await bar(page).getByRole('button', { name: 'Done' }).click();

@@ -338,15 +338,21 @@ describe('rule 6 — a pause becomes the click’s own timeout', () => {
 
 /* ---------------- 7. Duplicates ---------------- */
 
-describe('rule 7 — a double press is one step', () => {
-  it('collapses consecutive clicks on the same target', () => {
+describe('rule 7 — every click is a click the user asked for', () => {
+  /**
+   * The recorder used to watch everything, so a double press arrived as two steps
+   * nobody meant and the compiler collapsed them. The page is inert now and a click
+   * costs a press of Interact first, so a repeat is a repeat — and dropping half of
+   * it would lose a step the user paid for twice.
+   */
+  it('keeps consecutive clicks on the same target', () => {
     const out = compileRecording(recording([
       click('#more'), click('#more'), click('#more'), click('#other'),
     ]));
-    expect(out.posting.prep.map((s) => s.selector)).toEqual(['#more', '#other']);
+    expect(out.posting.prep.map((s) => s.selector)).toEqual(['#more', '#more', '#more', '#other']);
   });
 
-  it('keeps a repeat that is genuinely a repeat, with something between', () => {
+  it('keeps a repeat with something between, as it always did', () => {
     const out = compileRecording(recording([click('#more'), click('#other'), click('#more')]));
     expect(out.posting.prep.map((s) => s.selector)).toEqual(['#more', '#other', '#more']);
   });

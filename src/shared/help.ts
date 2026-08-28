@@ -642,29 +642,35 @@ export const CONCEPT_HELP: Record<ConceptKey, HelpEntry> = {
   recording: {
     title: 'Setting a site up by applying once',
     short: 'Apply to one job as normal; the extension learns the site from what you do.',
-    body: 'You already know how to apply to this job, so do it — press the buttons you '
-      + 'would press, fill in the fields you would fill in — and the extension watches '
-      + 'and writes the site config from what happened. It records where things are, '
-      + 'and never what you typed. Nothing is saved until you have looked at the summary at '
-      + 'the end and pressed Save, and nothing is submitted on your behalf: the '
-      + 'application that goes in during a recording is the one you send yourself.',
+    body: 'You already know how to apply to this job, so do it — and say what you are '
+      + 'doing as you go. While a recording runs the page is held still: clicking does '
+      + 'nothing until you press one of two buttons. "Interact" hands the page back for '
+      + 'one action — open a section, go to the next step, type into a box — and keeps '
+      + 'it as a step to repeat next time. "Declare" names something on the page '
+      + 'instead. Nothing else is watched, so reading the posting leaves nothing behind. '
+      + 'It records where things are, never what you typed, and saves nothing until you '
+      + 'have read the summary at the end and pressed Save. Nothing is submitted on your '
+      + 'behalf: the application that goes in during a recording is the one you send '
+      + 'yourself.',
     when: 'Any site you have not set up. The two buttons ask where the application '
       + 'actually happens — on this site, or on the employer\'s own after a handoff — '
       + 'and getting it wrong costs nothing, because what really happened wins.',
   },
   marking: {
-    title: 'Marking things while you record',
-    short: 'Tell the extension what something is, and it fills that itself next time.',
-    body: 'Every click is kept as a step to replay, unless you say what it was. Mark a '
-      + 'field and the extension fills it from your profile instead of replaying the '
-      + 'click; mark the description and it reads the posting from there; mark the Send '
-      + 'button and Apply presses that one. The bar guesses for you as you go — typing '
-      + 'into a box marks it as the field it looks like — so most of the time there is '
-      + 'nothing to press. "Keep as a step" refuses a guess.',
-    when: 'Two marks are worth going out of your way for, because nothing else can '
-      + 'supply them: the Send button, and the confirmation the site shows once the '
-      + 'application is really in. Mark the confirmation while it is on screen — it is '
-      + 'gone as soon as you leave the page, and without it Apply stays greyed out.',
+    title: 'Declaring things while you record',
+    short: 'Tell the extension what something is, and it fills or presses that itself.',
+    body: 'A step is something to repeat; a declaration is something to understand. '
+      + 'Declare a field and the extension fills it from your profile instead of '
+      + 'repeating your typing; declare the description and it reads the posting from '
+      + 'there; declare the Send button and Apply presses that one. Choose what it is '
+      + 'first, and then point at it — the same click-to-pick used everywhere else, so '
+      + 'you can widen the selection to the box around a thing rather than the word '
+      + 'inside it. Declaring works on anything on the page, not only on what you have '
+      + 'just done, which is the only way to catch something that appears by itself.',
+    when: 'Two declarations are worth going out of your way for, because nothing else '
+      + 'can supply them: the Send button, and the confirmation the site shows once the '
+      + 'application is really in. Declare the confirmation while it is on screen — it '
+      + 'is gone as soon as you leave the page, and without it Apply stays greyed out.',
   },
   selectorStrength: {
     title: 'Reliable, usable, fragile',

@@ -583,6 +583,7 @@ function bootSetup(): void {
     },
     review: recordedState('internal'),
     recording: recordedState('internal'),
+    'recording-armed': recordedState('internal'),
     /**
      * The same review for a posting that handed off. Two configs come out of it
      * rather than one, and the lead sentence is different — which is exactly the
@@ -618,18 +619,31 @@ function bootSetup(): void {
    * What the page looks like *during* a recording: the panel folded to its pill and
    * the bar up. The bar is its own surface and never takes a pill slot, so this is
    * also the check that it does not land on top of one.
+   *
+   * Two states, because the bar has two renderings and the loud one is the whole
+   * point of it. `recording` is the resting bar over an inert page; `recording-armed`
+   * is what Interact does — the page live under the user's finger, which is a thing
+   * that has to *look* like a mode and is otherwise reachable only by pressing a
+   * button, which a screenshot cannot do.
    */
-  if (state === 'recording') {
+  if (state === 'recording' || state === 'recording-armed') {
     panel.minimize();
     panel.setSlot(0);
     const bar = new RecorderBar({
-      onBindLast: (b) => console.log('[harness] bind last', b),
-      onBindPick: (b) => console.log('[harness] bind by picking', b),
+      onInteract: () => console.log('[harness] interact'),
+      onDeclare: (b) => console.log('[harness] declare', b),
       onUndo: () => console.log('[harness] undo step'),
       onDone: () => console.log('[harness] recording done'),
     });
     const { steps } = recordedState('internal').recording!;
-    bar.render({ flow: 'internal', leg: 'posting', stepCount: steps.length, last: steps[1], bound: ['field:email'] });
+    bar.render({
+      flow: 'internal',
+      leg: 'posting',
+      stepCount: steps.length,
+      mode: state === 'recording-armed' ? 'armed' : 'idle',
+      last: steps[1],
+      bound: ['field:email'],
+    });
   }
 
   // `&step=…` opens one of the six wizard steps. Each is a distinct rendering

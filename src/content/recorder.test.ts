@@ -1,196 +1,405 @@
-import { describe, it, expect, afterEach } from 'vitest';
-import { startRecording, type RecorderHandle } from './recorder';
+/**
+ * The recorder's contract, inverted.
+ *
+ * It used to watch everything and cancel nothing. Now the page is inert until the
+ * user asks for it, and the assertions that matter are the pair: an unarmed click
+ * reaches neither the page nor the recording, and an armed one reaches both.
+ */
+import { describe, it, expect, afterEach, vi } from 'vitest';
+import { startRecording, type RecorderHandle, type RecorderMode } from './recorder';
 import type { RecordedStep } from '../shared/recording';
 
-let handle: RecorderHandle | undefined;
-let steps: RecordedStep[] = [];
-
-function record(html: string): HTMLElement {
-  const root = document.createElement('div');
-  root.innerHTML = html;
-  document.body.appendChild(root);
-  steps = [];
-  handle = startRecording({ leg: 'posting', startedAt: Date.now(), onStep: (s) => steps.push(s) });
-  return root;
-}
+let handle: RecorderHandle | null = null;
 
 afterEach(() => {
   handle?.stop();
-  handle = undefined;
+  handle = null;
   document.body.innerHTML = '';
 });
 
-const click = (el: Element) =>
-  el.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
-
-function change(el: HTMLInputElement | HTMLTextAreaElement, value?: string): void {
-  // jsdom refuses a programmatic value on a file input, which is the same rule real
-  // browsers enforce — an attached file arrives as a `change` with nothing set here.
-  if (value !== undefined) el.value = value;
-  el.dispatchEvent(new Event('change', { bubbles: true }));
+function start(): { steps: RecordedStep[]; modes: RecorderMode[] } {
+  const steps: RecordedStep[] = [];
+  const modes: RecorderMode[] = [];
+  handle = startRecording({
+    leg: 'posting',
+    startedAt: Date.now(),
+    onStep: (s) => steps.push(s),
+    onMode: (m) => modes.push(m),
+  });
+  return { steps, modes };
 }
 
-describe('what the recorder watches', () => {
-  it('records a click with a selector and the control’s own words', () => {
-    const root = record(`<button id="go">Apply now</button>`);
-    click(root.querySelector('#go')!);
+/** Dispatch a real, cancelable click and report whether the page got it. */
+function click(el: Element): { seen: boolean; defaultPrevented: boolean } {
+  let seen = false;
+  const spy = () => { seen = true; };
+  el.addEventListener('click', spy);
+  const e = new MouseEvent('click', { bubbles: true, cancelable: true });
+  el.dispatchEvent(e);
+  el.removeEventListener('click', spy);
+  return { seen, defaultPrevented: e.defaultPrevented };
+}
+
+function key(el: Element, k = 'a'): boolean {
+  let seen = false;
+  const spy = () => { seen = true; };
+  el.addEventListener('keydown', spy);
+  el.dispatchEvent(new KeyboardEvent('keydown', { key: k, bubbles: true, cancelable: true }));
+  el.removeEventListener('keydown', spy);
+  return seen;
+}
+
+const change = (el: Element) => el.dispatchEvent(new Event('change', { bubbles: true }));
+
+function button(id: string, label = 'Go'): HTMLButtonElement {
+  const b = document.createElement('button');
+  b.id = id;
+  b.textContent = label;
+  document.body.append(b);
+  return b;
+}
+
+function field(id: string, over: Partial<HTMLInputElement> = {}): HTMLInputElement {
+  const input = document.createElement('input');
+  input.id = id;
+  Object.assign(input, over);
+  document.body.append(input);
+  return input;
+}
+
+/* ---------------- The page is inert ---------------- */
+
+describe('a page nobody has asked to use', () => {
+  it('does not act on a click, and does not record one', () => {
+    const { steps } = start();
+    const b = button('go');
+
+    const { seen, defaultPrevented } = click(b);
+    expect(seen).toBe(false);
+    expect(defaultPrevented).toBe(true);
+    expect(steps).toEqual([]);
+  });
+
+  /**
+   * The whole reason this changed. Reading a posting means pressing things — a
+   * "Show more", a cookie banner, a tab — and `prep` runs automatically on every
+   * later visit, so an idle press used to become a step replayed for ever.
+   */
+  it('leaves nothing behind when the user is only reading', () => {
+    const { steps } = start();
+    for (const id of ['a', 'b', 'c']) click(button(id));
+    expect(steps).toEqual([]);
+  });
+
+  it('swallows typing too, so the page cannot be driven from the keyboard', () => {
+    start();
+    expect(key(field('email'))).toBe(false);
+  });
+
+  it('never touches scrolling — a recording lasts as long as reading the posting', () => {
+    start();
+    const box = document.createElement('div');
+    document.body.append(box);
+    let scrolled = false;
+    box.addEventListener('wheel', () => { scrolled = true; });
+    box.dispatchEvent(new Event('wheel', { bubbles: true, cancelable: true }));
+    expect(scrolled).toBe(true);
+  });
+
+  it('leaves our own chrome alone — the bar is the only way out', () => {
+    const { steps } = start();
+    const host = document.createElement('div');
+    host.setAttribute('data-cf-recorder', 'host');
+    const b = document.createElement('button');
+    host.append(b);
+    document.body.append(host);
+
+    expect(click(b).seen).toBe(true);
+    expect(steps).toEqual([]);
+  });
+});
+
+/* ---------------- Interact ---------------- */
+
+describe('interacting with the page, one action at a time', () => {
+  it('hands the page back for the armed click, and keeps it as a step', () => {
+    const { steps } = start();
+    const b = button('more', 'Show more');
+    handle!.arm();
+
+    const { seen, defaultPrevented } = click(b);
+    expect(seen).toBe(true);
+    expect(defaultPrevented).toBe(false);
     expect(steps).toHaveLength(1);
-    expect(steps[0]).toMatchObject({
-      action: 'click', label: 'Apply now', target: { selector: '#go' },
-    });
+    expect(steps[0].action).toBe('click');
+    expect(steps[0].target?.selector).toBe('#more');
+    expect(steps[0].label).toBe('Show more');
+  });
+
+  it('spends the arm on one click — the next one is inert again', () => {
+    const { steps } = start();
+    const b = button('more');
+    handle!.arm();
+    click(b);
+    expect(handle!.mode()).toBe('idle');
+
+    expect(click(b).seen).toBe(false);
+    expect(steps).toHaveLength(1);
+  });
+
+  it('can be disarmed without being spent', () => {
+    const { steps } = start();
+    handle!.arm();
+    handle!.disarm();
+    expect(click(button('more')).seen).toBe(false);
+    expect(steps).toEqual([]);
+  });
+
+  it('reports every mode change, because only the bar can say which one it is in', () => {
+    const { modes } = start();
+    handle!.arm();
+    click(button('more'));
+    expect(modes).toEqual(['armed', 'idle']);
+  });
+
+  it('names the control, not the span the click landed on', () => {
+    const { steps } = start();
+    const b = button('send', '');
+    const span = document.createElement('span');
+    span.textContent = 'Submit application';
+    b.append(span);
+    handle!.arm();
+
+    click(span);
+    expect(steps[0].target?.selector).toBe('#send');
+    expect(steps[0].label).toBe('Submit application');
   });
 
   /**
-   * Half of the selector quality is choosing the right element to name. A click
-   * lands on whatever `<span>` the button happens to wrap its label in, and a span
-   * has nothing to be identified by — which is precisely what forces the structural
-   * path this whole part exists to avoid.
+   * Pressing a label makes the browser raise a second click on the control it
+   * names. One gesture, one step — and the second click must still reach the page,
+   * or the box the label names never ticks.
    */
-  it('names the control, not the span inside it that was actually hit', () => {
-    const root = record(`<button id="go"><span class="lbl">Apply</span></button>`);
-    click(root.querySelector('.lbl')!);
-    expect(steps[0].target?.selector).toBe('#go');
+  it('lets a label and the control it names be one gesture', () => {
+    const { steps } = start();
+    const label = document.createElement('label');
+    label.textContent = 'I agree';
+    const box = document.createElement('input');
+    box.type = 'checkbox';
+    box.id = 'agree';
+    label.append(box);
+    document.body.append(label);
+
+    handle!.arm();
+    click(label);
+    const second = click(box);
+
+    expect(second.seen).toBe(true);
+    expect(second.defaultPrevented).toBe(false);
+    expect(steps).toHaveLength(1);
+  });
+});
+
+/* ---------------- Filling in a field ---------------- */
+
+describe('an armed click that lands in something to type in', () => {
+  it('keeps the page live for that control, so the field can be filled', () => {
+    start();
+    const input = field('email');
+    handle!.arm();
+    click(input);
+
+    expect(handle!.mode()).toBe('live');
+    expect(key(input)).toBe(true);
   });
 
-  it('records a plain element when the click was not on a control', () => {
-    const root = record(`<section id="body">Read me</section>`);
-    click(root.querySelector('#body')!);
-    expect(steps[0].target?.selector).toBe('#body');
+  it('does not let the rest of the page in with it', () => {
+    start();
+    const input = field('email');
+    const elsewhere = button('other');
+    handle!.arm();
+    click(input);
+
+    expect(click(elsewhere).seen).toBe(false);
+  });
+
+  it('records the field, with the extension’s own guess already made', () => {
+    const { steps } = start();
+    const input = field('email', { name: 'email', type: 'email' });
+    handle!.arm();
+    click(input);
+    input.value = 'someone@example.com';
+    change(input);
+
+    const filled = steps.find((s) => s.action === 'input');
+    expect(filled?.bind).toBe('field:email');
+    expect(filled?.bindSource).toBe('auto');
+    expect(handle!.mode()).toBe('idle');
+  });
+
+  it('leaves a field it cannot name unbound', () => {
+    const { steps } = start();
+    const input = field('q7');
+    handle!.arm();
+    click(input);
+    change(input);
+
+    expect(steps.find((s) => s.action === 'input')?.bind).toBeUndefined();
   });
 
   /**
-   * Pressing a label makes the browser raise a second click on the control it names.
-   * That is one gesture, and recording it twice puts a step in the config that
-   * replays a press the user never made.
+   * A checkbox is toggled *by clicking it*, so the armed click already recorded it.
+   * The second copy would arrive as an unbound `input` step, which the compiler
+   * drops — and "I agree to the terms" would silently not be in the config.
    */
-  it('counts a label and the control it activates as one press', () => {
-    const root = record(`<label id="l">Remote <input id="cb" type="checkbox" /></label>`);
-    click(root.querySelector('#l')!);
+  it('does not record a ticked box twice', () => {
+    const { steps } = start();
+    const box = field('agree', { type: 'checkbox' });
+    handle!.arm();
+    click(box);
+    change(box);
+
     expect(steps).toHaveLength(1);
     expect(steps[0].action).toBe('click');
   });
 
   /**
-   * A tick is one gesture that raises two events, and the second is worse than
-   * redundant: a checkbox is never a profile field, so it arrives as an unbound
-   * `input` step, which the compiler drops — and "I agree to the terms" quietly does
-   * not make it into the config. The click is the record.
+   * A form being submitted is the consequence of a press this recorder allowed —
+   * there is no other way to reach one. Cancelling it would eat the application the
+   * user is in the middle of sending, which is the one thing a recording is for.
    */
-  it('records a ticked box once, as the click it was', () => {
-    const root = record(`<input id="cb" type="checkbox" />`);
-    click(root.querySelector('#cb')!);
-    expect(steps).toHaveLength(1);
-    expect(steps[0]).toMatchObject({ action: 'click', target: { selector: '#cb' } });
+  it('lets the form the armed button sits in actually submit', () => {
+    start();
+    const form = document.createElement('form');
+    const send = document.createElement('button');
+    send.type = 'submit';
+    send.textContent = 'Send application';
+    form.append(send);
+    document.body.append(form);
+
+    handle!.arm();
+    click(send);
+
+    let submitted = false;
+    form.addEventListener('submit', () => { submitted = true; });
+    const e = new Event('submit', { bubbles: true, cancelable: true });
+    form.dispatchEvent(e);
+    expect(submitted).toBe(true);
+    expect(e.defaultPrevented).toBe(false);
   });
 
-  it('records typing as the field it went into, guessed', () => {
-    const root = record(`<label for="e">Email</label><input id="e" name="email" />`);
-    change(root.querySelector('#e')!, 'someone@example.com');
-    expect(steps[0]).toMatchObject({
-      action: 'input', bind: 'field:email', bindSource: 'auto', target: { selector: '#e' },
-    });
+  it('spends the arm when the user types nothing and moves on', () => {
+    start();
+    const input = field('email');
+    handle!.arm();
+    click(input);
+    input.dispatchEvent(new Event('focusout', { bubbles: true }));
+
+    expect(handle!.mode()).toBe('idle');
   });
 
-  it('treats an unlabelled upload as the CV, as a guess', () => {
-    const root = record(`<input id="f" type="file" />`);
-    change(root.querySelector('#f')!);
-    expect(steps[0]).toMatchObject({ action: 'input', bind: 'field:resume', bindSource: 'auto' });
-  });
-
-  it('records a field it cannot name, so the user can bind it themselves', () => {
-    const root = record(`<input id="mystery" />`);
-    change(root.querySelector('#mystery')!);
-    expect(steps[0]).toMatchObject({ action: 'input', target: { selector: '#mystery' } });
-    expect(steps[0].bind).toBeUndefined();
+  it('ignores a control changing itself, which is the page and not the user', () => {
+    const { steps } = start();
+    change(field('hidden-thing'));
+    expect(steps).toEqual([]);
   });
 });
+
+/* ---------------- What a recording must never carry ---------------- */
 
 describe('what the recorder must not do', () => {
-  /**
-   * The user is filling in their real name, address and salary expectation. Where
-   * those went is the config; what they were is nobody's business, and a recording
-   * is written to `chrome.storage.session` and rendered in a review panel.
-   */
   it('never stores what was typed', () => {
-    const root = record(`<input id="e" name="email" />`);
-    change(root.querySelector('#e')!, 'someone@example.com');
-    expect(JSON.stringify(steps)).not.toContain('someone@example.com');
-    expect(steps[0]).not.toHaveProperty('value');
+    const { steps } = start();
+    const input = field('email', { name: 'email' });
+    handle!.arm();
+    click(input);
+    input.value = 'private@example.com';
+    change(input);
+
+    expect(JSON.stringify(steps)).not.toContain('private@example.com');
   });
 
-  /**
-   * The inverse of `picker.ts`, which cancels every click it sees. The user is
-   * really applying for this job; a recorder that swallowed the press would record a
-   * sequence that never happened and leave them stuck on the first step.
-   */
-  it('lets the page have the click', () => {
-    const root = record(`<button id="go">Go</button>`);
-    let pageSaw = false;
-    root.querySelector('#go')!.addEventListener('click', (e) => {
-      pageSaw = true;
-      expect(e.defaultPrevented).toBe(false);
-    });
-    click(root.querySelector('#go')!);
-    expect(pageSaw).toBe(true);
+  it('reads an input’s value only where it is a label', () => {
+    const { steps } = start();
+    const send = field('send', { type: 'submit', value: 'Send application' });
+    handle!.arm();
+    click(send);
+
+    expect(steps[0].label).toBe('Send application');
   });
 
-  it('ignores its own bar and the sheets', () => {
-    const root = record(`
-      <div data-cf-recorder="bar"><button id="done">Done</button></div>
-      <div id="chromium-filler-setup-host"><button id="pick">Pick</button></div>
-      <div data-cf-picker="bar"><button id="confirm">Confirm</button></div>
-    `);
-    click(root.querySelector('#done')!);
-    click(root.querySelector('#pick')!);
-    click(root.querySelector('#confirm')!);
+  it('stands down entirely while something is being pointed at', () => {
+    const { steps } = start();
+    const marker = document.createElement('div');
+    marker.setAttribute('data-cf-picker', 'bar');
+    document.body.append(marker);
+    const b = button('banner');
+
+    handle!.arm();
+    // The picker has its own suppression and its own reading of the click; ours
+    // would record the user aiming at the confirmation as a step in the application.
+    expect(click(b).defaultPrevented).toBe(false);
     expect(steps).toEqual([]);
+
+    marker.remove();
+    click(b);
+    expect(steps).toHaveLength(1);
   });
 
-  it('stops watching when it is stopped', () => {
-    const root = record(`<button id="go">Go</button>`);
+  it('stops when told to', () => {
+    const { steps } = start();
     handle!.stop();
-    click(root.querySelector('#go')!);
+    handle = null;
+
+    const b = button('go');
+    expect(click(b).seen).toBe(true);
     expect(steps).toEqual([]);
   });
 });
 
+/* ---------------- The shape of a step ---------------- */
+
 describe('the shape of a step', () => {
-  it('times each step from the start of the recording, not the epoch', () => {
-    const root = record(`<button id="go">Go</button>`);
-    click(root.querySelector('#go')!);
-    expect(steps[0].at).toBeGreaterThanOrEqual(0);
-    expect(steps[0].at).toBeLessThan(60_000);
+  /**
+   * Stamped when Interact was pressed, not when the click landed. The compiler
+   * turns the gap between steps into a `waitForSelector` timeout meaning "the page
+   * was still loading" — and arming puts a tap between every pair of actions, which
+   * would otherwise read as a pause on every one of them.
+   */
+  it('is stamped from the moment the user asked to act', () => {
+    vi.useFakeTimers();
+    try {
+      const startedAt = Date.now();
+      const steps: RecordedStep[] = [];
+      handle = startRecording({ leg: 'posting', startedAt, onStep: (s) => steps.push(s), onMode: () => {} });
+
+      vi.advanceTimersByTime(4000);
+      handle.arm();
+      vi.advanceTimersByTime(3000); // the user takes their time finding the button
+      click(button('go'));
+
+      expect(steps[0].at).toBe(4000);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it('stamps the leg and the page it happened on', () => {
-    const root = record(`<button id="go">Go</button>`);
-    click(root.querySelector('#go')!);
+    const { steps } = start();
+    handle!.arm();
+    click(button('go'));
+
     expect(steps[0].leg).toBe('posting');
     expect(steps[0].url).toBe(location.href);
   });
 
-  it('gives every step a distinct id, which is what the review edits by', () => {
-    const root = record(`<button id="a">A</button><button id="b">B</button>`);
-    click(root.querySelector('#a')!);
-    click(root.querySelector('#b')!);
-    expect(steps[0].id).not.toBe(steps[1].id);
-  });
-});
+  it('gives every step its own id', () => {
+    const { steps } = start();
+    handle!.arm();
+    click(button('a'));
+    handle!.arm();
+    click(button('b'));
 
-describe('while something else is being pointed at', () => {
-  /**
-   * The picker and the recorder both listen on `document` in the capture phase, and
-   * the recorder is attached first — so marking the confirmation banner used to
-   * record a click on the confirmation banner too, which the compiler would then
-   * faithfully replay on every later visit.
-   */
-  it('records nothing while a click-to-pick is running', () => {
-    const root = record(`<button id="go">Go</button><div data-cf-picker="bar"></div>`);
-    click(root.querySelector('#go')!);
-    expect(steps).toEqual([]);
-
-    root.querySelector('[data-cf-picker]')!.remove();
-    click(root.querySelector('#go')!);
-    expect(steps).toHaveLength(1);
+    expect(new Set(steps.map((s) => s.id)).size).toBe(2);
   });
 });

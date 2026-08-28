@@ -81,30 +81,6 @@ export async function popStep(tabId: number | undefined): Promise<Recording | un
   return rec;
 }
 
-/**
- * Change what the last step means — the bar's "Mark as…" and "Keep as a step".
- * `null` clears the binding, which is how a guess is refused.
- */
-export async function bindLastStep(
-  tabId: number | undefined, bind: RecordedStep['bind'] | null,
-): Promise<Recording | undefined> {
-  if (tabId == null) return undefined;
-  const map = await all();
-  const rec = map[String(tabId)];
-  const last = rec?.steps[rec.steps.length - 1];
-  if (!rec || !last) return rec;
-  if (bind) {
-    last.bind = bind;
-    // A user's choice, so it outranks any later guess about the same element.
-    last.bindSource = 'user';
-  } else {
-    delete last.bind;
-    delete last.bindSource;
-  }
-  await write(map);
-  return rec;
-}
-
 export async function stopRecording(tabId: number | undefined): Promise<Recording | undefined> {
   if (tabId == null) return undefined;
   const map = await all();

@@ -21,6 +21,7 @@ import { ACTION_LABELS, SELECTOR_STRENGTH_TEXT } from '../shared/labels';
 import { pickSelector } from '../shared/selector';
 import { currentPalette, withAlpha } from '../ui/palette';
 import { PICKER_ATTR as OWN_ATTR, isExtensionUi } from './extensionUi';
+import { swallowPageInput } from './inertPage';
 
 export type PickHandler = (el: Element) => void;
 
@@ -232,17 +233,6 @@ export function startPicker(onPick: PickHandler, fieldLabel: string, onCancel?: 
     paint();
   };
 
-  /**
-   * The page must not act on any part of a gesture aimed at us. A pick is several
-   * presses long now, so cancelling `click` alone is not enough: a site that acts
-   * on `mousedown` would act once per step of the chain.
-   */
-  const swallow = (e: Event): void => {
-    if (isOwn(e.target as Element)) return;
-    e.preventDefault();
-    e.stopPropagation();
-  };
-
   const onKey = (e: KeyboardEvent): void => {
     if (e.key === 'Escape') { cancel(); return; }
     if (!anchor) return;
@@ -256,13 +246,25 @@ export function startPicker(onPick: PickHandler, fieldLabel: string, onCancel?: 
   // outline behind on an empty patch of page.
   const reposition = (): void => { if (chain[index]) paint(); };
 
-  const SWALLOWED = ['pointerdown', 'pointerup', 'mousedown', 'mouseup', 'dblclick', 'contextmenu'];
+  /**
+   * The page must not act on any part of a gesture aimed at us. A pick is several
+   * presses long now, so cancelling `click` alone is not enough: a site that acts
+   * on `mousedown` would act once per step of the chain. `hard` because a pick is
+   * seconds long and the drag-selection a live `mousedown` starts is worth more
+   * gone than the scrolling it costs — the recorder, which runs for minutes, makes
+   * the opposite trade off the same helper.
+   *
+   * `onClick` below still cancels and reads the click itself: this suppression is
+   * blanket, and choosing a depth is the one gesture that means something to us.
+   */
+  let detachInert: (() => void) | null = null;
 
   const cleanup = (): void => {
+    detachInert?.();
+    detachInert = null;
     document.removeEventListener('pointermove', onMove, true);
     document.removeEventListener('click', onClick, true);
     document.removeEventListener('keydown', onKey, true);
-    for (const type of SWALLOWED) document.removeEventListener(type, swallow, true);
     document.removeEventListener('scroll', reposition, true);
     window.removeEventListener('resize', reposition);
     box.remove();
@@ -286,10 +288,13 @@ export function startPicker(onPick: PickHandler, fieldLabel: string, onCancel?: 
   press(cancelBtn, cancel);
 
   setEnabled(false);
+  // Our own readers go on **before** the suppression, because it ends with
+  // `stopImmediatePropagation` — which stops the listeners registered after it on
+  // this same node, and those are the ones that make the picker work.
   document.addEventListener('pointermove', onMove, true);
   document.addEventListener('click', onClick, true);
   document.addEventListener('keydown', onKey, true);
-  for (const type of SWALLOWED) document.addEventListener(type, swallow, true);
+  detachInert = swallowPageInput({ isExempt: isOwn, hard: true });
   document.addEventListener('scroll', reposition, { capture: true, passive: true });
   window.addEventListener('resize', reposition);
 

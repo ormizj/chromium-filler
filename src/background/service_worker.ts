@@ -9,7 +9,7 @@ import {
   MSG, type FollowRedirectResponse, type Message, type RecordingResponse,
 } from '../shared/messages';
 import {
-  bindLastStep, getRecording, inheritRecording, popStep, pushStep, startRecording, stopRecording,
+  getRecording, inheritRecording, popStep, pushStep, startRecording, stopRecording,
 } from './recordings';
 import { getSettings, mutateJobUrls } from '../shared/storage';
 import { applyStatusChain, linkRedirect } from '../shared/jobUrls';
@@ -76,12 +76,6 @@ chrome.runtime.onMessage.addListener((msg: Message, _sender, sendResponse) => {
     pushStep(_sender.tab?.id, msg.step)
       .then(() => sendResponse({ ok: true }))
       .catch((e) => sendResponse({ ok: false, error: String(e) }));
-    return true;
-  }
-  if (msg.type === MSG.RECORD_BIND) {
-    bindLastStep(_sender.tab?.id, msg.bind)
-      .then((recording) => sendResponse({ recording } satisfies RecordingResponse))
-      .catch(() => sendResponse({} satisfies RecordingResponse));
     return true;
   }
   if (msg.type === MSG.RECORD_UNDO) {

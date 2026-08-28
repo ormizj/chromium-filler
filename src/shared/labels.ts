@@ -150,8 +150,9 @@ export type ActionKey =
   | 'record'
   | 'recordExternal'
   | 'stopRecording'
-  | 'bind'
-  | 'bindPick'
+  | 'interact'
+  | 'interactArmed'
+  | 'declare'
   | 'keepAsClick'
   | 'undo'
   | 'saveRecording'
@@ -205,14 +206,21 @@ export const ACTION_LABELS: Record<ActionKey, string> = {
   // "Done", not "Stop": the user has finished applying, which is a thing they did,
   // not a recording they are operating.
   stopRecording: 'Done',
-  bind: 'Mark as…',
-  // The other half of marking, and it needs its own verb because it answers a
-  // different question. "Mark as…" is about the thing you just did; this one goes
-  // and finds something you did *not* do — which is the only way to mark the
-  // confirmation banner, since it appears rather than being pressed.
-  bindPick: 'Mark another…',
-  // The other half of the same decision, and worded as the outcome rather than as a
-  // refusal — keeping a step is a perfectly good answer, and most steps are that.
+  // The two things a recording can be told to do, and the whole of the bar's
+  // middle. They are named for what the *user* is doing, not for what the
+  // extension will do with it: "Interact" is using the page, "Declare" is saying
+  // what something is. Neither is the default — while neither is chosen the page
+  // is inert, which is what stops an idle click becoming a step replayed on every
+  // later visit.
+  interact: 'Interact',
+  // The armed form of the verb above, paired with it the way `applied` is with
+  // `apply`. It has to name what the extension is now waiting for, because the
+  // page has just gone live under the user's finger and nothing else says so.
+  interactArmed: 'Click one thing…',
+  declare: 'Declare…',
+  // What a step is when it is nothing else. The bar has no use for it any more —
+  // a step is now precisely what Interact produces — but the review's bind select
+  // still needs a word for its empty option, and it is the same word.
   keepAsClick: 'Keep as a step',
   undo: 'Undo',
   saveRecording: 'Save setup',

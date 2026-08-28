@@ -1,17 +1,21 @@
 /**
  * The bar that stays up while the user applies for the job.
  *
- * Its whole reason to exist is the decision it carries: after each thing the user
- * does, is that a **step** to replay, or is it **something the extension should
- * know** — the description, the Send button, the confirmation? Answering that at the
- * end, from a list, means remembering which of nine clicks was which. Answering it
- * here costs one tap, while the thing is still on screen and still under the finger.
+ * Its whole reason to exist is the decision it carries, and that decision is now
+ * asked **before** the user acts rather than after. The page underneath is inert,
+ * and the middle of the bar is the two ways to make it do something:
  *
- * So the bar is three parts: what is being recorded, what just happened and what to
- * do about it, and the way out. The middle part pre-fills with the extension's own
- * guess (`guessField` already named the field the user typed into), so the common
- * case is *not tapping anything at all* — which is what makes recording faster than
- * the wizard rather than the same twenty-five decisions in a different order.
+ * - **Interact** arms one gesture. The next click reaches the page and is kept as
+ *   a step to replay. That is how a "Show more" or a "Next" gets into the config.
+ * - **Declare…** names what an element *is* — the description, the Send button,
+ *   the confirmation, a profile field — and then `picker.ts` goes and finds it.
+ *
+ * Neither is a default, and that is the feature: while neither is chosen a click
+ * does nothing at all, so reading the posting cannot leave a stray press behind to
+ * be replayed on every later visit.
+ *
+ * The armed state is loud on purpose. The page has just gone live under the
+ * user's finger, and the bar is the only thing that can say so.
  *
  * It is a **toolbar, not a `Sheet`**. It never takes a pill slot, so the "one slot,
  * two sheets" arbitration between the review modal and the setup panel is untouched;
@@ -27,15 +31,16 @@ import {
   isFieldBind, type BindKey, type ConfigBindKey, type RecordFlow, type RecordLeg,
   type RecordedStep,
 } from '../shared/recording';
+import type { RecorderMode } from './recorder';
 import { BASE_CSS } from '../ui/shadowCss';
 import { RECORDER_ATTR, RECORDER_HOST_ID } from './extensionUi';
 import barCss from './recorderBar.css?inline';
 
 export interface RecorderBarCallbacks {
-  /** Re-decide the step that just happened: a binding, or `null` to keep it a step. */
-  onBindLast(bind: BindKey | null): void;
-  /** Mark something that is not what just happened — the picker finds it. */
-  onBindPick(bind: BindKey): void;
+  /** Interact: arm one gesture, or cancel an arm that is already up. */
+  onInteract(): void;
+  /** Declare: name a thing, and let the picker find it. */
+  onDeclare(bind: BindKey): void;
   onUndo(): void;
   onDone(): void;
 }
@@ -45,7 +50,9 @@ export interface RecorderBarState {
   /** Which page of a handoff this is. It decides what the menu leads with. */
   leg: RecordLeg;
   stepCount: number;
-  /** The step the middle of the bar is about; absent before anything has happened. */
+  /** Whether the page is inert, waiting for one click, or being typed into. */
+  mode: RecorderMode;
+  /** The step just recorded, reported back so the user can see it landed. */
   last?: RecordedStep;
   /** What has already been marked, so the menu can lead with what has not. */
   bound: BindKey[];
@@ -84,8 +91,8 @@ export class RecorderBar {
   private shadow: ShadowRoot;
   private cb: RecorderBarCallbacks;
   private data?: RecorderBarState;
-  /** Which menu is open, if any. On the instance: a re-render must not close it. */
-  private menu: 'last' | 'pick' | null = null;
+  /** Whether the Declare menu is open. On the instance: a repaint must not close it. */
+  private menu = false;
   private startedAt = Date.now();
   private ticker?: ReturnType<typeof setInterval>;
 
@@ -126,7 +133,10 @@ export class RecorderBar {
     const bar = el('div', 'cf-bar');
     bar.setAttribute('role', 'toolbar');
     bar.setAttribute('aria-label', 'Recording this site');
-    bar.append(this.state(data), this.lastStep(data), this.exits());
+    // Source order is the wide layout: state, what just happened, the two options,
+    // the way out. Narrow re-orders it with `order`, which is where the readout drops
+    // to a row of its own.
+    bar.append(this.state(data), this.lastStep(data), this.options(data), this.exits());
     this.shadow.append(bar);
   }
 
@@ -146,54 +156,52 @@ export class RecorderBar {
   }
 
   /**
-   * The middle: what just happened, and the two answers to it. A guessed binding is
-   * shown as already made — because it is — so the common case needs no tap.
+   * The middle: the two ways to act on the page. Interact is the one that changes
+   * what the page is doing, so it takes the emphasis while it is armed — and only
+   * while it is armed, because a permanently loud button says nothing.
    */
-  private lastStep(data: RecorderBarState): HTMLElement {
-    const wrap = el('div', 'cf-rec-last');
-    const what = el('div', 'cf-rec-what');
+  private options(data: RecorderBarState): HTMLElement {
+    const wrap = el('div', 'cf-rec-options');
 
-    const { last } = data;
-    if (last) {
-      const name = last.label || last.target?.selector || 'that element';
-      const verb = last.action === 'input' ? 'Filled in' : 'Clicked';
-      what.append(text('span', `${verb} `), text('b', name));
-      if (last.bind) what.append(text('span', ` — ${bindLabel(last.bind)}`));
-    } else {
-      what.textContent = 'Apply as you normally would.';
-    }
+    const armed = data.mode !== 'idle';
+    // Not `.primary` when armed: Done is the one thing this bar is for, and a second
+    // coral beside it makes neither of them mean anything. `.cf-rec-armed` is a mode,
+    // drawn as one.
+    const interact = btn(
+      armed ? ACTION_LABELS.interactArmed : ACTION_LABELS.interact,
+      () => { this.menu = false; this.cb.onInteract(); },
+      armed ? 'cf-rec-armed' : '',
+    );
+    interact.setAttribute('aria-pressed', String(armed));
 
-    const actions = el('div', 'cf-rec-actions');
-    if (last) actions.append(this.markButton(data, 'last'));
-    // Always offered, and that is the point: the confirmation banner is never the
-    // thing you just pressed — it *appears* once the application is in — so a bar
-    // that could only re-label the last step could not mark the one selector that
-    // exists for a few seconds and nowhere else.
-    actions.append(this.markButton(data, 'pick'));
-    wrap.append(what, actions);
+    // Both options are the same shape of box — a `.cf-rec-wrap` holding one button —
+    // so that "equal halves" at 390px is a fact about two identical siblings rather
+    // than a coincidence of a `<button>`'s padding and a `<div>`'s lack of it. It
+    // was 191/169 while they differed.
+    const one = el('div', 'cf-rec-wrap');
+    one.append(interact);
+    wrap.append(one, this.declareButton(data));
     return wrap;
   }
 
-  private markButton(data: RecorderBarState, kind: 'last' | 'pick'): HTMLElement {
+  private declareButton(data: RecorderBarState): HTMLElement {
     const wrap = el('div', 'cf-rec-wrap');
-    const label = kind === 'last' ? ACTION_LABELS.bind : ACTION_LABELS.bindPick;
-    const toggle = btn(label, () => {
-      this.menu = this.menu === kind ? null : kind;
+    const toggle = btn(ACTION_LABELS.declare, () => {
+      this.menu = !this.menu;
       this.paint();
     });
-    toggle.setAttribute('aria-expanded', String(this.menu === kind));
+    toggle.setAttribute('aria-expanded', String(this.menu));
     wrap.append(toggle);
-    if (this.menu === kind) wrap.append(this.buildMenu(data, kind));
+    if (this.menu) wrap.append(this.buildMenu(data));
     return wrap;
   }
 
-  private buildMenu(data: RecorderBarState, kind: 'last' | 'pick'): HTMLElement {
+  private buildMenu(data: RecorderBarState): HTMLElement {
     const menu = el('div', 'cf-rec-menu');
     menu.setAttribute('role', 'menu');
     const choose = (bind: BindKey) => {
-      this.menu = null;
-      if (kind === 'last') this.cb.onBindLast(bind);
-      else this.cb.onBindPick(bind);
+      this.menu = false;
+      this.cb.onDeclare(bind);
     };
 
     // What the flow still needs leads, because those are the marks that cannot be
@@ -203,19 +211,6 @@ export class RecorderBar {
       ['What the posting says', INFO_MARKS],
       ['Form fields', fieldMarks()],
     ];
-
-    // "Keep as a step" leads the menu for the last step, because it is one of the
-    // answers to the same question and not a separate control — as a button on the
-    // bar it was a third thing competing for a 390px row, and it only ever applied
-    // to one of the two menus anyway.
-    if (kind === 'last') {
-      const keep = btn(ACTION_LABELS.keepAsClick, () => {
-        this.menu = null;
-        this.cb.onBindLast(null);
-      }, 'btn-ghost');
-      keep.setAttribute('role', 'menuitem');
-      menu.append(keep);
-    }
 
     for (const [head, keys] of groups) {
       const pending = keys.filter((k) => !data.bound.includes(k));
@@ -229,6 +224,31 @@ export class RecorderBar {
       }
     }
     return menu;
+  }
+
+  /**
+   * What the last action turned into — a readout and never a control. It is
+   * feedback that the press landed, and the place to change one's mind about it is
+   * the review, which opens the moment recording stops.
+   */
+  private lastStep(data: RecorderBarState): HTMLElement {
+    const wrap = el('div', 'cf-rec-last');
+    const what = el('div', 'cf-rec-what');
+
+    const { last } = data;
+    if (data.mode !== 'idle') {
+      what.append(text('span', 'The page is live — use it as you normally would.'));
+    } else if (last) {
+      const name = last.label || last.target?.selector || 'that element';
+      const verb = last.action === 'input' ? 'Filled in' : 'Clicked';
+      what.append(text('span', `${verb} `), text('b', name));
+      if (last.bind) what.append(text('span', ` — ${bindLabel(last.bind)}`));
+    } else {
+      what.append(text('span', 'Interact to use the page, Declare to name something on it.'));
+    }
+
+    wrap.append(what);
+    return wrap;
   }
 
   private exits(): HTMLElement {
@@ -277,8 +297,13 @@ export function bindLabel(key: BindKey): string {
   return BIND_LABELS[key as ConfigBindKey] ?? key;
 }
 
-/** The CV first, then the rest in reading order — `FIELD_ORDER`'s job, reused. */
-function fieldMarks(): BindKey[] {
+/**
+ * The CV first, then the rest in reading order — `FIELD_ORDER`'s job, reused.
+ *
+ * Exported because the review's per-step dropdown offers the same sixteen fields,
+ * and two lists of them in two files is the drift the label catalog exists to stop.
+ */
+export function fieldMarks(): BindKey[] {
   const fields: FieldKey[] = ['resume', ...TEXT_FIELDS];
   return orderFields(fields, (f) => f, () => false).map((f) => `field:${f}` as BindKey);
 }

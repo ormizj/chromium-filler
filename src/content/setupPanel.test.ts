@@ -708,6 +708,27 @@ describe('reviewing a recording', () => {
     expect(s.querySelector('[data-k="rec:s1:bind"]')).not.toBeNull();
   });
 
+  /**
+   * The one bind the extension still guesses for itself is a profile field, and the
+   * bar has no control for refusing a guess any more — so the review is the only
+   * place a wrong one can be corrected, and it has to offer the sixteen fields to
+   * correct it to. Grouped, because flat they run straight past the marks above them.
+   */
+  it('offers the profile fields, under a heading of their own', () => {
+    const { recording, compiled } = recorded();
+    const s = render(data({ recording, compiled }));
+    panel!.showReview(true);
+
+    const select = s.querySelector<HTMLSelectElement>('[data-k="rec:s2:bind"]')!;
+    const group = select.querySelector('optgroup')!;
+    expect(group.label).toBe('Form fields');
+    const values = [...group.querySelectorAll('option')].map((o) => o.value);
+    expect(values).toContain('field:email');
+    expect(values).toContain('field:phone');
+    // The CV leads them, the same order the profile itself is read in.
+    expect(values[0]).toBe('field:resume');
+  });
+
   it('re-marks a step through the callback rather than deciding itself', () => {
     const seen: Array<[string, string | null]> = [];
     const { recording, compiled } = recorded();

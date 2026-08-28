@@ -165,18 +165,15 @@ function waitFor(gap: number): number | undefined {
 
 const selectorOf = (s: RecordedStep): string | undefined => s.target?.selector;
 
-/**
- * A double press is one step. Only consecutive, only unbound, only the same target:
- * a repeat with something in between is a page that genuinely wanted pressing twice.
+/*
+ * There is deliberately no de-duplication of consecutive clicks here any more.
+ *
+ * It existed because the recorder used to watch everything the user did, so a
+ * double press — or a page that raised two clicks for one gesture — arrived as two
+ * steps nobody meant. The page is inert now and every click costs a press of
+ * Interact first, so two presses of "Add another" are two presses, and collapsing
+ * them would quietly drop half of a repeated step the user paid for twice.
  */
-function collapseRepeats(steps: RecordedStep[]): RecordedStep[] {
-  return steps.filter((s, i) => {
-    const prev = steps[i - 1];
-    if (!prev || s.action !== 'click' || prev.action !== 'click') return true;
-    if (s.bind || prev.bind) return true;
-    return !(s.leg === prev.leg && selectorOf(s) != null && selectorOf(s) === selectorOf(prev));
-  });
-}
 
 interface LegOptions {
   url: string;
@@ -300,7 +297,7 @@ function buildPatch(steps: RecordedStep[], opts: LegOptions): ConfigPatch {
 }
 
 export function compileRecording(rec: Recording): CompiledSetup {
-  const steps = collapseRepeats(rec.steps);
+  const steps = rec.steps;
 
   // Rule 1: what happened outranks what was chosen, in both directions. A
   // `navigate` counts as evidence alongside a destination-leg step, so a handoff

@@ -5,7 +5,7 @@
  */
 import { describe, it, expect, beforeEach, vi, afterEach } from 'vitest';
 import {
-  bindLastStep, getRecording, inheritRecording, popStep, pushStep, startRecording, stopRecording,
+  getRecording, inheritRecording, popStep, pushStep, startRecording, stopRecording,
 } from './recordings';
 import type { RecordedStep } from '../shared/recording';
 import { resetChromeMock } from '../../test/setup';
@@ -116,37 +116,13 @@ describe('crossing the handoff', () => {
   });
 });
 
+/**
+ * Undo is the only edit the bar makes to a recording in flight now. Re-marking a
+ * step happens in the review, against the content script's own copy, because a step
+ * is only ever created by a deliberate act in the first place — there is no guess
+ * standing between the user and the config to be refused on the spot.
+ */
 describe('changing your mind mid-recording', () => {
-  it('re-marks the last step', async () => {
-    await startRecording(1, 'internal', BOARD);
-    await pushStep(1, step({ id: 'a' }));
-    await pushStep(1, step({ id: 'b' }));
-
-    const rec = await bindLastStep(1, 'submit');
-    expect(rec?.steps[1].bind).toBe('submit');
-    expect(rec?.steps[0].bind).toBeUndefined();
-  });
-
-  /**
-   * The bar shows the extension's own guess as already made, so "Keep as a step" is
-   * how a wrong guess is refused — and the refusal has to actually clear it, or the
-   * compiler still routes the step to a config slot the user just rejected.
-   */
-  it('clears a guess when the step is kept as a step', async () => {
-    await startRecording(1, 'internal', BOARD);
-    await pushStep(1, step({ bind: 'field:email', bindSource: 'auto' }));
-
-    const rec = await bindLastStep(1, null);
-    expect(rec?.steps[0].bind).toBeUndefined();
-    expect(rec?.steps[0].bindSource).toBeUndefined();
-  });
-
-  it('records a chosen mark as the user’s, so no later guess overrides it', async () => {
-    await startRecording(1, 'internal', BOARD);
-    await pushStep(1, step({ bind: 'field:email', bindSource: 'auto' }));
-    expect((await bindLastStep(1, 'field:phone'))?.steps[0].bindSource).toBe('user');
-  });
-
   it('undoes the last step', async () => {
     await startRecording(1, 'internal', BOARD);
     await pushStep(1, step({ id: 'a' }));

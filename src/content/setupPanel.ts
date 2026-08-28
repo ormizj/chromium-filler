@@ -20,7 +20,7 @@ import type {
   BindKey, CompiledSetup, RecordFlow, Recording, RecordedStep,
 } from '../shared/recording';
 import { SELECTOR_STRENGTH_TEXT } from '../shared/labels';
-import { bindLabel } from './recorderBar';
+import { bindLabel, fieldMarks } from './recorderBar';
 import {
   CONCEPT_HELP, DOT_LEGEND, SETUP_STEP_HELP, SETUP_STEP_TITLES,
 } from '../shared/help';
@@ -104,11 +104,15 @@ export interface SetupCallbacks extends SheetCallbacks {
 }
 
 /**
- * What the review's per-step dropdown offers. The flow and job-info marks, in the
- * order they come up while applying — the profile fields are deliberately not here:
- * sixteen of them would bury the five that matter in a control the user is scanning,
- * and a field is bound from the recorder bar while the cursor is still in it, which
- * is both easier and the case this list is not for.
+ * What the review's per-step dropdown leads with: the flow and job-info marks, in
+ * the order they come up while applying. The five that matter stay at the top of a
+ * control the user is scanning.
+ *
+ * The sixteen profile fields follow, under a heading of their own. They used to be
+ * left out entirely, because a field was corrected from the recorder bar while the
+ * cursor was still in it — but the bar has no such control any more, and the one
+ * bind the extension still guesses for itself is exactly a field. This is now the
+ * only place a wrong guess can be refused, so it has to offer them.
  */
 const BIND_CHOICES: BindKey[] = [
   'submit', 'success', 'jobDescription', 'jobTitle', 'jobRequirements',
@@ -640,20 +644,27 @@ export class SetupPanel extends Sheet<SetupData> {
     keep.textContent = ACTION_LABELS.keepAsClick;
     select.append(keep);
 
-    for (const key of BIND_CHOICES) {
-      const option = document.createElement('option');
-      option.value = key;
-      option.textContent = bindLabel(key);
-      select.append(option);
-    }
-    // A bind the model allows but this list does not offer (a field, most often)
-    // still has to be shown as the current value rather than silently reset.
-    if (step.bind && !BIND_CHOICES.includes(step.bind)) {
-      const option = document.createElement('option');
-      option.value = step.bind;
-      option.textContent = bindLabel(step.bind);
-      select.append(option);
-    }
+    const option = (key: BindKey): HTMLOptionElement => {
+      const node = document.createElement('option');
+      node.value = key;
+      node.textContent = bindLabel(key);
+      return node;
+    };
+
+    for (const key of BIND_CHOICES) select.append(option(key));
+
+    // Grouped rather than appended flat: sixteen fields run past the eleven above
+    // them, and without a heading the list reads as one very long thing rather than
+    // "what this does" followed by "which of my details it is".
+    const fields = document.createElement('optgroup');
+    fields.label = 'Form fields';
+    for (const key of fieldMarks()) fields.append(option(key));
+    select.append(fields);
+
+    // A bind the model allows but neither list offers still has to be shown as the
+    // current value rather than silently reset.
+    const offered = [...BIND_CHOICES, ...fieldMarks()];
+    if (step.bind && !offered.includes(step.bind)) select.append(option(step.bind));
     select.value = step.bind ?? '';
     select.onchange = () => this.cb.onRebindStep(step.id, (select.value || null) as BindKey | null);
     return select;
