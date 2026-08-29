@@ -216,3 +216,39 @@ describe('flowBanner', () => {
     }
   });
 });
+
+/**
+ * The one blocked-looking state that is not blocked.
+ *
+ * `noConfirmation` was a dead end and, on a site nobody had ever applied to, an
+ * unanswerable one: Apply refused to send without the element, and the element does
+ * not exist until an application has been sent. `finishSetup` is the way through —
+ * so it has to read as an offer rather than as a failure, and it must still lose to
+ * everything that outranks a pending decision.
+ */
+describe('finishing the setup as you apply', () => {
+  it('reads as something about to happen, not something broken', () => {
+    const b = flowBanner({ ...base, applyState: 'finishSetup' });
+    expect(b.key).toBe('finishSetup');
+    expect(b.tone).toBe('accent');
+    expect(b.help).toBe('finishSetup');
+  });
+
+  it('says what the press will do before it does it', () => {
+    const b = flowBanner({ ...base, applyState: 'finishSetup' });
+    expect(b.detail).toMatch(/point at/i);
+  });
+
+  /** Nothing pending can still be the answer once something has gone through. */
+  it('is outranked by both applied states', () => {
+    expect(flowBanner({ ...base, applyState: 'finishSetup', applied: true }).key).toBe('applied');
+    expect(flowBanner({ ...base, applyState: 'finishSetup', alreadyApplied: true }).key)
+      .toBe('alreadyApplied');
+  });
+
+  /** Same rule the other blocked states follow: an empty profile does not outrank it. */
+  it('outranks empty', () => {
+    expect(flowBanner({ ...base, applyState: 'finishSetup', filled: 0, total: 0 }).key)
+      .toBe('finishSetup');
+  });
+});

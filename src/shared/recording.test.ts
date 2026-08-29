@@ -1,7 +1,8 @@
 import { describe, it, expect } from 'vitest';
 import {
-  RECORDING_WARNINGS, compileRecording,
-  type BindKey, type RecordFlow, type RecordLeg, type RecordedStep, type Recording,
+  RECORDING_NOTES, RECORDING_WARNINGS, compileRecording,
+  type BindKey, type RecordFlow, type RecordLeg, type RecordPhase, type RecordedStep,
+  type Recording,
 } from './recording';
 
 /* ---------------- Builders ---------------- */
@@ -40,9 +41,12 @@ const input = (selector: string, bind: BindKey, over: StepOver = {}) =>
 const bindOnly = (selector: string, bind: BindKey, over: StepOver = {}) =>
   step('click', { selector, bind, bindSource: 'user', ...over } as StepOver);
 
-function recording(steps: RecordedStep[], flow: RecordFlow = 'internal'): Recording {
+function recording(
+  steps: RecordedStep[], flow: RecordFlow = 'internal', phase: RecordPhase = 'beforeSend',
+): Recording {
   return {
     flow,
+    phase,
     startedAt: 0,
     postingUrl: 'https://board.test/job/1',
     destinationUrl: steps.some((s) => s.leg === 'destination') ? 'https://ats.test/apply' : undefined,
@@ -183,6 +187,32 @@ describe('rule 3 — nothing that sends an application reaches a prep list', () 
     ]));
     expect(out.posting.submitSelector).toBe('#send');
     expect(JSON.stringify(out.posting)).not.toContain('#send-again');
+  });
+
+  /**
+   * The other side of the same rule, and the one the hold created. The recorder holds
+   * every send-shaped press of a real control now, so an unbound one that reached the
+   * page did so because the user was asked and said it was not the Send button —
+   * usually the "Apply now" that *opens* the form. Dropping it here would leave the
+   * config unable to open the form it is meant to fill.
+   */
+  it('replays a send-shaped click the user was asked about and refused', () => {
+    const out = compileRecording(recording([
+      { ...click('#open', { label: 'Apply for this role' }), sendRefused: true },
+      bindOnly('#send', 'submit'),
+    ]));
+    expect(out.posting.prep).toEqual([{ action: 'click', selector: '#open' }]);
+    expect(out.posting.submitSelector).toBe('#send');
+    expect(out.warnings).not.toContain(RECORDING_WARNINGS.adoptedSubmit);
+  });
+
+  /** And it is never adopted as the Send button either, for the same reason. */
+  it('does not adopt a refused click when nothing else was marked', () => {
+    const out = compileRecording(recording([
+      { ...click('#open', { label: 'Apply for this role' }), sendRefused: true },
+    ]));
+    expect(out.posting.submitSelector).toBeUndefined();
+    expect(out.warnings).toContain(RECORDING_WARNINGS.noSubmit);
   });
 
   it('is not fooled by a Save button, which must stay an ordinary step', () => {
@@ -372,13 +402,22 @@ describe('rules 8 and 9 — what the compiler refuses to be quiet about', () => 
   });
 
   /**
-   * Without a confirmation element nothing here can ever be recorded as applied and
-   * Apply refuses to send at all — and a recording is the one moment the element is
-   * on screen to be pointed at.
+   * The expected ending of a before-sending pass, and so a note rather than a
+   * warning. The element does not exist until an application has really gone in, and
+   * this pass stops short of sending one on purpose — telling the user their setup
+   * failed is how the half that worked read as broken.
    */
-  it('warns when no confirmation was marked', () => {
+  it('hands a before-sending pass on to the second one rather than warning', () => {
     const out = compileRecording(recording([bindOnly('#send', 'submit')]));
-    expect(out.warnings).toContain(RECORDING_WARNINGS.noSuccess);
+    expect(out.warnings).not.toContain(RECORDING_WARNINGS.noSuccess);
+    expect(out.notes).toContain(RECORDING_NOTES.afterSendPending);
+  });
+
+  /** Nothing to hand on to: the second pass needs a button to press first. */
+  it('says nothing about the second pass when no Send button was found either', () => {
+    const out = compileRecording(recording([click('#expand')]));
+    expect(out.notes).toEqual([]);
+    expect(out.warnings).toContain(RECORDING_WARNINGS.noSubmit);
   });
 
   it('warns when no Send button was found', () => {
@@ -453,5 +492,55 @@ describe('what a recording is allowed to hold', () => {
     typed.value = 'someone@example.com';
     const out = compileRecording(recording([typed]));
     expect(JSON.stringify(out)).not.toContain('someone@example.com');
+  });
+});
+
+/* ---------------- The after-sending pass ---------------- */
+
+/**
+ * The second half of setting a site up: one page, one thing to point at, and nothing
+ * inert. Everything the compiler does about *replaying* what the user did is moot
+ * here — the pass records no gestures at all — so what these assert is mostly what it
+ * refuses to do.
+ */
+describe('the after-sending pass compiles binds and nothing else', () => {
+  const after = (steps: RecordedStep[], flow: RecordFlow = 'internal') =>
+    compileRecording(recording(steps, flow, 'afterSend'));
+
+  it('turns the marked confirmation into successSelector', () => {
+    const out = after([bindOnly('.thanks', 'success')]);
+    expect(out.posting.successSelector).toBe('.thanks');
+    expect(out.warnings).toEqual([]);
+    expect(out.destination).toBeUndefined();
+  });
+
+  it('warns when the pass ended without one, because that is all it was for', () => {
+    const out = after([]);
+    expect(out.warnings).toContain(RECORDING_WARNINGS.noSuccess);
+  });
+
+  /**
+   * The pass has one page by definition — whichever one the application went from —
+   * so a second URL appearing is the confirmation page loading, never a handoff. Read
+   * as one it would split a single mark across two configs and write it to neither.
+   */
+  it('never splits into two legs, whatever the flow says', () => {
+    const out = after([
+      step('navigate', { to: 'https://ats.test/apply/confirmation' }),
+      bindOnly('.thanks', 'success'),
+    ], 'external');
+    expect(out.destination).toBeUndefined();
+    expect(out.posting.successSelector).toBe('.thanks');
+  });
+
+  /** Nothing about handing off can be learned after the application has gone in. */
+  it('never writes a redirect block', () => {
+    const out = after([bindOnly('#apply-link', 'applySelector'), bindOnly('.thanks', 'success')]);
+    expect(out.posting.redirect).toBeUndefined();
+  });
+
+  it('carries the Send button too, when the pass is where it was marked', () => {
+    const out = after([bindOnly('#send', 'submit'), bindOnly('.thanks', 'success')]);
+    expect(out.posting.submitSelector).toBe('#send');
   });
 });

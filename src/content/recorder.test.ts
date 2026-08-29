@@ -17,16 +17,20 @@ afterEach(() => {
   document.body.innerHTML = '';
 });
 
-function start(): { steps: RecordedStep[]; modes: RecorderMode[] } {
+function start(): { steps: RecordedStep[]; modes: RecorderMode[]; held: Element[] } {
   const steps: RecordedStep[] = [];
   const modes: RecorderMode[] = [];
+  const held: Element[] = [];
   handle = startRecording({
     leg: 'posting',
     startedAt: Date.now(),
     onStep: (s) => steps.push(s),
     onMode: (m) => modes.push(m),
+    onHeldSend: (el) => held.push(el),
+    // The real controller answers this from the recording; here the steps are it.
+    sendMarked: () => steps.some((s) => s.bind === 'submit'),
   });
-  return { steps, modes };
+  return { steps, modes, held };
 }
 
 /** Dispatch a real, cancelable click and report whether the page got it. */
@@ -265,15 +269,19 @@ describe('an armed click that lands in something to type in', () => {
 
   /**
    * A form being submitted is the consequence of a press this recorder allowed —
-   * there is no other way to reach one. Cancelling it would eat the application the
-   * user is in the middle of sending, which is the one thing a recording is for.
+   * there is no other way to reach one. Cancelling it would eat the page turn the
+   * user is in the middle of, on every multi-page application form.
+   *
+   * The button is labelled "Continue" and not "Send application" on purpose: a
+   * send-shaped press is held now (see the held-send block below), so the only
+   * `submit` that can still be reached from an allowed press is one like this.
    */
   it('lets the form the armed button sits in actually submit', () => {
     start();
     const form = document.createElement('form');
     const send = document.createElement('button');
     send.type = 'submit';
-    send.textContent = 'Send application';
+    send.textContent = 'Continue';
     form.append(send);
     document.body.append(form);
 
@@ -401,5 +409,142 @@ describe('the shape of a step', () => {
     click(button('b'));
 
     expect(new Set(steps.map((s) => s.id)).size).toBe(2);
+  });
+});
+
+/* ---------------- The first pass cannot send ---------------- */
+
+/**
+ * The seam the two-pass setup is built on. The only moment the Send button can be
+ * pointed at is *before* it is pressed, and pressing it is what ends the page it
+ * lives on — so an armed press that reads like a send is held and marked instead.
+ */
+describe('a press that would send the application', () => {
+  it('is cancelled, and the control is marked as the Send button', () => {
+    const { steps, held } = start();
+    const b = button('send', 'Submit application');
+
+    handle!.arm();
+    const { seen, defaultPrevented } = click(b);
+
+    expect(seen).toBe(false);
+    expect(defaultPrevented).toBe(true);
+    expect(steps).toHaveLength(1);
+    expect(steps[0]).toMatchObject({ action: 'click', bind: 'submit', bindSource: 'auto' });
+    // Reported, because a button that does nothing and says nothing reads as broken.
+    expect(held).toEqual([b]);
+  });
+
+  /**
+   * A `<label>` press raises a second click on the control it names, and the
+   * `SAME_GESTURE_MS` tail lets that one through. Leaving the tail armed after a hold
+   * would send the application the hold exists to stop.
+   */
+  it('leaves no tail for a second click to ride through on', () => {
+    start();
+    const label = document.createElement('label');
+    label.textContent = 'Submit application';
+    const inner = document.createElement('span');
+    label.append(inner);
+    document.body.append(label);
+    const other = button('real-send', 'Send');
+
+    handle!.arm();
+    click(label);
+    expect(click(other).seen).toBe(false);
+  });
+
+  /** The arm is not spent by a hold, but the mode is: nothing stays live. */
+  it('does not leave the page armed behind it', () => {
+    start();
+    const b = button('send', 'Submit application');
+    handle!.arm();
+    click(b);
+    expect(handle!.mode()).toBe('idle');
+  });
+
+  /**
+   * `looksLikeSend` matches "apply" and "finish", and on most boards the button that
+   * *opens* the application form says "Apply now". Without a way past the guess, the
+   * first pass could not be run on those sites at all.
+   */
+  it('lets a forced arm through, once', () => {
+    const { steps } = start();
+    const b = button('open', 'Apply now');
+
+    handle!.arm();
+    expect(click(b).seen).toBe(false);
+
+    handle!.arm({ force: true });
+    expect(click(b).seen).toBe(true);
+    expect(steps[steps.length - 1]).toMatchObject({ action: 'click' });
+    expect(steps[steps.length - 1].bind).toBeUndefined();
+
+    // Once. The user said that one control was not the Send button, which is not a
+    // standing permission to submit.
+    handle!.arm();
+    expect(click(button('send', 'Submit application')).seen).toBe(false);
+  });
+
+  it('holds a second press without marking a second Send button', () => {
+    const { steps, held } = start();
+    const b = button('send', 'Submit application');
+    handle!.arm();
+    click(b);
+    handle!.arm();
+    click(b);
+    expect(steps.filter((step) => step.bind === 'submit')).toHaveLength(1);
+    expect(held).toHaveLength(2);
+  });
+
+  /**
+   * The other half of holding the press: a site that validates in JS and then calls
+   * `requestSubmit()` itself would otherwise send the application a moment after the
+   * click was refused, which is the hold doing nothing at all.
+   */
+  it('takes the form submit down with the press it held', () => {
+    start();
+    const form = document.createElement('form');
+    const send = document.createElement('button');
+    send.type = 'submit';
+    send.textContent = 'Submit application';
+    form.append(send);
+    document.body.append(form);
+
+    handle!.arm();
+    click(send);
+
+    const e = new Event('submit', { bubbles: true, cancelable: true });
+    form.dispatchEvent(e);
+    expect(e.defaultPrevented).toBe(true);
+  });
+
+  /**
+   * The apply link of every two-step posting on every board reads like a send, and
+   * holding it would mean the first pass could never cross a handoff — the exact
+   * flow the second half of a recording exists for. So a label is not enough: the
+   * control has to be one `submitDetect` could nominate in the first place.
+   */
+  it('lets an apply link through, however much it reads like a send', () => {
+    const { steps, held } = start();
+    const a = document.createElement('a');
+    a.href = 'https://ats.example.com/apply';
+    a.textContent = 'Apply on company website';
+    document.body.append(a);
+
+    handle!.arm();
+    expect(click(a).seen).toBe(true);
+    expect(held).toEqual([]);
+    expect(steps[0].bind).toBeUndefined();
+  });
+
+  /** The veto list is `submitDetect`'s, so "Save job" is an ordinary step as ever. */
+  it('is not fooled by a Save button', () => {
+    const { steps, held } = start();
+    const b = button('save', 'Save job');
+    handle!.arm();
+    expect(click(b).seen).toBe(true);
+    expect(held).toEqual([]);
+    expect(steps[0].bind).toBeUndefined();
   });
 });

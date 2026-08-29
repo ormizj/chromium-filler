@@ -524,6 +524,7 @@ async function initSettings(): Promise<void> {
   const autoRun = $<HTMLInputElement>('auto-run');
   const closeOnSubmit = $<HTMLInputElement>('close-on-submit');
   const closeOnSkip = $<HTMLInputElement>('close-on-skip');
+  const finishSetup = $<HTMLInputElement>('finish-setup');
   const closeDelay = $<HTMLInputElement>('close-delay');
   const keepInBrowser = $<HTMLInputElement>('keep-in-browser');
   const redirectTarget = $<HTMLSelectElement>('redirect-target');
@@ -533,6 +534,7 @@ async function initSettings(): Promise<void> {
   autoRun.checked = settings.autoRunOnLoad;
   closeOnSubmit.checked = settings.closeTabOnSubmit;
   closeOnSkip.checked = settings.closeTabOnSkip;
+  finishSetup.checked = settings.finishSetupOnApply;
   closeDelay.value = String(settings.closeTabDelayMs);
   keepInBrowser.checked = settings.keepInBrowser;
   redirectTarget.value = settings.redirectTarget;
@@ -545,6 +547,7 @@ async function initSettings(): Promise<void> {
       autoRunOnLoad: autoRun.checked,
       closeTabOnSubmit: closeOnSubmit.checked,
       closeTabOnSkip: closeOnSkip.checked,
+      finishSetupOnApply: finishSetup.checked,
       closeTabDelayMs: Math.max(0, Number(closeDelay.value) || 0),
       keepInBrowser: keepInBrowser.checked,
       redirectTarget: redirectTarget.value as RedirectTarget,
@@ -556,6 +559,7 @@ async function initSettings(): Promise<void> {
   autoRun.addEventListener('change', persist);
   closeOnSubmit.addEventListener('change', persist);
   closeOnSkip.addEventListener('change', persist);
+  finishSetup.addEventListener('change', persist);
   closeDelay.addEventListener('change', persist);
   keepInBrowser.addEventListener('change', persist);
   redirectTarget.addEventListener('change', persist);
@@ -564,6 +568,7 @@ async function initSettings(): Promise<void> {
   attachRowHelp(autoRun, SETTINGS_HELP.autoRunOnLoad);
   attachRowHelp(closeOnSubmit, SETTINGS_HELP.closeTabOnSubmit);
   attachRowHelp(closeOnSkip, SETTINGS_HELP.closeTabOnSkip);
+  attachRowHelp(finishSetup, SETTINGS_HELP.finishSetupOnApply);
   attachRowHelp(closeDelay, SETTINGS_HELP.closeTabDelayMs);
   attachRowHelp(keepInBrowser, SETTINGS_HELP.keepInBrowser);
   attachRowHelp(redirectTarget, SETTINGS_HELP.redirectTarget);

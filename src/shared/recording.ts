@@ -46,6 +46,24 @@ import { looksLikeSend } from './submitDetect';
  */
 export type RecordFlow = 'internal' | 'external';
 
+/**
+ * Which half of the setup a recording is.
+ *
+ * The page has two halves and so does teaching the extension about it. **Before
+ * sending** is everything that exists while the application is still on screen — the
+ * fields, the prep clicks, the description, the apply link, and the Send button
+ * *pointed at, rather than pressed*. It is rehearsable: it can be run on any posting,
+ * as often as you like, and nothing leaves the page. **After sending** is the site's
+ * confirmation, which exists only once an application has really gone in, often on a
+ * different URL, and only for as long as it happens to be on screen.
+ *
+ * They were one recording, and the seam is exactly where it hurt: the only moment the
+ * Send button can be pointed at is *before* it is pressed, and pressing it is what
+ * ends the page it lives on. So the first pass now stops at that button
+ * (`content/recorder.ts` holds the press) and the second is its own short errand.
+ */
+export type RecordPhase = 'beforeSend' | 'afterSend';
+
 /** Which of an external flow's two pages — and so which config — a step belongs to. */
 export type RecordLeg = 'posting' | 'destination';
 
@@ -93,12 +111,30 @@ export interface RecordedStep {
   bind?: BindKey;
   /** A user's choice outranks a guess, which is what lets a later bind correct one. */
   bindSource?: 'auto' | 'user';
+  /**
+   * The recorder held this press as a send, and the user said it was not one.
+   *
+   * Rule 3 refuses to replay an unbound click that reads like a send, because a
+   * passive recorder could not tell a deliberate submission from anything else and
+   * `prep` runs on every later visit. The recorder is not passive any more — every
+   * send-shaped press of a real control is held and marked — so an unbound one that
+   * reached the page did so because the user was asked and answered. Dropping *that*
+   * discards a step they paid two presses for, and on a site whose form opens behind
+   * an "Apply now" button it is the step that opens the form.
+   */
+  sendRefused?: true;
   /** `navigate` only: where the page went. */
   to?: string;
 }
 
 export interface Recording {
   flow: RecordFlow;
+  /**
+   * Optional, and read as `?? 'beforeSend'` everywhere. A recording is kept in
+   * `chrome.storage.session`, so one written by a build without this field can still
+   * be sitting in a tab when a new build wakes up beside it.
+   */
+  phase?: RecordPhase;
   startedAt: number;
   postingUrl: string;
   destinationUrl?: string;
@@ -128,6 +164,12 @@ export interface CompiledSetup {
   destination?: ConfigPatch;
   /** Everything the review has to say out loud before the user presses Save. */
   warnings: string[];
+  /**
+   * What went right, where that still leaves something to do. Kept apart from
+   * `warnings` because they are answered differently: a warning is something to look
+   * at *before* Save, and a note is what happens after it.
+   */
+  notes: string[];
 }
 
 /**
@@ -138,14 +180,31 @@ export interface CompiledSetup {
  */
 export const RECORDING_WARNINGS = {
   noSubmit: 'No Send button was marked, so Apply will stay greyed out on this site.',
-  noSuccess: 'No confirmation element was marked. Without one nothing can be recorded '
-    + 'as applied, and Apply refuses to send — mark it while a confirmation is on screen.',
+  noSuccess: 'No confirmation element was marked, so this pass recorded nothing. '
+    + 'The confirmation is only on screen for as long as the site shows it — mark it '
+    + 'while it is there.',
   adoptedSubmit: 'A button that looks like it sends the application was treated as the '
     + 'Send button rather than replayed as a step. Check it is the right one.',
   sendOnWrongLeg: 'The Send button or confirmation was marked on the posting, but this '
     + 'application is made on the employer’s site. Those marks were dropped.',
   fragileTargets: 'Some steps could only be identified by their position on the page, '
     + 'which breaks when the site changes. Re-pick them if you can.',
+} as const;
+
+/**
+ * The other half of what a compile has to say: what it achieved, and what that leaves.
+ *
+ * `afterSendPending` used to be the `noSuccess` *warning*, which was the old model
+ * speaking — one recording that had failed if it did not end in a real application.
+ * Under two passes it is the ordinary, expected ending of the first one: the site can
+ * fill now, and the confirmation is captured the next time an application really goes
+ * in. Wording a successful outcome as a failure is how the first pass read as broken
+ * on every site it worked on.
+ */
+export const RECORDING_NOTES = {
+  afterSendPending: 'This site can fill now. The confirmation can only be marked while '
+    + 'one is on screen, so it is captured the first time you apply — press Apply and '
+    + 'point at the message the site shows.',
 } as const;
 
 /* ---------------- Waits ---------------- */
@@ -232,6 +291,7 @@ function buildPatch(steps: RecordedStep[], opts: LegOptions): ConfigPatch {
   // --- Rule 3: nothing send-shaped is ever replayed. ---
   const sendShaped = new Set<number>();
   steps.forEach((s, i) => {
+    if (s.sendRefused) return;
     if (s.action === 'click' && !s.bind && looksLikeSend(s.label)) sendShaped.add(i);
   });
   let submitIndex = bindIndex.get('submit') ?? -1;
@@ -298,6 +358,34 @@ function buildPatch(steps: RecordedStep[], opts: LegOptions): ConfigPatch {
 
 export function compileRecording(rec: Recording): CompiledSetup {
   const steps = rec.steps;
+  const phase: RecordPhase = rec.phase ?? 'beforeSend';
+
+  /*
+   * The after-sending pass is binds and nothing else.
+   *
+   * It runs over a page the user is really applying on, so it holds nothing inert and
+   * records no gestures — the only thing that reaches it is what was pointed at. That
+   * makes every rule below about *replaying* clicks moot, and two of them actively
+   * wrong: there is no leg to split (the pass has one page by definition, whichever
+   * one the send happened on) and a `navigate` here would be the confirmation page
+   * loading, not a handoff, which rule 1 would read as one.
+   *
+   * `sends: true` because this pass is, definitionally, on the page that sent it —
+   * that is the only reason it exists. `isPosting: false` keeps the redirect block
+   * out: nothing about handing off can be learned after the application has gone.
+   */
+  if (phase === 'afterSend') {
+    const warnings: string[] = [];
+    const patch = buildPatch(steps, {
+      url: rec.postingUrl,
+      sends: true,
+      isPosting: false,
+      external: false,
+      warn: (w) => { if (!warnings.includes(w)) warnings.push(w); },
+    });
+    if (!patch.successSelector) warnings.push(RECORDING_WARNINGS.noSuccess);
+    return { flow: rec.flow, posting: patch, warnings, notes: [] };
+  }
 
   // Rule 1: what happened outranks what was chosen, in both directions. A
   // `navigate` counts as evidence alongside a destination-leg step, so a handoff
@@ -327,7 +415,19 @@ export function compileRecording(rec: Recording): CompiledSetup {
 
   const sendPatch = destination ?? posting;
   if (!sendPatch.submitSelector) warn(RECORDING_WARNINGS.noSubmit);
-  if (!sendPatch.successSelector) warn(RECORDING_WARNINGS.noSuccess);
+
+  /*
+   * No confirmation is the *expected* ending of a before-sending pass, not a failure:
+   * the element does not exist until an application has really gone in, and this pass
+   * deliberately stops short of sending one. So it is a note about what comes next,
+   * and it is only worth saying when there is something to come next from — a pass
+   * that found no Send button either is told about that instead, and pointing at a
+   * second pass it cannot reach yet would be the louder of two wrong things.
+   */
+  const notes: string[] = [];
+  if (sendPatch.submitSelector && !sendPatch.successSelector) {
+    notes.push(RECORDING_NOTES.afterSendPending);
+  }
 
   // Rule 8: a fragile handle is kept — it is the only one there is — but the review
   // must say so, because it is the thing most likely to stop working silently.
@@ -342,6 +442,7 @@ export function compileRecording(rec: Recording): CompiledSetup {
     posting,
     ...(destination ? { destination } : {}),
     warnings,
+    notes,
   };
 }
 

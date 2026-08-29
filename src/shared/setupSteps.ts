@@ -297,3 +297,25 @@ export function isUnconfigured(s: SetupSnapshot): boolean {
   const steps = s.prep.length + s.submitCv.length + s.beforeFollow.length;
   return !saved && steps === 0;
 }
+
+/**
+ * Which of setting-a-site-up's two halves this site is in.
+ *
+ * The page has two halves — everything that exists before the application is sent,
+ * and the confirmation that exists only after — so the setup does too, and this is
+ * the one place that says which one a site has reached. `unconfigured` opens the
+ * offer, `beforeSend` means the site can fill but cannot yet tell that an
+ * application landed, and `complete` means both marks are in.
+ *
+ * A *saved*-only test, for the same reason as `isUnconfigured` above it: the
+ * heuristics find a Send button on nearly every page, and a stage read off a guess
+ * would call a site finished on the strength of something stored nowhere. The
+ * confirmation is the one row that has no heuristic at all, which is exactly why it
+ * is the thing the second pass exists to capture.
+ */
+export type SetupStage = 'unconfigured' | 'beforeSend' | 'complete';
+
+export function setupStage(s: SetupSnapshot): SetupStage {
+  if (isUnconfigured(s)) return 'unconfigured';
+  return s.success.hasSave ? 'complete' : 'beforeSend';
+}

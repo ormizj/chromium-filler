@@ -244,6 +244,23 @@ export interface Settings {
   /** Milliseconds to wait before closing the tab, after a submit or a skip. */
   closeTabDelayMs: number;
   /**
+   * Let Apply send on a site whose confirmation element is not set yet, and ask the
+   * user to point at the site's reply afterwards.
+   *
+   * This is the second half of setting a site up, and it is deliberately the one
+   * place the "nothing is sent to a site whose outcome cannot be read back" rule
+   * bends. It has to bend somewhere: the confirmation element does not exist until an
+   * application has really gone in, so requiring it before sending is a deadlock that
+   * left `successSelector` unset on nearly every site. The outcome is still read
+   * back — by the person who pressed Apply, once, so that the extension can read it
+   * for itself every time after. Nothing is recorded as applied unless they point at
+   * something.
+   *
+   * Off restores the strict behaviour exactly: `applyState` reads `noConfirmation`,
+   * Apply is greyed, and the element is set by hand in the setup panel.
+   */
+  finishSetupOnApply: boolean;
+  /**
    * Where an external ("two-step") application opens when a redirect posting is
    * followed: a new tab replacing the posting tab (default), a new tab beside
    * it, or in place.

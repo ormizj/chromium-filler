@@ -132,6 +132,11 @@ async function readJobUrls(): Promise<JobUrlEntry[]> {
   ));
 }
 
+/** What the database says about one URL, or nothing if it has never heard of it. */
+async function statusOf(url: string): Promise<string | undefined> {
+  return (await readJobUrls()).find((e) => e.url === url)?.status;
+}
+
 async function readJobDetails(): Promise<JobDetailsMap> {
   return onExtensionPage((page) => page.evaluate(
     async () => ((await chrome.storage.local.get('jobDetails')).jobDetails ?? {}) as JobDetailsMap,
@@ -192,6 +197,35 @@ async function teachConfirmation(url: string, selector: string): Promise<void> {
     }
     await chrome.storage.local.set({ siteConfigs });
   }, { u: url, sel: selector }));
+}
+
+/**
+ * Rewind the config that matches `url` to where a finished *first* pass leaves it:
+ * it knows how to fill and which button sends, and knows nothing about the reply.
+ *
+ * The inverse of `teachConfirmation`, and written the same way — through storage
+ * rather than through the panel, because the recording of a first pass has its own
+ * spec and these are about the half that comes after. Otherwise two specs would
+ * depend on a third having run first, which is the ordering coupling that makes a
+ * suite fail differently on its own than in a full run.
+ */
+async function rewindToBeforeSend(url: string, submitSelector: string): Promise<void> {
+  // The fixture configs first: the recording specs run `clearConfigs()`, so by the
+  // time these run there may be nothing on this site to rewind. A helper that
+  // guarantees its own precondition beats a spec that passes alone and not in order.
+  const fixtures = JSON.parse(fs.readFileSync(CONFIGS, 'utf8'));
+  await onExtensionPage((page) => page.evaluate(async ({ u, sel, seed }) => {
+    await chrome.storage.local.set({ siteConfigs: seed });
+    const { siteConfigs } = await chrome.storage.local.get('siteConfigs');
+    const glob = (p: string) => new RegExp(`^${p.replace(/[.+?^${}()|[\]\\]/g, '\\$&')
+      .replace(/\*/g, '.*')}$`).test(u);
+    for (const c of siteConfigs) {
+      if (!c.urlPatterns.some(glob)) continue;
+      delete c.successSelector;
+      c.submitSelector = sel;
+    }
+    await chrome.storage.local.set({ siteConfigs });
+  }, { u: url, sel: submitSelector, seed: fixtures }));
 }
 
 /** Poll the job-URL database until `check` passes (the link is written async). */
@@ -482,9 +516,14 @@ test('DialogATS: re-opening an applied posting retires both decisions', async ()
 });
 
 /**
- * Nothing is sent to a site whose outcome cannot be read back. This is the
- * second reason Apply greys out, and it needs its own answer: the user has to
- * teach the site its confirmation, not go hunting for a button.
+ * Nothing is sent to a site whose outcome cannot be read back — the strict rule,
+ * which is now what "Finish setup when you apply" turned *off* means.
+ *
+ * With it on (the default, and the two specs near the recording ones) Apply sends and
+ * then asks the user to point at the site's reply, because the element it wants does
+ * not exist until an application has gone in. Off, this is what is left: the button
+ * greys and says which half is missing, and the user sets it by hand. Both behaviours
+ * need holding, and this is the one nobody would think to check again.
  */
 test('QuickBoard: Apply refuses to send when the site has no confirmation configured', async () => {
   const page = await context.newPage();
@@ -495,11 +534,13 @@ test('QuickBoard: Apply refuses to send when the site has no confirmation config
   const apply = page.locator('.cf-footer button.cf-btn', { hasText: 'Apply' });
   await expect(apply).not.toHaveAttribute('aria-disabled', 'true');
 
-  // Take it away and the button must go grey without the page reloading.
+  // Take it away, and turn off the setting that would otherwise offer to capture it.
   await onExtensionPage((opts) => opts.evaluate(async () => {
-    const { siteConfigs } = await chrome.storage.local.get('siteConfigs');
+    const { siteConfigs, settings } = await chrome.storage.local.get(['siteConfigs', 'settings']);
     for (const c of siteConfigs) if (c.id === 'quick-board') delete c.successSelector;
-    await chrome.storage.local.set({ siteConfigs });
+    await chrome.storage.local.set({
+      siteConfigs, settings: { ...settings, finishSetupOnApply: false },
+    });
   }));
   await page.reload();
   await expect(page.locator('.cf-card')).toBeVisible({ timeout: 20_000 });
@@ -511,9 +552,11 @@ test('QuickBoard: Apply refuses to send when the site has no confirmation config
   await expect(page.locator('.cf-flow .cf-help')).toContainText(/confirmation element/i);
 
   await onExtensionPage((opts) => opts.evaluate(async () => {
-    const { siteConfigs } = await chrome.storage.local.get('siteConfigs');
+    const { siteConfigs, settings } = await chrome.storage.local.get(['siteConfigs', 'settings']);
     for (const c of siteConfigs) if (c.id === 'quick-board') c.successSelector = '#quick-success';
-    await chrome.storage.local.set({ siteConfigs });
+    await chrome.storage.local.set({
+      siteConfigs, settings: { ...settings, finishSetupOnApply: true },
+    });
   }));
   await page.close();
 });
@@ -2374,6 +2417,24 @@ async function stepCount(page: Page): Promise<string> {
   return (await bar(page).locator('.cf-rec-count').textContent()) ?? '';
 }
 
+/** The escape hatch behind a held send: "that was not the Send button, press it". */
+async function forceSend(page: Page): Promise<void> {
+  await bar(page).getByRole('button', { name: 'Not the Send button — press it' }).click();
+}
+
+/**
+ * Press something the hold will refuse, refuse the refusal, and press it again.
+ *
+ * The shape of every "Apply now" that *opens* a form rather than sending one:
+ * `looksLikeSend` matches the label and the control is a real button, so the first
+ * pass holds it, and the user is the only one who can say it was not the Send button.
+ */
+async function pressThroughHold(page: Page, selector: string): Promise<void> {
+  await press(page, selector);
+  await forceSend(page);
+  await page.click(selector);
+}
+
 /** Throw the recording away: press Reset, then answer the warning behind it. */
 async function startOver(page: Page): Promise<void> {
   await bar(page).getByRole('button', { name: 'Reset', exact: true }).click();
@@ -2433,32 +2494,42 @@ test('Recording: one application on this site becomes the whole config', async (
     // Apply the way a person would, saying so each time.
     await type(page, '#email', 'ada@example.com');
     await type(page, '#first_name', 'Ada');
-    await press(page, '#submit');
-    await expect(page.locator('#quick-success')).toBeVisible();
 
-    // The confirmation is the one thing that cannot be what you just pressed — it
-    // appears *because* the application went in — so it is declared and pointed at.
-    await declare(page, 'Confirmation');
-    await pickOnPage(page, page.locator('#quick-success'));
+    /*
+     * The seam. Pressing Send is how anyone would finish an application, and the
+     * first pass will not let it: the only moment that button can be pointed at is
+     * before it is pressed, and pressing it is what ends the page it lives on. So the
+     * press is held and the control is marked instead.
+     *
+     * The assertion that matters is the *negative* one — no application went in.
+     */
+    await press(page, '#submit');
+    await expect(page.locator('#quick-success')).toBeHidden();
+    await expect(bar(page).locator('.cf-rec-notice')).toContainText('Send button');
 
     await bar(page).getByRole('button', { name: 'Done' }).click();
     await expect(setup.getByText('Check what was recorded')).toBeVisible({ timeout: 10_000 });
     await setup.getByRole('button', { name: 'Save setup' }).click();
 
     // Save reports, it does not become the wizard. This used to drop the user four
-    // steps into the manual surface with nothing saying the recording had worked —
-    // and this recording marked everything, so the wizard is a detour and Done is
-    // the coral one.
+    // steps into the manual surface with nothing saying the recording had worked.
     await expect(setup.getByText('Site setup saved')).toBeVisible({ timeout: 10_000 });
     await expect(setup.locator('.cf-rail')).toHaveCount(0);
     await expect(setup.getByRole('button', { name: 'Review configuration' })).toBeVisible();
+    // And it names the half that is left. This is the only screen that says the
+    // second pass exists, so a user who never reads it never finds it.
+    await expect(setup.getByText('Before sending — saved')).toBeVisible();
+    await expect(setup.getByRole('button', { name: 'Mark the confirmation' })).toBeVisible();
 
     const config = await configFor(urlFor('record-internal'));
-    // The two rows that gate Apply, which the wizard buried at the end of a queue of
-    // twenty-five and which almost nobody ever set.
+    // The Send button, which the wizard buried at the end of a queue of twenty-five
+    // and which almost nobody ever set — captured here by the press that would have
+    // used it.
     expect(config?.submitSelector).toBeTruthy();
-    expect(config?.successSelector).toBeTruthy();
     expect(config?.fieldOverrides).toMatchObject({ email: expect.any(String) });
+    // And *not* the confirmation: it does not exist until an application has really
+    // gone in, which is the whole reason there is a second pass.
+    expect(config?.successSelector).toBeFalsy();
 
     // The rule the whole compiler is built around: `prep` runs automatically on every
     // later visit, so the click that sent this application must not be in it.
@@ -2512,10 +2583,10 @@ test('Recording: a handoff is saved as two configs, one per site', async () => {
     await expect(mark(page, 'Email')).toBeVisible({ timeout: 10_000 });
 
     await type(page, '#ats-email', 'ada@example.com');
+    // Held here too. The employer's leg is where the application really goes, so it
+    // is the leg where letting the press through would send one during setup.
     await press(page, '#ats-submit');
-    await expect(page.locator('#ats-success')).toBeVisible({ timeout: 10_000 });
-    await declare(page, 'Confirmation');
-    await pickOnPage(page, page.locator('#ats-success'));
+    await expect(page.locator('#ats-success')).toBeHidden();
 
     await bar(page).getByRole('button', { name: 'Done' }).click();
     const atsSetup = page.locator('.cf-card[data-sheet="setup"]');
@@ -2529,8 +2600,145 @@ test('Recording: a handoff is saved as two configs, one per site', async () => {
 
     const employer = await configFor(ATS_URL);
     expect(employer?.submitSelector).toBeTruthy();
-    expect(employer?.successSelector).toBeTruthy();
     expect(employer?.fieldOverrides).toMatchObject({ email: expect.any(String) });
+    // The confirmation belongs to the second pass on this leg as much as on any
+    // other — rule 10 puts both marks on the leg that sends, and only one of them
+    // can be made before it does.
+    expect(employer?.successSelector).toBeFalsy();
+  } finally {
+    await page.close();
+  }
+});
+
+/**
+ * The hold has to be refusable, and this is why.
+ *
+ * `looksLikeSend` matches "apply", and on most boards the button that *opens* the
+ * application form says exactly that — ModalLever's does. Held with no way past it,
+ * the first pass could not be run on those sites at all: the form never opens, so
+ * there is nothing to record.
+ */
+test('Recording: a held press that was not the Send button can be pressed anyway', async () => {
+  await clearConfigs();
+  const page = await context.newPage();
+  try {
+    await page.setViewportSize({ width: 1280, height: 900 });
+    await page.goto(urlFor('record-apply-lever'));
+    await openSetupPanel(page);
+
+    const setup = page.locator('.cf-card[data-sheet="setup"]');
+    await expect(setup).toBeVisible({ timeout: 20_000 });
+    await setup.getByRole('button', { name: 'Apply on this site' }).click();
+    await expect(bar(page)).toBeVisible({ timeout: 10_000 });
+
+    // "Apply for this role" opens the modal. It reads like a send, so it is held.
+    await press(page, '#apply-btn');
+    await expect(page.locator('#modal-form')).toBeHidden();
+
+    // One press to say so, and the same button now works. The mark the hold made is
+    // dropped with it — keeping it would put the control that opens the form into
+    // `submitSelector`, which is the wrong button in the one slot that must be right.
+    await forceSend(page);
+    await page.click('#apply-btn');
+    await expect(page.locator('#modal-form')).toBeVisible({ timeout: 10_000 });
+
+    // Once. The user said that one control was not the Send button, which is not a
+    // standing permission to submit — the real one is held like any other.
+    await press(page, '#lever-submit');
+    await expect(page.locator('#lever-success')).toBeHidden();
+
+    await bar(page).getByRole('button', { name: 'Done' }).click();
+    await expect(setup.getByText('Check what was recorded')).toBeVisible({ timeout: 10_000 });
+    await setup.getByRole('button', { name: 'Save setup' }).click();
+
+    const config = await configFor(urlFor('record-apply-lever'));
+    expect(config?.submitSelector).toContain('lever-submit');
+    // The button that opened the form is a step to replay, not the button that sends.
+    expect(JSON.stringify(config?.prep ?? [])).toContain('apply-btn');
+  } finally {
+    await page.close();
+  }
+});
+
+/**
+ * The second pass, from the end the user actually reaches it: Apply.
+ *
+ * This is the half that was unreachable. Apply refused to send without a confirmation
+ * element and the element does not exist until an application has been sent, so
+ * `successSelector` went unset on nearly every site — and a greyed Apply with no way
+ * forward is what that looked like. Here Apply sends, because it was pressed, and
+ * then asks where the site's answer is.
+ */
+test('Apply finishes the setup on a site that has never been applied to', async () => {
+  const page = await context.newPage();
+  try {
+    await page.setViewportSize({ width: 1280, height: 900 });
+    // The first pass has already run: this posting's config knows how to fill and
+    // which button sends, and knows nothing about the reply.
+    await rewindToBeforeSend(urlFor('record-internal'), '#submit');
+    await page.goto(urlFor('record-internal'));
+    expect((await configFor(urlFor('record-internal')))?.successSelector).toBeFalsy();
+
+    const modal = page.locator('.cf-card[data-sheet="review"]');
+    await expect(modal).toBeVisible({ timeout: 20_000 });
+
+    // Live, and saying what else the press is about to start. It was greyed here.
+    const apply = modal.getByRole('button', { name: 'Apply · finish setup' });
+    await expect(apply).toBeVisible();
+    await expect(apply).not.toHaveAttribute('aria-disabled', 'true');
+    await expect(modal.locator('.cf-flow.accent')).toContainText('point at');
+
+    await apply.click();
+
+    // The application really went in — that is the price, and the point.
+    await expect(page.locator('#quick-success')).toBeVisible({ timeout: 10_000 });
+    await expect(bar(page)).toBeVisible({ timeout: 10_000 });
+
+    await bar(page).getByRole('button', { name: 'Mark the confirmation' }).click();
+    await pickOnPage(page, page.locator('#quick-success'));
+
+    // Written, and read back by the machinery that has always read it: the element is
+    // visible, so the ordinary success observer fires and files the posting applied.
+    await expect.poll(async () => (await configFor(urlFor('record-internal')))?.successSelector,
+      { timeout: 15_000 }).toBeTruthy();
+    await expect.poll(async () => statusOf(urlFor('record-internal')), { timeout: 15_000 })
+      .toBe('applied');
+    await expect(bar(page)).toContainText('Saved');
+  } finally {
+    await page.close();
+  }
+});
+
+/**
+ * Nothing is recorded as applied until the user points at something.
+ *
+ * The whole justification for letting Apply send here is that the outcome is still
+ * read back — by the person looking at it. If they cannot find a confirmation, or the
+ * form came back with an error instead, the posting must not be filed as applied on
+ * the strength of a button having been pressed. That is the failure the strict rule
+ * existed to prevent, and it still is.
+ */
+test('Apply · finish setup files nothing when no confirmation is marked', async () => {
+  const page = await context.newPage();
+  try {
+    await page.setViewportSize({ width: 1280, height: 900 });
+    // A different posting on the same site — the spec above applied to the other one,
+    // and an applied posting retires Apply. `&n=…` is ignored by the fixture and
+    // exists to make one posting distinct from another.
+    const url = `${urlFor('record-internal')}&n=nomark`;
+    await rewindToBeforeSend(url, '#submit');
+    await page.goto(url);
+
+    const modal = page.locator('.cf-card[data-sheet="review"]');
+    await expect(modal).toBeVisible({ timeout: 20_000 });
+    await modal.getByRole('button', { name: 'Apply · finish setup' }).click();
+    await expect(bar(page)).toBeVisible({ timeout: 10_000 });
+
+    await bar(page).getByRole('button', { name: 'Not yet' }).click();
+    await expect(bar(page)).toHaveCount(0);
+
+    expect((await configFor(url))?.successSelector).toBeFalsy();
+    expect(await statusOf(url)).not.toBe('applied');
   } finally {
     await page.close();
   }
@@ -2654,9 +2862,11 @@ test('Recording: Reset throws the steps away and puts the page back', async () =
     expect(chip.y + chip.height).toBeLessThanOrEqual(field.y + 1);
     expect(Math.abs((chip.x + chip.width) - (field.x + field.width))).toBeLessThan(4);
 
+    // What the discarded steps did to the page, which is the half Undo cannot take
+    // back. Not a press of Send: the first pass holds that, so the change a recording
+    // leaves behind is what was typed and where the form got to.
     await type(page, '#email', 'ada@example.com');
-    await press(page, '#submit');
-    await expect(page.locator('#quick-success')).toBeVisible();
+    await type(page, '#first_name', 'Ada');
     expect(await stepCount(page)).not.toContain('0 steps');
 
     await startOver(page);
@@ -2666,8 +2876,8 @@ test('Recording: Reset throws the steps away and puts the page back', async () =
     await expect(bar(page).locator('.cf-rec-count')).toContainText('0 steps');
     expect(page.url()).toBe(urlFor('record-internal'));
     // The page really was reloaded, so what the discarded steps did to it is gone too.
-    await expect(page.locator('#quick-success')).toBeHidden();
     await expect(page.locator('#email')).toHaveValue('');
+    await expect(page.locator('#first_name')).toHaveValue('');
   } finally {
     await page.close();
   }
@@ -2800,10 +3010,11 @@ test('Recording: fields that appear mid-recording are named, and marks already m
     // which is the thing being tested.
     await page.waitForTimeout(4_000);
 
-    // The click that reveals the form. The modal is injected in the click handler,
-    // so the sweep has to wait for the page to settle rather than read it as the
-    // step is recorded.
-    await press(page, '#apply-btn');
+    // The click that reveals the form. It reads like a send — "Apply for this role" —
+    // so it is held first and has to be refused, which is the whole reason the hold
+    // is escapable. The modal is injected in the click handler, so the sweep has to
+    // wait for the page to settle rather than read it as the step is recorded.
+    await pressThroughHold(page, '#apply-btn');
 
     await expect(mark(page, 'Full name')).toBeVisible({ timeout: 10_000 });
     await expectMarkOn(page, 'Full name', 'input[aria-label="Full name"]');

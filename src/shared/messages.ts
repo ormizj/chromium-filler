@@ -5,7 +5,7 @@
 
 import type { FieldKey, FieldMatch } from './types';
 import type { QueueProgress } from './queue';
-import type { RecordFlow, Recording, RecordedStep } from './recording';
+import type { RecordFlow, RecordPhase, Recording, RecordedStep } from './recording';
 
 export const MSG = {
   /** popup -> content: run the full detect/prep/fill flow now. */
@@ -174,7 +174,7 @@ export type Message =
   | { type: typeof MSG.SESSION_STATE }
   | { type: typeof MSG.SESSION_SKIP; url: string }
   | { type: typeof MSG.SHOW_REPORT }
-  | { type: typeof MSG.RECORD_START; flow: RecordFlow; postingUrl: string }
+  | { type: typeof MSG.RECORD_START; flow: RecordFlow; postingUrl: string; phase: RecordPhase }
   | { type: typeof MSG.RECORD_PUSH; step: RecordedStep }
   | { type: typeof MSG.RECORD_UNDO }
   | { type: typeof MSG.RECORD_GET }

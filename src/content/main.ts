@@ -22,19 +22,19 @@ import {
   saveExtractSelector, clearExtractSelector, ensureConfigForUrl, mutateSiteConfig,
   saveRedirectSelector, clearRedirectSelector, type RedirectSelectorKey,
   saveSubmitSelector, clearSubmitSelector, saveSuccessSelector, clearSuccessSelector,
-  mutateJobDetails, applyConfigPatch,
+  mutateJobDetails, applyConfigPatch, getSiteConfigs,
 } from '../shared/storage';
 import { captureDetails, type JobDetails } from '../shared/jobDetails';
 import {
   compileRecording,
   type BindKey, type CompiledSetup, type RecordFlow, type RecordLeg,
-  type Recording, type RecordedStep,
+  type Recording, type RecordPhase, type RecordedStep,
 } from '../shared/recording';
 import { BUILD_ID } from '../shared/buildId';
 import { getDoc, cvFileToFile } from '../shared/cvStore';
 import { FIELD_LABELS, orderFields } from '../shared/fieldKeys';
 import { matchStatus, orderReport } from '../shared/fieldStatus';
-import { BIND_LABELS } from '../shared/labels';
+import { BIND_LABELS, heldSendNotice } from '../shared/labels';
 import {
   MSG, type FollowRedirectResponse, type Message, type RecordingResponse,
   type SessionState, type StatusResponse,
@@ -49,7 +49,7 @@ import { detectForConfig, DETECTABLE_FIELDS } from './fieldDetect';
 import { detectRedirect, type RedirectDetection } from './redirectDetect';
 import { fillTextField, fillFileInput, highlight, clearHighlights } from './fill';
 import { startPicker } from './picker';
-import { startRecording, type RecorderHandle } from './recorder';
+import { labelFor, startRecording, type RecorderHandle } from './recorder';
 import { watchPageChange } from './pageChange';
 import { RecorderBar, bindLabel } from './recorderBar';
 import { FillerModal, type ApplyState } from './modal/modal';
@@ -158,6 +158,11 @@ class Controller {
   private recorderBar?: RecorderBar;
   /** Which page of the recording this one is — the bar orders its menu by it. */
   private recordingLeg: RecordLeg = 'posting';
+  /**
+   * The one thing the bar has to say about the press that just happened, when it was
+   * not simply recorded. Cleared by the next step, because it is about *that* press.
+   */
+  private recorderNotice?: string;
   /** The bounded page watch that re-sweeps after a gesture — see `scheduleFieldSweep`. */
   private sweepWatch?: () => void;
   private sweepWindow?: ReturnType<typeof setTimeout>;
@@ -319,7 +324,10 @@ class Controller {
     // underneath them would rewrite the answers they are typing, click prep steps
     // they are in the middle of, and record a sequence that mixes their gestures
     // with ours — so the whole flow stands down until the recording stops.
-    if (this.recorder) return;
+    // The after-sending pass has no recorder handle — the page is live and nothing is
+    // being watched — but it is still a page the user is applying on, and re-filling
+    // the confirmation they are being asked to point at is the same failure.
+    if (this.recorder || this.recordingPhase() === 'afterSend') return;
     if (!this.config) return;
     const config = this.config;
 
@@ -755,20 +763,139 @@ class Controller {
 
   /* ---------------- Recording a site by applying to one job ---------------- */
 
+  /** Which half of the setup is running here, if either. */
+  private recordingPhase(): RecordPhase | undefined {
+    return this.recording ? this.recording.phase ?? 'beforeSend' : undefined;
+  }
+
   /**
-   * Begin. The panel folds to its pill rather than closing, because the user is
-   * about to need the whole page — and because a destroyed panel is a lost place in
-   * the wizard they will come straight back to.
+   * Begin the first pass. The panel folds to its pill rather than closing, because
+   * the user is about to need the whole page — and because a destroyed panel is a
+   * lost place in the wizard they will come straight back to.
    */
   private async startRecording(flow: RecordFlow): Promise<void> {
     if (this.recorder) return;
     this.config = await ensureConfigForUrl(location.href);
     await chrome.runtime.sendMessage({
-      type: MSG.RECORD_START, flow, postingUrl: location.href,
+      type: MSG.RECORD_START, flow, postingUrl: location.href, phase: 'beforeSend',
     } satisfies Message);
-    this.recording = { flow, startedAt: Date.now(), postingUrl: location.href, steps: [] };
+    this.recording = {
+      flow, phase: 'beforeSend', startedAt: Date.now(), postingUrl: location.href, steps: [],
+    };
     this.setupPanel?.minimize();
     this.attachRecorder('posting');
+  }
+
+  /**
+   * Begin the second pass: an application has just gone in, and the one thing this
+   * site still needs is on screen for as long as the site chooses to show it.
+   *
+   * It is a `Recording` rather than a bare picker for one reason, and it is the whole
+   * reason: **the confirmation is routinely on a different URL.** Greenhouse lands on
+   * `…/jobs/<id>/confirmation`, and the content script there is a fresh one that has
+   * never heard of this posting. The background's per-tab store is the only thing here
+   * that survives that, and `resumeRecording` is what picks this back up on the far
+   * side.
+   *
+   * No recorder handle is attached. The user is really applying, so the page stays
+   * live and nothing they do is watched — the only thing this pass can produce is the
+   * one thing they point at.
+   */
+  private async startConfirmationPass(): Promise<void> {
+    if (this.recording) return;
+    this.config = await ensureConfigForUrl(location.href);
+    await chrome.runtime.sendMessage({
+      type: MSG.RECORD_START,
+      flow: 'internal',
+      postingUrl: location.href,
+      phase: 'afterSend',
+    } satisfies Message);
+    this.recording = {
+      flow: 'internal',
+      phase: 'afterSend',
+      startedAt: Date.now(),
+      postingUrl: location.href,
+      steps: [],
+    };
+    this.setupPanel?.minimize();
+    this.attachAfterSendBar();
+  }
+
+  /**
+   * The after-sending bar: one question, over a page nothing is holding still.
+   *
+   * Separate from `attachRecorder` rather than a branch inside it, because the two
+   * share only the bar. This pass installs no suppression, no click reader and no
+   * field sweep — the marks the first pass draws are about a form, and this page is
+   * whatever the site shows after one has been sent.
+   */
+  private attachAfterSendBar(): void {
+    if (this.recorderBar) return;
+    this.recordingLeg = 'posting';
+    this.recorderBar = new RecorderBar({
+      onInteract: () => {},
+      onForceSend: () => {},
+      onDeclare: () => {},
+      onMarkConfirmation: () => this.pickForBind('success', 'posting'),
+      onReset: () => {},
+      onUndo: () => {},
+      // "Not yet" — stand the pass down, keeping everything the first pass taught the
+      // site. Nothing is written and nothing is recorded as applied.
+      onDone: () => void this.stopConfirmationPass(),
+    });
+    this.paintBar();
+  }
+
+  /**
+   * The mark was made: write it, and let the ordinary machinery notice.
+   *
+   * The last step is deliberately the smallest one. Rather than a second path for
+   * "this posting was applied for", the patched config is put back on the controller
+   * and `setupSubmitDetection` is armed with it — the element the user just pointed at
+   * is on screen and visible, so the existing observer fires `SUBMITTED` immediately
+   * and the posting is recorded through the one path that has always done it.
+   *
+   * The recording is stopped *before* that, which is what lets `handleSubmitted` close
+   * the tab as usual: its "never while a recording is running" guard exists for the
+   * first pass, where tidying the page away would take the confirmation with it.
+   *
+   * `compiled.posting.url` and not `location.href`: the confirmation is routinely on a
+   * page of its own, and the config this belongs to is the one the application was
+   * sent from.
+   */
+  private async finishConfirmationPass(): Promise<void> {
+    const answer = await this.ask<RecordingResponse>({ type: MSG.RECORD_STOP });
+    if (answer?.recording) this.recording = answer.recording;
+    const recording = this.recording;
+    if (!recording) return;
+
+    const compiled = compileRecording(recording);
+    if (!compiled.posting.successSelector) return;
+
+    const config = await ensureConfigForUrl(compiled.posting.url);
+    await applyConfigPatch(config.id, compiled.posting);
+    // Re-read rather than patching the local copy: `applyConfigPatch` is a
+    // read-modify-write of the stored object, and the snapshot on this controller is
+    // as old as the page.
+    this.config = (await getSiteConfigs()).find((c) => c.id === config.id) ?? this.config;
+    this.setupSubmitDetection();
+
+    // The bar stays up to report, because nothing else here can. On a page whose
+    // confirmation is inline the modal's own receipt appears behind it, and on one
+    // that navigated there is no modal at all.
+    this.recorderNotice = 'Saved. This site can read its own confirmations now — '
+      + 'Apply works here from now on.';
+    this.paintBar();
+  }
+
+  /** Take the after-sending bar down, keeping whatever the first pass taught the site. */
+  private async stopConfirmationPass(): Promise<void> {
+    this.cancelPicker?.();
+    await chrome.runtime.sendMessage({ type: MSG.RECORD_STOP } satisfies Message).catch(() => {});
+    this.recorderBar?.destroy();
+    this.recorderBar = undefined;
+    this.recorderNotice = undefined;
+    this.clearRecording();
   }
 
   /**
@@ -784,6 +911,19 @@ class Controller {
     const recording = answer?.recording;
     if (!recording) return;
     this.recording = recording;
+
+    /*
+     * The after-sending pass has one page by definition — whichever one the
+     * application went from — so none of the two-leg reasoning below applies to it.
+     * A second URL here is the confirmation page loading, and synthesizing a
+     * `navigate` step for it would have `compileRecording` read a handoff that never
+     * happened, splitting one mark across two configs and writing it to neither.
+     */
+    if ((recording.phase ?? 'beforeSend') === 'afterSend') {
+      this.attachAfterSendBar();
+      return;
+    }
+
     // Which config this page's steps belong to. The posting is whatever the
     // recording started on; anything on another host is the employer's side.
     const leg: RecordLeg = isExternalUrl(recording.postingUrl, location.href)
@@ -826,10 +966,20 @@ class Controller {
       // live, so every mode change has to reach it — including the ones it did not
       // ask for, like an armed click spending itself.
       onMode: () => this.paintBar(),
+      // A send was held. The step it made arrives through `onStep` and clears the
+      // notice, so this is set *after* it — the order is what makes the explanation
+      // survive its own step.
+      onHeldSend: (el) => {
+        this.recorderNotice = heldSendNotice(labelFor(el));
+        this.paintBar();
+      },
+      sendMarked: () => (this.recording?.steps ?? []).some((step) => step.bind === 'submit'),
     });
     this.recorderBar = new RecorderBar({
       onInteract: () => this.toggleArmed(),
+      onForceSend: () => void this.forceSend(),
       onDeclare: (bind) => this.pickForBind(bind, leg),
+      onMarkConfirmation: () => this.pickForBind('success', leg),
       onReset: () => void this.resetRecording(),
       onUndo: () => void this.undoStep(),
       onDone: () => void this.stopRecording(),
@@ -935,6 +1085,8 @@ class Controller {
 
   private async onRecordedStep(step: RecordedStep): Promise<void> {
     this.recording?.steps.push(step);
+    // A new step answers whatever the last one left hanging.
+    this.recorderNotice = undefined;
     this.paintBar();
     // What the page looks like may be about to change — see `scheduleFieldSweep`.
     this.scheduleFieldSweep();
@@ -951,6 +1103,24 @@ class Controller {
     if (!recorder) return;
     if (recorder.mode() === 'idle') recorder.arm();
     else recorder.disarm();
+  }
+
+  /**
+   * "That was not the Send button."
+   *
+   * Two halves, and both are needed. The mark the hold made has to go — it is a guess
+   * the user has just refused, and leaving it would put the wrong control in
+   * `submitSelector` — and the next gesture has to be allowed to be send-shaped, or
+   * the same press is held again and the refusal does nothing.
+   *
+   * `MSG.RECORD_UNDO` rather than a local splice: the background holds the truth, and
+   * the held step is always the last one, having just been made.
+   */
+  private async forceSend(): Promise<void> {
+    this.recorderNotice = undefined;
+    await this.undoStep();
+    this.recorder?.arm({ force: true });
+    this.paintBar();
   }
 
   private async undoStep(): Promise<void> {
@@ -985,7 +1155,10 @@ class Controller {
     // Awaited: the navigation below tears this context down, and a message still in
     // flight when it does would leave the old steps in the store.
     await chrome.runtime.sendMessage({
-      type: MSG.RECORD_START, flow: recording.flow, postingUrl: recording.postingUrl,
+      type: MSG.RECORD_START,
+      flow: recording.flow,
+      postingUrl: recording.postingUrl,
+      phase: recording.phase ?? 'beforeSend',
     } satisfies Message);
 
     // Nothing is torn down by hand. Unload does it, and `run()` stands down on
@@ -1029,6 +1202,9 @@ class Controller {
       // then the Send button and, unlabelled, they are two identical green outlines
       // with nothing saying which is which — on exactly the two marks that gate Apply.
       highlight(element as HTMLElement, 'high', bindLabel(bind));
+      // The after-sending pass exists for exactly one mark, so making it is the end
+      // of the pass — there is nothing further to press Done about.
+      if ((recording.phase ?? 'beforeSend') === 'afterSend') void this.finishConfirmationPass();
       // No sweep is scheduled here: the step above went through `onRecordedStep`,
       // which arms one, and `markBoundSteps` redraws this mark from that very step.
     }, bindLabel(bind), () => this.paintBar());
@@ -1038,12 +1214,14 @@ class Controller {
     const recording = this.recording;
     if (!this.recorderBar || !recording) return;
     this.recorderBar.render({
+      phase: recording.phase ?? 'beforeSend',
       flow: recording.flow,
       leg: this.recordingLeg,
       stepCount: recording.steps.length,
       mode: this.recorder?.mode() ?? 'idle',
       last: recording.steps[recording.steps.length - 1],
       bound: recording.steps.map((s) => s.bind).filter((b): b is BindKey => !!b),
+      notice: this.recorderNotice,
     });
   }
 
@@ -1176,6 +1354,9 @@ class Controller {
         onClearSuccess: () => void this.clearSuccess(),
         onRename: (name, pattern) => this.renameConfig(name, pattern),
         onStartRecording: (flow) => void this.startRecording(flow),
+        // The panel's way into the second pass: no Send is pressed, because the user
+        // is going to apply by hand. The bar is identical — it has only ever waited.
+        onMarkConfirmation: () => void this.startConfirmationPass(),
         onRebindStep: (id, bind) => void this.rebindStep(id, bind),
         onRepickStep: (id) => this.repickStep(id),
         onRemoveStep: (id) => void this.removeStep(id),
@@ -1619,6 +1800,21 @@ class Controller {
       console.warn(LOG, 'apply: this posting is already recorded as applied');
       return;
     }
+
+    /*
+     * The second half of setting this site up, if it has not had one.
+     *
+     * Started *before* the press, not after: the Send button routinely navigates, and
+     * a `RECORD_START` still in flight when this context is torn down leaves the far
+     * side with nothing to resume — which is exactly the case this pass exists for.
+     * The modal folds to its pill for the same reason the panel does when a recording
+     * begins: the user is about to be asked to point at something on the page, and
+     * the card is sitting on it.
+     */
+    if (this.applyState(false) === 'finishSetup') {
+      this.modal?.minimize();
+      await this.startConfirmationPass();
+    }
     if (this.config?.submitCv?.length) {
       try {
         await runPrepSteps(this.config.submitCv);
@@ -1651,7 +1847,23 @@ class Controller {
    */
   private applyState(isRedirect: boolean): ApplyState {
     if (isRedirect) return 'noButton';
-    if (!this.config?.successSelector) return 'noConfirmation';
+    if (!this.config?.successSelector) {
+      /*
+       * The deadlock, and the one place it is allowed to give.
+       *
+       * Requiring the confirmation element before sending is unanswerable on a site
+       * that has never been applied to: the element does not exist until an
+       * application has gone in. So Apply sends this one — the user pressed it — and
+       * then asks them to point at the reply. The outcome is still read back, once,
+       * by the person looking at it, and by the extension every time after.
+       *
+       * Only with a real button to press. Offering to finish a setup that cannot
+       * start is worse than the blocked state it replaces, and `noButton` is the more
+       * useful complaint. With the setting off, nothing here changes at all.
+       */
+      if (this.settings.finishSetupOnApply && this.submitControl()) return 'finishSetup';
+      return 'noConfirmation';
+    }
     return this.submitControl() ? 'ready' : 'noButton';
   }
 

@@ -307,6 +307,18 @@ export const SETTINGS_HELP: Record<keyof Settings, HelpEntry> = {
     when: 'Turn it off to keep skipped postings open for a second look. The queue moves '
       + 'on either way — a skip frees its slot whether or not the tab goes.',
   },
+  finishSetupOnApply: {
+    title: 'Finish setup when you apply',
+    short: 'Capture a site\u2019s confirmation on the first real application',
+    body: 'On a site that can fill but has no confirmation element yet, Apply sends the '
+      + 'application and then asks you to point at the message the site shows back. That '
+      + 'message is saved, and from then on the extension reads it for itself. It is the '
+      + 'only moment the element can be captured, because it does not exist until an '
+      + 'application has gone in.',
+    when: 'Turn it off to keep Apply blocked on those sites instead, and set the '
+      + 'confirmation by hand under Site setup \u2192 Sending. Nothing is ever sent '
+      + 'without you pressing Apply either way.',
+  },
   closeTabDelayMs: {
     title: 'Close delay',
     short: 'Milliseconds on screen before either auto-close',
@@ -636,27 +648,31 @@ export type ConceptKey =
   | 'dots' | 'autoVsSaved' | 'todoChip' | 'picker' | 'neverSubmits'
   | 'twoStep' | 'appLink' | 'sessions' | 'urlPattern' | 'successSelector' | 'howItWorks'
   | 'apply' | 'applyUnverified' | 'alreadyApplied' | 'exportJobs' | 'syncClient' | 'coverLetter'
-  | 'recording' | 'marking' | 'selectorStrength';
+  | 'recording' | 'marking' | 'selectorStrength' | 'finishSetup';
 
 export const CONCEPT_HELP: Record<ConceptKey, HelpEntry> = {
   recording: {
-    title: 'Setting a site up by applying once',
+    title: 'Setting a site up in two passes',
     short: 'Apply to one job as normal; the extension learns the site from what you do.',
-    body: 'You already know how to apply to this job, so do it — and say what you are '
-      + 'doing as you go. While a recording runs the page is held still: clicking does '
-      + 'nothing until you press one of two buttons. "Interact" hands the page back for '
-      + 'one action — open a section, go to the next step, type into a box — and keeps '
-      + 'it as a step to repeat next time. "Declare" names something on the page '
-      + 'instead. Nothing else is watched, so reading the posting leaves nothing behind. '
-      + 'It records where things are, never what you typed, and saves nothing until you '
-      + 'have read the summary at the end and pressed Save. Nothing is submitted on your '
-      + 'behalf: the application that goes in during a recording is the one you send '
-      + 'yourself. If it goes wrong, "Undo" takes back the last step and "Reset" throws '
-      + 'the whole recording away and starts it again from the posting, with the page '
-      + 'reloaded back to how it was found.',
+    body: 'Setting a site up follows the application, and an application has two halves. '
+      + 'The first pass is everything up to the Send button: you apply as you normally '
+      + 'would and say what you are doing as you go, and it ends by marking the button '
+      + 'that sends it — pointed at, not pressed. Nothing is submitted during it. The '
+      + 'second pass is the site\u2019s confirmation, the message it shows once an '
+      + 'application has really gone in. That one cannot be captured in advance, because '
+      + 'it does not exist until then, so it is captured the first time you press Apply. '
+      + 'While the first pass runs the page is held still: clicking does nothing until '
+      + 'you press one of two buttons. "Interact" hands the page back for one action — '
+      + 'open a section, go to the next step, type into a box — and keeps it as a step '
+      + 'to repeat next time. "Declare" names something on the page instead. Nothing '
+      + 'else is watched, so reading the posting leaves nothing behind. It records where '
+      + 'things are, never what you typed, and saves nothing until you have read the '
+      + 'summary at the end and pressed Save. If it goes wrong, "Undo" takes back the '
+      + 'last step and "Reset" throws the whole pass away and starts it again from the '
+      + 'posting, with the page reloaded back to how it was found.',
     when: 'Any site you have not set up. The two buttons ask where the application '
-      + 'actually happens — on this site, or on the employer\'s own after a handoff — '
-      + 'and getting it wrong costs nothing, because what really happened wins.',
+      + 'actually happens — on this site, or on the employer\u2019s own after a handoff '
+      + '— and getting it wrong costs nothing, because what really happened wins.',
   },
   marking: {
     title: 'Declaring things while you record',
@@ -669,10 +685,11 @@ export const CONCEPT_HELP: Record<ConceptKey, HelpEntry> = {
       + 'you can widen the selection to the box around a thing rather than the word '
       + 'inside it. Declaring works on anything on the page, not only on what you have '
       + 'just done, which is the only way to catch something that appears by itself.',
-    when: 'Two declarations are worth going out of your way for, because nothing else '
-      + 'can supply them: the Send button, and the confirmation the site shows once the '
-      + 'application is really in. Declare the confirmation while it is on screen — it '
-      + 'is gone as soon as you leave the page, and without it Apply stays greyed out.',
+    when: 'The Send button is the one declaration worth going out of your way for, '
+      + 'because it is what Apply presses and nothing else can supply it — and if you '
+      + 'press it instead, it is held and marked for you rather than sent. Its other '
+      + 'half, the confirmation, is not declared here at all: it belongs to the second '
+      + 'pass, which happens the first time you really apply.',
   },
   selectorStrength: {
     title: 'Reliable, usable, fragile',
@@ -801,17 +818,43 @@ export const CONCEPT_HELP: Record<ConceptKey, HelpEntry> = {
    * next action is completely different — teach it the confirmation, not the
    * button.
    */
+  /**
+   * The other half of setting a site up, explained at the one moment it can happen.
+   *
+   * It exists because the strict rule was a deadlock: Apply refused to send without a
+   * confirmation element, and the element does not exist until an application has
+   * been sent. Something had to give, and this is the smallest thing that could: the
+   * user presses Apply, so the send is asked for; the outcome is still read back,
+   * once, by the person looking at it — and from then on by the extension.
+   */
+  finishSetup: {
+    title: 'Finishing the setup as you apply',
+    short: 'Send this one yourself and point at the site\u2019s reply — that is the last thing it needs.',
+    body: 'This site is set up to fill and its Send button is known. The one thing left '
+      + 'is the message it shows once an application has really gone in, and that cannot '
+      + 'be pointed at in advance because it does not exist yet. So Apply sends this '
+      + 'application — you asked it to — and then puts a bar up asking you to point at '
+      + 'the site\u2019s reply: a "thank you", an "application received", whatever it shows. '
+      + 'That is saved as the confirmation element, and from then on the extension reads '
+      + 'it for itself: this posting is marked applied, and every later one on this site '
+      + 'is too, without asking again. Nothing is recorded as applied until you point at '
+      + 'something, so if the form came back with an error instead, press "Not yet" and '
+      + 'nothing is lost.',
+    when: 'The first time you apply on a site whose first setup pass is done. Turn '
+      + '"Finish setup when you apply" off in Settings to keep Apply blocked instead, '
+      + 'and set the element by hand under Site setup \u2192 Sending.',
+  },
   applyUnverified: {
     title: 'Apply needs a confirmation element',
     short: 'Nothing is sent to a site that cannot tell us it worked.',
     body: 'This site has no confirmation element set, so there would be no way to know '
       + 'whether the application was accepted — a form can be rejected after it is sent, '
-      + 'and recording that as applied is worse than not sending at all. Open “Set up '
-      + 'this site” → Confirmation element and Pick the “thank you” or “application '
-      + 'received” message the site shows after a successful send. Then Apply goes live '
-      + '— as long as a Send button was found too — and that same element is what marks '
-      + 'the posting applied.',
-    when: 'Apply is grey on a site you have not finished setting up.',
+      + 'and recording that as applied is worse than not sending at all. Normally Apply '
+      + 'would offer to send this one and then ask you to point at the site\u2019s reply, '
+      + 'which is how that element gets captured; "Finish setup when you apply" is '
+      + 'turned off in Settings, so it stays blocked instead. Turn it back on, or open '
+      + '"Set up this site" \u2192 Sending and Pick the "thank you" or "application '
+      + 'received" message the site shows after a successful send.',
   },
   /**
    * Why *two* controls are retired at once, which is the part nobody would guess.

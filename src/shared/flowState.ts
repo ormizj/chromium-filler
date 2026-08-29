@@ -21,10 +21,19 @@ import type { ConceptKey } from './help';
  * different answers from the user: find the button, or teach the site what its
  * confirmation looks like. One shared "unavailable" told them neither.
  *
+ * `finishSetup` is the third of those and the odd one out: it is not a failure. The
+ * site can fill and its Send button is known, and the only thing missing is the
+ * confirmation — which cannot be pointed at until an application has really gone in.
+ * That used to be `noConfirmation`, i.e. a dead end, and it was a deadlock: Apply
+ * refused to send without the element, and the element only exists after a send. So
+ * here Apply runs and then asks the user to point at what the site said back. It is
+ * the second half of setting a site up, offered at the one moment it is possible.
+ * `settings.finishSetupOnApply` turns it off, which restores `noConfirmation`.
+ *
  * Lives here rather than in `content/modal/modal.ts` because it is now an input
  * to a pure decision; the modal re-exports it so its callers are unaffected.
  */
-export type ApplyState = 'ready' | 'noButton' | 'noConfirmation';
+export type ApplyState = 'ready' | 'noButton' | 'noConfirmation' | 'finishSetup';
 
 /**
  * How loud the banner is. Deliberately not a colour: `ok`/`warn`/`accent` map to
@@ -79,6 +88,10 @@ const TONES: Record<FlowKey, FlowTone> = {
   externalOpened: 'accent',
   noButton: 'warn',
   noConfirmation: 'warn',
+  // `accent`, not `warn`: nothing here is blocked or broken. It is the coral
+  // "something is about to happen" the redirect states use, and the button below it
+  // is live — a warning tone over a working primary says the two disagree.
+  finishSetup: 'accent',
   ready: 'quiet',
   empty: 'quiet',
 };
@@ -92,6 +105,7 @@ const HELP: Partial<Record<FlowKey, ConceptKey>> = {
   alreadyApplied: 'alreadyApplied',
   noButton: 'apply',
   noConfirmation: 'applyUnverified',
+  finishSetup: 'finishSetup',
   external: 'twoStep',
   externalOpened: 'twoStep',
   appLink: 'appLink',

@@ -10,6 +10,7 @@ import { describe, it, expect, afterEach, vi } from 'vitest';
 import { FillerModal, type ModalCallbacks, type ModalData } from './modal';
 import type { FieldMatch } from '../../shared/types';
 import type { ModalLayout } from '../../shared/modalLayout';
+import { ACTION_LABELS } from '../../shared/labels';
 
 const noop = () => {};
 
@@ -1301,5 +1302,38 @@ describe('FillerModal — two views of one layout', () => {
 
     at('pointerup', 460, 280);
     expect(onLayoutChange).toHaveBeenCalledTimes(1);
+  });
+});
+
+/**
+ * The one non-`ready` Apply that is not retired.
+ *
+ * It is not a failure state: the site fills and the Send button is known, and the
+ * only thing missing is the reply — which cannot exist until an application has gone
+ * in. So the press has to work, and it has to say what else it is about to start.
+ */
+describe('Apply while the setup is unfinished', () => {
+  const finishing = () => render(data([match()], { applyState: 'finishSetup' }));
+
+  it('stays live, and names the second half', () => {
+    const shadow = finishing();
+    const button = footerBtn(shadow, ACTION_LABELS.applyFinishSetup);
+    expect(button).toBeTruthy();
+    expect(button!.getAttribute('aria-disabled')).toBeNull();
+  });
+
+  it('runs onApply when pressed', () => {
+    let applied = 0;
+    const shadow = render(
+      data([match()], { applyState: 'finishSetup' }),
+      callbacks({ onApply: () => { applied += 1; } }),
+    );
+    footerBtn(shadow, ACTION_LABELS.applyFinishSetup)!.click();
+    expect(applied).toBe(1);
+  });
+
+  /** One coral per card, as ever — the label changed, not the rank. */
+  it('is still the only primary', () => {
+    expect(finishing().querySelectorAll('.cf-btn.primary')).toHaveLength(1);
   });
 });

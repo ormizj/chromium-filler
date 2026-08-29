@@ -13,6 +13,7 @@ export const DEFAULT_SETTINGS: Settings = {
   // done with a posting, so leaving its tab open only makes work. Submitting is
   // different — the confirmation is often worth reading.
   closeTabOnSkip: true,
+  finishSetupOnApply: true,
   closeTabDelayMs: 1500,
   redirectTarget: 'newTabCloseSource',
   // On: filling and recording are both impossible inside a phone app, so this is

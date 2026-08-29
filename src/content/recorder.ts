@@ -18,6 +18,20 @@
  *
  * Two things follow that are not obvious and both have tests.
  *
+ * **The first pass cannot send.** An armed click that lands on something whose label
+ * reads like a send is *held*: the arm is not spent, so the suppression below cancels
+ * it, and the control is recorded as `submit` instead. This is the seam the two-pass
+ * setup is built on — the only moment the Send button can be pointed at is before it
+ * is pressed, and pressing it is what ends the page it lives on.
+ *
+ * Two things keep the hold from swallowing gestures it has no business refusing. It
+ * only ever applies to a control `submitDetect` could nominate (`isSubmitCandidate`),
+ * so the `<a>` labelled "Apply on company website" — the apply link of every two-step
+ * posting — passes straight through, and the first pass can still cross a handoff.
+ * And it is escapable in one press (`arm({ force: true })`), which it has to be:
+ * `looksLikeSend` matches "apply" and "finish", and on plenty of boards the *button*
+ * that opens the application form says "Apply now".
+ *
  * **An arm covers an interaction, not an event.** Pressing a `<label>` makes the
  * browser raise a second click on the control it names; disarming on the first
  * would leave the second to be cancelled, and the checkbox would not tick. And an
@@ -39,6 +53,7 @@
 
 import type { RecordLeg, RecordedStep } from '../shared/recording';
 import { pickSelector } from '../shared/selector';
+import { isSubmitCandidate, looksLikeSend } from '../shared/submitDetect';
 import { normalizeText } from '../shared/query';
 import { guessField } from './fieldDetect';
 import { PICKER_ATTR, isExtensionUi } from './extensionUi';
@@ -80,12 +95,33 @@ export interface RecorderOptions {
   onStep(step: RecordedStep): void;
   /** The bar is the only thing that says which mode this is in, so it must know. */
   onMode(mode: RecorderMode): void;
+  /**
+   * A press that looked like a send was held rather than passed on.
+   *
+   * Reported rather than merely done, because a button that does nothing is the
+   * failure this whole mechanism could produce: without a line on screen saying what
+   * happened and offering the way past it, the user presses Send four more times and
+   * concludes the extension is broken. The element is passed so the bar can name it.
+   */
+  onHeldSend?(el: Element): void;
+  /**
+   * Whether the recording already carries a Send button. Asked rather than
+   * remembered, because the answer changes from three places this cannot see — a
+   * Declare, an Undo, and the refusal that follows a hold.
+   */
+  sendMarked?(): boolean;
 }
 
 export interface RecorderHandle {
   stop(): void;
-  /** Interact: let the next gesture through, and record it. */
-  arm(): void;
+  /**
+   * Interact: let the next gesture through, and record it.
+   *
+   * `force` is the way past a held send, and covers exactly one gesture — the user
+   * has said "that was not the Send button", which is a fact about that one control
+   * and not a standing permission to submit.
+   */
+  arm(opts?: { force?: boolean }): void;
   disarm(): void;
   mode(): RecorderMode;
 }
@@ -108,6 +144,8 @@ export function startRecording(opts: RecorderOptions): RecorderHandle {
    * Identity is what carries the permission across those two listeners.
    */
   let gestureEvent: Event | null = null;
+  /** This arm was granted after a held send was refused, so it skips the send check. */
+  let forced = false;
 
   const setMode = (next: RecorderMode): void => {
     if (mode === next) return;
@@ -184,11 +222,40 @@ export function startRecording(opts: RecorderOptions): RecorderHandle {
     if (mode !== 'armed') return;
 
     const el = hit.closest(INTERACTIVE) ?? hit;
+
+    /*
+     * The seam. The arm is deliberately *not* spent here — no `gestureEvent`, no
+     * `gestureEl` — so `passes()` sees a mode that is no longer `armed` and the
+     * suppression below cancels this very event. Nothing reaches the page, and the
+     * control the user aimed at is recorded as the thing they aimed at it for.
+     *
+     * The tail rule matters as much as the click: a held `<label>` press would
+     * otherwise raise a second click on the control it names, and that one would go
+     * through — sending the application the hold exists to stop.
+     */
+    if (!forced && isSubmitCandidate(el) && looksLikeSend(labelFor(el))) {
+      gestureEl = null;
+      setMode('idle');
+      // Held either way — the first pass cannot send, full stop — but marked only
+      // once. Asking the recording rather than remembering locally is what keeps a
+      // Declare, an Undo and the escape hatch below from disagreeing with this.
+      if (!opts.sendMarked?.()) {
+        opts.onStep({ ...base(el, 'click'), bind: 'submit', bindSource: 'auto' });
+      }
+      opts.onHeldSend?.(el);
+      return;
+    }
+
     gestureEl = el;
     gestureAt = Date.now();
     gestureEvent = e;
+    // Whether this press got through *because* the user refused the hold. Read before
+    // it is spent, and carried on the step: the compiler's send veto has to know that
+    // this one was asked about, or it drops the step the refusal was paid for.
+    const refused = forced;
+    forced = false;
 
-    emitClick(el);
+    emitClick(el, refused);
 
     // An arm covers an interaction, not an event: if this one opened a box to type
     // in, the typing belongs to it.
@@ -201,8 +268,8 @@ export function startRecording(opts: RecorderOptions): RecorderHandle {
     }
   };
 
-  const emitClick = (el: Element): void => {
-    opts.onStep(base(el, 'click'));
+  const emitClick = (el: Element, refused = false): void => {
+    opts.onStep({ ...base(el, 'click'), ...(refused ? { sendRefused: true as const } : {}) });
   };
 
   const onChange = (e: Event): void => {
@@ -252,16 +319,18 @@ export function startRecording(opts: RecorderOptions): RecorderHandle {
       document.removeEventListener('change', onChange, true);
       document.removeEventListener('focusout', onFocusOut, true);
     },
-    arm() {
+    arm(armOpts) {
       if (mode === 'armed') return;
       liveEl = null;
       gestureEvent = null;
+      forced = !!armOpts?.force;
       armedAt = Date.now();
       setMode('armed');
     },
     disarm() {
       liveEl = null;
       gestureEvent = null;
+      forced = false;
       setMode('idle');
     },
     mode: () => mode,
@@ -280,7 +349,7 @@ const VALUE_IS_LABEL = new Set(['submit', 'button', 'reset', 'image']);
  * into a field into the recording, which is the one thing a recording must never
  * carry.
  */
-function labelFor(el: Element): string {
+export function labelFor(el: Element): string {
   const parts: Array<string | null> = [el.getAttribute('aria-label')];
   if (el instanceof HTMLInputElement) {
     if (VALUE_IS_LABEL.has(el.type)) parts.push(el.value);

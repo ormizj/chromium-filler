@@ -90,6 +90,7 @@ export type FlowKey =
   | 'externalOpened'
   | 'noButton'
   | 'noConfirmation'
+  | 'finishSetup'
   | 'ready'
   | 'empty';
 
@@ -138,6 +139,20 @@ export const FLOW_TEXT: Record<FlowKey, FlowText> = {
     title: 'Apply is unavailable here',
     detail: 'This site has no confirmation element set, so a result cannot be read back. Set it under Site setup → Sending, along with the Send button if that is unset too.',
   },
+  /**
+   * The one state here that is not a report but an offer.
+   *
+   * It is `noConfirmation` with a way out. The site fills and its Send button is
+   * known; the only thing missing is the element that says an application landed, and
+   * that element does not exist until one has. So this says what pressing Apply will
+   * do *before* it does it — send this application, then ask where the site's answer
+   * is — because a button that quietly starts a second job is worse than a grey one.
+   */
+  finishSetup: {
+    title: 'Set up to fill, not yet to confirm',
+    detail: 'Apply sends this application and then asks you to point at the message the '
+      + 'site shows back. That message is the last thing this site needs.',
+  },
   ready: { title: 'Filled — nothing has been sent yet', detail: 'ready to review' },
   // Not "no form was found here". This state is reached when the *report* has no
   // rows, and `main.ts` builds one row per field it has something to fill with —
@@ -183,6 +198,10 @@ export type ActionKey =
   | 'interact'
   | 'interactArmed'
   | 'declare'
+  | 'applyFinishSetup'
+  | 'markConfirmation'
+  | 'notTheSendButton'
+  | 'notYet'
   | 'keepAsClick'
   | 'undo'
   | 'saveRecording'
@@ -243,6 +262,21 @@ export const ACTION_LABELS: Record<ActionKey, string> = {
   // page has just gone live under the user's finger and nothing else says so.
   interactArmed: 'Click one thing…',
   declare: 'Declare…',
+  // Apply, plus what else this particular press is going to do. The extra half is
+  // not decoration: this is the one Apply that starts a second job after sending,
+  // and the vocabulary rule ("our action is Apply") is kept by leading with the verb.
+  applyFinishSetup: 'Apply · finish setup',
+  // The whole of the after-sending bar. Not "Declare…": there is exactly one thing
+  // to name here, so a menu would be a list of one.
+  markConfirmation: 'Mark the confirmation',
+  // The way out of a held press. `looksLikeSend` matches "apply" and "finish", and on
+  // most boards the button that *opens* the form says "Apply now" — so the guess has
+  // to be refusable in one press, or the first pass cannot be run on those sites at
+  // all. Worded as the user's correction, not as an override.
+  notTheSendButton: 'Not the Send button — press it',
+  // Standing the after-sending pass down. Not "Cancel": nothing is being abandoned,
+  // and the site keeps everything the first pass taught it.
+  notYet: 'Not yet',
   // What a step is when it is nothing else. The bar has no use for it any more —
   // a step is now precisely what Interact produces — but the review's bind select
   // still needs a word for its empty option, and it is the same word.
@@ -319,6 +353,25 @@ export function resetRecordingPrompt(stepCount: number, leg: RecordLeg): string 
   return leg === 'destination'
     ? `Discard ${steps} and start again on the posting? This page will be left.`
     : `Discard ${steps} and record this site again? The page reloads.`;
+}
+
+/**
+ * Why the button the user just pressed did nothing.
+ *
+ * The first pass cannot send: the only moment the Send button can be pointed at is
+ * *before* it is pressed, and pressing it is what ends the page it lives on. So a
+ * press that looks like a send is held, marked, and explained — and it has to be
+ * explained here and now, or the user presses it four more times and concludes the
+ * extension is broken.
+ *
+ * Built rather than looked up, like `resetRecordingPrompt`, because naming the
+ * control back to the user is most of what makes it legible as a decision about
+ * *that* button rather than a rule about buttons in general.
+ */
+export function heldSendNotice(label: string): string {
+  const name = label.trim() ? `“${label.trim()}”` : 'That button';
+  return `${name} looks like the button that sends this application, so it was marked `
+    + 'as the Send button rather than pressed. Sending happens in the second pass.';
 }
 
 /* ---------------- What a recorded element can be marked as ---------------- */

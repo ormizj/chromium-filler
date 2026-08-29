@@ -8,7 +8,7 @@
  */
 import { describe, it, expect } from 'vitest';
 import {
-  SETUP_STEP_ORDER, firstStepWithWork, isUnconfigured, stepStates,
+  SETUP_STEP_ORDER, firstStepWithWork, isUnconfigured, setupStage, stepStates,
   type SetupRow, type SetupSnapshot,
 } from './setupSteps';
 
@@ -395,5 +395,51 @@ describe('isUnconfigured — has anyone taught this site anything?', () => {
     expect(isUnconfigured(snapshot({ ...bare, beforeFollow: [{ action: 'click' as const, selector: '#c' }] }))).toBe(false);
     // …and the control: the same bare snapshot with no page actions is unconfigured.
     expect(isUnconfigured(snapshot(bare))).toBe(true);
+  });
+});
+
+/**
+ * Which half of the setup a site has reached — the one thing that decides whether
+ * the panel offers to record, hands on to the after-sending pass, or says it is
+ * done. Saved-only, like `isUnconfigured`, because the heuristics find a Send button
+ * on nearly every page and a stage read off a guess calls a site finished on the
+ * strength of nothing.
+ */
+describe('setupStage — before sending, after sending, or done', () => {
+  const bare = (over: Partial<SetupSnapshot> = {}) => snapshot({
+    prep: [],
+    containers: [row({ key: 'jobTitle', hasSave: false }), row({ key: 'jobDescription', hasSave: false })],
+    fields: [row({ key: 'resume', hasSave: false })],
+    redirect: [],
+    submit: row({ key: 'submitSelector', hasSave: false }),
+    success: row({ key: 'successSelector', status: 'none', note: 'not set', hasSave: false }),
+    ...over,
+  });
+
+  it('opens the offer while nothing at all is saved', () => {
+    expect(setupStage(bare())).toBe('unconfigured');
+  });
+
+  /**
+   * The ordinary ending of a first pass: the site can fill, and the one row that has
+   * no heuristic behind it is still empty. This is the stage the whole second pass
+   * exists for, so it must not be lumped in with either neighbour.
+   */
+  it('is beforeSend once something is saved but the confirmation is not', () => {
+    expect(setupStage(bare({ submit: row({ key: 'submitSelector', hasSave: true }) })))
+      .toBe('beforeSend');
+  });
+
+  it('is complete once the confirmation is saved', () => {
+    expect(setupStage(bare({
+      submit: row({ key: 'submitSelector', hasSave: true }),
+      success: row({ key: 'successSelector', hasSave: true }),
+    }))).toBe('complete');
+  });
+
+  /** A found-but-unsaved Send button is a guess, and a guess is not a stage. */
+  it('does not count a heuristic match as taught', () => {
+    expect(setupStage(bare({ submit: row({ key: 'submitSelector', status: 'high', hasSave: false }) })))
+      .toBe('unconfigured');
   });
 });

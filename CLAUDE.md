@@ -43,12 +43,17 @@ footer overflow menu.
 `offer` (what a never-configured site opens on — the most-seen screen in the
 panel), `recording`, `recording-armed` and `recording-reset` (the bar up over a page
 held inert, the same bar with the page live for one gesture, and the warning behind
-Reset — the panel folded to its pill in all three), `review` /
+Reset — the panel folded to its pill in all three), `recording-held` (a press that
+would have sent the application, refused and marked instead — a full sentence and an
+escape hatch in a bar that is otherwise one line of readout, so the state most likely
+to break the narrow layout), and `after-send` / `after-send-saved` (the second pass's
+own bar: one question over a live page, and the report that replaces it — neither
+reachable by pressing anything, both being downstream of a real application), `review` /
 `review-external`, which are the two renderings a real page can only reach by
 applying to a job, and `saved` / `saved-clean`, the two ends of Save — the second
 being the only way to see the coral move from `Review configuration` onto `Done`; modal: `long`, `redirect`,
 `redirect-followed`, `app-link`, `landed`, `empty`, `listing`, `failed-fill`, `apply-unset`,
-`apply-unverified`, `applied`, `already-applied`, `already-applied-redirect`,
+`apply-unverified`, `finish-setup`, `applied`, `already-applied`, `already-applied-redirect`,
 `flush`, `fullscreen`; setup: `external`, `help`,
 `cv-steps`, `submit-unset`, `success-unset`; options *and popup*: `fresh`, which
 seeds an empty store — on options so the getting-started checklist is reachable
@@ -120,17 +125,26 @@ pressing it loses the application silently; a greyed Apply that explains itself 
 always the better failure. `settings.closeTabOnSkip` shares `closeTabDelayMs` with
 the submit path deliberately.
 
-**Apply also requires `successSelector`.** Nothing is sent to a site whose outcome
-cannot be read back, so `applyState` is `noButton` | `noConfirmation` | `ready`
-and the modal says a *different* thing for each — the two failures need different
-actions from the user.
+**Apply also requires `successSelector`** — with one exception, which is how the
+element gets captured in the first place. Nothing is sent to a site whose outcome
+cannot be read back, so `applyState` is `noButton` | `noConfirmation` |
+`finishSetup` | `ready` and the modal says a *different* thing for each. The first
+two are failures needing different actions from the user; `finishSetup` is not a
+failure at all — the site fills, its Send button is known, and Apply sends *and then
+asks the user to point at the site's reply*, which is the only moment that element
+exists. See "Two passes, because the page has two halves".
 
 ### The flow banner
 `src/shared/flowState.ts` (pure) is the one place that decides **where a posting
 is in the flow**, and `labels.FLOW_TEXT` is where each state is worded.
-`flowBanner()` returns `{ key, tone, title, detail, help? }` for one of nine
+`flowBanner()` returns `{ key, tone, title, detail, help? }` for one of ten
 states: `applied` / `alreadyApplied` · `appLink` · `external` / `externalOpened` ·
-`noButton` / `noConfirmation` · `empty` · `ready`.
+`noButton` / `noConfirmation` / `finishSetup` · `empty` · `ready`.
+
+`finishSetup` is the odd one in that group: it is `noConfirmation` with a way out, and
+the only non-`ready` state whose Apply is **live** and **coral**. See "Two passes"
+below — it is worded as an offer because the press is going to do something, and the
+banner has to say what before the button does it.
 
 It exists because the modal used to say none of this. Three unrelated renderings
 — an applied banner, a redirect notice, and an explanation of the greyed-out
@@ -704,6 +718,92 @@ last in the queue, so on most sites they never got set. `successSelector` is the
 sharper case — it does not exist until an application has really gone in, so the only
 moment it can be captured is during one, which the wizard had no way to be present
 for.
+
+#### Two passes, because the page has two halves
+`RecordPhase` is `beforeSend` | `afterSend` (`shared/recording.ts`), and the on-screen
+words are **Before sending** / **After sending**. Everything about setting a site up
+splits along that seam:
+
+- **Before sending** — the fields, the prep clicks, the description, the apply link,
+  and the Send button *pointed at, not pressed*. Rehearsable: it can be run on any
+  posting, as often as you like, and **nothing is submitted**.
+- **After sending** — the site's confirmation, which exists only once an application
+  has really gone in, often on a different URL, and only for as long as the site
+  shows it. One-shot and time-boxed.
+
+They were one recording, and the seam is where it hurt. The only moment `submit` can
+be declared is *before* it is pressed, and pressing it is what ends the page it lives
+on — so in practice nobody declared it (the E2E's own happy path never did), and rule
+3 silently adopted the press instead, warning "check it is the right one" about a
+decision the user never made. Meanwhile the confirmation, the one mark with a
+deadline, was three taps down a 28-item menu.
+
+**The first pass cannot send** (`recorder.ts`). An armed click on a control
+`isSubmitCandidate` accepts whose label `looksLikeSend` is **held**: the arm is not
+spent, so the existing suppression cancels the very event, and the control is recorded
+as `submit` (`bindSource: 'auto'`) instead. Three things keep that honest:
+
+- **It only ever holds what could be the Send button.** `isSubmitCandidate` is
+  exported from `submitDetect` so the hold and the detector share one answer — the
+  `<a>` reading "Apply on company website" is the apply link of every two-step posting
+  on every board, and holding it would mean the first pass could never cross a
+  handoff. If `findSubmitControl` would never nominate it, the hold may not refuse it.
+- **It is escapable in one press.** `looksLikeSend` matches "apply" and "finish", and
+  on plenty of boards the *button* that opens the form says "Apply now"
+  (ModalLever's does). "Not the Send button — press it" drops the mark and re-arms
+  with `arm({ force: true })`, which covers one gesture — a fact about that control,
+  not a standing permission to submit.
+- **The refusal reaches the compiler.** That click carries `sendRefused`, and rule 3's
+  veto skips it. Without that the step is dropped as "send-shaped and unbound" — and
+  on a site whose form opens behind an "Apply now" it is the step that opens the form,
+  so `prep` would never reach the thing it is meant to fill.
+- **The held press explains itself.** `onHeldSend` → `heldSendNotice(label)`. A button
+  that does nothing and says nothing is the failure this mechanism could produce.
+
+**The second pass is a `Recording` with `phase: 'afterSend'`**, and that is not
+ceremony: the confirmation is routinely on a page of its own (Greenhouse lands on
+`…/jobs/<id>/confirmation`), so the pass has to survive a navigation, and the
+background's per-tab store is the only thing here that does. It attaches **only the
+bar** — no recorder handle, no suppression, no field sweep — because the user is
+really applying and the only thing the pass can produce is the one mark they point at.
+`resumeRecording` branches on the phase and must **not** synthesize the `navigate`
+step: a second URL here is the confirmation loading, and rule 1 would read it as a
+handoff, splitting one mark across two configs and writing it to neither.
+`compileRecording` short-circuits to binds only, for the same reasons.
+
+Finishing is deliberately the smallest possible step (`finishConfirmationPass`):
+`RECORD_STOP` → `applyConfigPatch` → re-read the config → `setupSubmitDetection()`.
+The element the user just pointed at is visible, so the **existing** observer fires
+`SUBMITTED` and the posting is filed applied through the one path that has always done
+it. Stopping the recording *before* that is what lets `handleSubmitted` close the tab
+as usual — its "never while a recording is running" guard is for the first pass.
+
+**Apply is how the second pass is reached** (`applyState` → `'finishSetup'`, gated on
+`settings.finishSetupOnApply`, default on). This is the one place the rule "nothing is
+sent to a site whose outcome cannot be read back" bends, and it had to bend somewhere:
+requiring the element before sending is a deadlock on a site nobody has applied to,
+which is why `successSelector` went unset on nearly every site. The outcome is still
+read back — by the person who pressed Apply, once, so the extension can read it
+forever after. Guarded four ways: only while `successSelector` is unset, only on a
+user press, only with a real submit control, and **nothing is recorded as applied
+until the user marks something**. Turning the setting off restores the old
+`noConfirmation` dead end exactly, and an E2E holds that branch.
+
+The panel's `send` step and the saved screen reach the same pass without pressing
+Send, for the user who applies by hand (`onMarkConfirmation`). `setupStage`
+(`setupSteps.ts`, pure) is `unconfigured` | `beforeSend` | `complete` — saved
+selectors only, same rule as `isUnconfigured`, because the heuristics find a Send
+button on nearly every page.
+
+Two wording consequences. `RECORDING_WARNINGS.noSuccess` is no longer raised by a
+first pass: it became `RECORDING_NOTES.afterSendPending`, drawn as an **`ok`** note
+below the warnings, because a first pass ending without a confirmation is its
+*expected* outcome — worded as a failure, the half that worked reported itself as
+broken on every site. And the offer leads with a sentence and a `?` rather than
+`CONCEPT_HELP.recording.body`, which grew to twenty-one lines of prose at 390px before
+the user could reach a control; the two-pass block under it carries what has to be
+read before pressing anything, and "nothing is submitted" is the part that was
+missing.
 
 Four pieces, and the split matters: **`src/shared/recording.ts`** is pure and holds
 every rule about what a recording *means*; **`src/content/recorder.ts`** owns the page
@@ -1614,6 +1714,20 @@ needs no `downloads` permission, and an MV3 service worker has no
   ever say here. Relatedly, `authed()` retries once on 401 with a forced
   refresh: expiry is judged on this machine's clock alone, so Drive is the only
   thing that knows a token has really died.
+- **The first pass of a recording cannot send, and the hold is escapable.** The
+  press is held by *not spending the arm* (`recorder.ts`), so the existing
+  suppression cancels it; the control is marked `submit` instead. It only ever
+  applies to an `isSubmitCandidate` — never an `<a>`, or a two-step posting's apply
+  link would be held and the handoff could never be recorded — and the refusal
+  (`sendRefused`) has to reach rule 3's veto, or the step that *opens* the form is
+  dropped as send-shaped.
+- **Apply may send without a `successSelector`, and only to capture one.**
+  `applyState === 'finishSetup'`, gated on `settings.finishSetupOnApply`. This is a
+  deliberate, documented amendment to the rule below it: the element does not exist
+  until an application has gone in, so demanding it first is a deadlock. Never widen
+  it — only while the element is unset, only on a user press, only with a real submit
+  control, and **the posting is not recorded as applied until the user marks
+  something visible**. With the setting off the old blocked state stands unchanged.
 - **`successSelector` becoming VISIBLE is the ONLY "actually sent" signal.**
   Not merely present — sites pre-render hidden success nodes; the
   `MutationObserver` in `main.ts` watches `style`/`class`/`hidden` flips. There is

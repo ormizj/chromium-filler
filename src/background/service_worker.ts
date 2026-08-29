@@ -67,7 +67,7 @@ chrome.runtime.onMessage.addListener((msg: Message, _sender, sendResponse) => {
     return true;
   }
   if (msg.type === MSG.RECORD_START) {
-    startRecording(_sender.tab?.id, msg.flow, msg.postingUrl)
+    startRecording(_sender.tab?.id, msg.flow, msg.postingUrl, msg.phase)
       .then(() => sendResponse({ ok: true }))
       .catch((e) => sendResponse({ ok: false, error: String(e) }));
     return true;

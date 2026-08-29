@@ -14,7 +14,7 @@
  * browser restart, so this must not survive one.
  */
 
-import type { RecordFlow, Recording, RecordedStep } from '../shared/recording';
+import type { RecordFlow, RecordPhase, Recording, RecordedStep } from '../shared/recording';
 
 const KEY = 'recordings';
 
@@ -31,11 +31,11 @@ async function write(map: Record<string, Recording>): Promise<void> {
 }
 
 export async function startRecording(
-  tabId: number | undefined, flow: RecordFlow, postingUrl: string,
+  tabId: number | undefined, flow: RecordFlow, postingUrl: string, phase: RecordPhase,
 ): Promise<void> {
   if (tabId == null) return;
   const map = await all();
-  map[String(tabId)] = { flow, startedAt: Date.now(), postingUrl, steps: [] };
+  map[String(tabId)] = { flow, phase, startedAt: Date.now(), postingUrl, steps: [] };
   await write(map);
 }
 

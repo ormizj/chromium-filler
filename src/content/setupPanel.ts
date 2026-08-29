@@ -25,7 +25,8 @@ import {
   CONCEPT_HELP, DOT_LEGEND, SETUP_STEP_HELP, SETUP_STEP_TITLES,
 } from '../shared/help';
 import {
-  SETUP_STEP_ICONS, SETUP_STEP_ORDER, firstStepWithWork, isUnconfigured, stepStates,
+  SETUP_STEP_ICONS, SETUP_STEP_ORDER, firstStepWithWork, isUnconfigured, setupStage,
+  stepStates,
   type ContainerKey, type PrepListKey, type PrepRow, type RowStatus, type SetupRow,
   type SetupSnapshot, type SetupStepKey, type SetupVerdict, type StepState,
 } from '../shared/setupSteps';
@@ -86,6 +87,12 @@ export interface SetupCallbacks extends SheetCallbacks {
   onRename(name: string, urlPattern: string): void;
   /** Set this site up by doing it once. The flow decides what the bar asks for. */
   onStartRecording(flow: RecordFlow): void;
+  /**
+   * Start the second pass by hand: the user is going to apply on this page however
+   * they like, and will point at the site's reply when it appears. The other way in
+   * is the review modal's Apply, which presses Send first.
+   */
+  onMarkConfirmation(): void;
   /** Re-decide one recorded step from the review — `null` keeps it a step. */
   onRebindStep(id: string, bind: BindKey | null): void;
   /** Point a recorded step at a different element, for a fragile one. */
@@ -199,6 +206,12 @@ export class SetupPanel extends Sheet<SetupData> {
   private savedFlow: RecordFlow = 'internal';
   /** The `?` explanations the user opened — a re-scan mid-read must not close one. */
   private openHelp = new Set<SetupStepKey>();
+  /**
+   * Whether the offer's own `?` is open. Not in `openHelp`, which is keyed by wizard
+   * step and the offer is not one — same reason `mode` is on the instance rather than
+   * in `SetupData`.
+   */
+  private offerHelp = false;
   /** The legend, once dismissed, stays folded for the rest of this page too. */
   private legendDismissed = false;
 
@@ -571,15 +584,69 @@ export class SetupPanel extends Sheet<SetupData> {
     title.textContent = 'Teach the extension this site';
     head.append(title);
 
+    /*
+     * A sentence and a `?`, not the whole catalog entry.
+     *
+     * `CONCEPT_HELP.recording.body` is the full account of how a recording works —
+     * the two passes, the two buttons, Undo, Reset — and rendered here it was
+     * twenty-one lines of prose at 390px before the user could reach a single
+     * control. That is the same failure the wizard's own steps avoid by showing one
+     * body at a time. The two-pass block below says the part that has to be read
+     * before pressing anything; the rest is something to look up.
+     */
     const lead = el('p', 'cf-step-lead');
-    lead.append(...richText(CONCEPT_HELP.recording.body));
+    lead.textContent = CONCEPT_HELP.recording.short ?? '';
+    // Immediately after the line it explains, never pushed to an edge and never
+    // inside the heading — the placement rule the whole panel follows. Above the
+    // title, where the wizard's steps put theirs, it would be a mark on its own line
+    // with nothing to belong to: those have a "Step n of 6" to sit beside.
+    lead.append(' ', helpButton('Setting a site up', this.offerHelp, (next) => {
+      this.offerHelp = next;
+      this.repaint();
+    }));
     head.append(lead);
-    body.append(head, this.recordLead(true), this.detected(data));
+    if (this.offerHelp) head.append(helpPanel(CONCEPT_HELP.recording));
+    body.append(head, this.passes(), this.recordLead(true), this.detected(data));
 
     const marking = el('p', 'cf-record-or');
     marking.textContent = CONCEPT_HELP.marking.short ?? '';
     body.append(marking);
     return body;
+  }
+
+  /**
+   * The two halves, named and in order, before the buttons that start the first.
+   *
+   * This is the sentence the offer was missing. "Teach the extension this site" said
+   * nothing about how far it goes or what it costs, and the one fact a user needs
+   * before they press anything is that the first pass **sends nothing** — the press
+   * that would send is held and marked instead. Without it the honest reading of
+   * "apply to one job while it watches" is "this is going to submit an application",
+   * which is the thing people were right to hesitate over.
+   *
+   * Two lines and no controls: the second pass has no button here because it cannot
+   * be started here. It happens the first time Apply is pressed, which is the only
+   * moment the thing it captures exists.
+   */
+  private passes(): HTMLElement {
+    const wrap = el('div', 'cf-passes');
+    for (const [name, detail] of [
+      ['Before sending', 'Apply as you normally would and say what you are doing. It '
+        + 'ends by marking the button that sends it — pointed at, not pressed. Nothing '
+        + 'is submitted.'],
+      ['After sending', 'The message this site shows once an application has really '
+        + 'gone in. It does not exist until then, so it is captured the first time you '
+        + 'press Apply.'],
+    ]) {
+      const item = el('div', 'cf-pass');
+      const heading = el('div', 'cf-pass-name');
+      heading.textContent = name;
+      const line = el('div', 'cf-pass-detail');
+      line.textContent = detail;
+      item.append(heading, line);
+      wrap.append(item);
+    }
+    return wrap;
   }
 
   /**
@@ -677,6 +744,32 @@ export class SetupPanel extends Sheet<SetupData> {
     head.append(title, lead);
     body.append(head);
 
+    /*
+     * Which half is done, and — while one is outstanding — the only screen that says
+     * the other exists.
+     *
+     * The list of outstanding steps below is the wizard's own accounting, and on a
+     * fresh site it reads "Sending — 1 thing still to do", which names the row and
+     * not the pass. That is the difference between an errand someone will do and a
+     * chip they will ignore: this one says what the thing is, when it can be done,
+     * and that it happens on its own the next time they apply.
+     */
+    const stage = setupStage(data);
+    if (stage === 'beforeSend') {
+      const note = el('div', 'cf-passes');
+      const item = el('div', 'cf-pass');
+      const heading = el('div', 'cf-pass-name');
+      heading.textContent = 'Before sending — saved. It can fill this site now.';
+      const line = el('div', 'cf-pass-detail');
+      line.textContent = 'After sending is what is left: the message this site shows '
+        + 'once an application has really gone in. Press Apply on a posting here and '
+        + 'you will be asked to point at it — or start now if you would rather apply '
+        + 'by hand.';
+      item.append(heading, line);
+      note.append(item);
+      body.append(note, btn(ACTION_LABELS.markConfirmation, () => this.cb.onMarkConfirmation()));
+    }
+
     const todo = stepStates(data).filter((state) => state.todo > 0);
     if (todo.length) {
       for (const state of todo) {
@@ -749,6 +842,9 @@ export class SetupPanel extends Sheet<SetupData> {
           + 'here — it has been saved as a one-step application.'));
     }
     for (const warning of compiled.warnings) body.append(this.reviewNote(warning));
+    // After the warnings, and in `ok`: a note is what happens *next*, and reading it
+    // before the things to look at now would make the outstanding half sound optional.
+    for (const note of compiled.notes) body.append(this.reviewNote(note, 'ok'));
 
     if (!recording.steps.length) {
       body.append(this.reviewNote('Nothing was recorded.'));
@@ -763,16 +859,21 @@ export class SetupPanel extends Sheet<SetupData> {
   /**
    * One thing the review has to say out loud.
    *
-   * All of them are `warn`, and deliberately not graded. The tone is the *dot* as
-   * much as the colour, and the coral `accent` banner has no dot of its own — so
-   * grading the missing confirmation up to accent drew the single most consequential
-   * line on this panel with a grey dash beside it, which reads as decoration. They
-   * are all the same kind of thing anyway: something to look at before Save.
+   * Warnings are all `warn` and deliberately not graded among themselves. The tone is
+   * the *dot* as much as the colour, and the coral `accent` banner has no dot of its
+   * own — so grading one of them up to accent drew the single most consequential line
+   * on this panel with a grey dash beside it, which reads as decoration. They are all
+   * the same kind of thing anyway: something to look at before Save.
+   *
+   * `ok` is the second kind, and the only other one: a note, which is not something
+   * to look at before Save but something that happens after it. The check mark is the
+   * point — the before-sending pass ending without a confirmation is the *expected*
+   * outcome, and it was worded as a failure for as long as there was only one pass.
    */
-  private reviewNote(text: string): HTMLElement {
-    const note = el('div', 'cf-flow warn');
+  private reviewNote(text: string, tone: 'warn' | 'ok' = 'warn'): HTMLElement {
+    const note = el('div', `cf-flow ${tone}`);
     const headLine = el('div', 'cf-flow-head');
-    headLine.append(el('span', 'cf-dot warn'));
+    headLine.append(el('span', `cf-dot ${tone}`));
     const line = el('div', 'cf-flow-titleline');
     const detail = el('div', 'cf-flow-detail');
     detail.textContent = text;
@@ -957,6 +1058,28 @@ export class SetupPanel extends Sheet<SetupData> {
       body.append(this.row('send', data.success,
         () => this.cb.onPickSuccess(),
         () => this.cb.onClearSuccess()));
+
+      /*
+       * The way to get one on screen, offered on the one step where its absence is
+       * the outstanding work.
+       *
+       * Pick, above, is the right control for every other row on this panel and the
+       * wrong one for this: it asks the user to point at something that is not there.
+       * This is the same second pass the review modal's Apply starts, entered from the
+       * other end — the user applies by hand, on their own schedule, and the bar waits
+       * for them to point at the reply. Secondary, because the row's own Pick is still
+       * correct on the page where a confirmation *is* up.
+       */
+      if (!data.success.hasSave) {
+        const wait = el('div', 'cf-record-lead');
+        const line = el('p', 'cf-record-lead-text');
+        line.textContent = 'The confirmation only exists while the site is showing it, '
+          + 'so it cannot be picked in advance. Apply on this page however you like and '
+          + 'point at the message when it appears.';
+        wait.append(line, btn(ACTION_LABELS.markConfirmation,
+          () => this.cb.onMarkConfirmation()));
+        body.append(wait);
+      }
     }
 
     return body;

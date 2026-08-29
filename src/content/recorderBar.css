@@ -186,6 +186,52 @@
   font-weight: 500;
 }
 
+/*
+ * The two things the readout says that are not a readout.
+ *
+ * Both wrap, where the ordinary "Clicked Next" ellipses on one line: they are
+ * sentences rather than labels, and a sentence clipped at the width of a bar says
+ * nothing. `--fg` because they are the most important thing on screen at the moment
+ * they appear — the notice is the answer to "why did that button do nothing", and
+ * the ask is the only instruction in a pass that has no other content.
+ */
+.cf-rec-notice,
+.cf-rec-ask {
+  white-space: normal;
+  overflow: visible;
+  color: var(--fg);
+}
+
+/* The held-send notice sits beside the way past it, so it must not eat the row. */
+.cf-rec-notice {
+  max-width: 42ch;
+}
+
+/*
+ * A bar with something to say takes a second row for saying it, at every width.
+ *
+ * The wide bar is a single flex line of four controls capped at 720px, and the
+ * readout is what gives: a sentence dropped into that row came out as a 70px column
+ * eleven lines tall, with the control beside it sitting under Interact. It is a
+ * paragraph, so it gets a line — the toolbar above it does not move, which is the
+ * whole point of a HUD, and the explanation lands directly under the button that
+ * did nothing.
+ *
+ * `order: 9` rather than a number in the narrow block's sequence: this is the last
+ * thing in the bar on both layouts, and the narrow rules already order everything
+ * else 1–4.
+ */
+.cf-bar-notice {
+  flex-wrap: wrap;
+  row-gap: var(--space-2);
+}
+
+.cf-bar-notice .cf-rec-last {
+  flex-basis: 100%;
+  order: 9;
+  padding: 0;
+}
+
 /* The way out, always in the same place. */
 .cf-rec-exits {
   display: flex;
@@ -314,5 +360,36 @@
   .cf-rec-confirm {
     right: auto;
     left: 0;
+  }
+
+  /*
+   * The after-sending pass has two rows, not four: it has no options row and no
+   * three-way exit, so the readout — which is the whole instruction here rather than
+   * a trailing note — leads, and the two buttons sit under it. The wide layout's
+   * `margin-left: auto` on the exits is already dropped above.
+   */
+  .cf-bar-after .cf-rec-state { order: 1; }
+  .cf-bar-after .cf-rec-last { order: 2; }
+  .cf-bar-after .cf-rec-exits { order: 3; }
+
+  /*
+   * The held-send notice is the one thing in this row that is a sentence *and* has a
+   * control beside it, and side by side at 390px it is neither: the text runs eight
+   * lines in a 140px column and the button hangs off the card. So the row turns, the
+   * sentence takes the width, and the escape hatch takes a full-width line under it —
+   * which is also where every other control on this bar sits at this size.
+   */
+  .cf-rec-last:has(.cf-rec-notice) {
+    flex-direction: column;
+    align-items: stretch;
+    gap: var(--space-2);
+  }
+
+  .cf-rec-notice {
+    max-width: none;
+  }
+
+  .cf-rec-last .cf-rec-wrap .cf-btn {
+    width: 100%;
   }
 }

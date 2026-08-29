@@ -364,8 +364,23 @@ export class FillerModal extends Sheet<ModalData> {
       return footer;
     }
 
-    const apply = btn(ACTION_LABELS.apply, () => this.cb.onApply(), true);
-    if (data.applyState !== 'ready') {
+    /*
+     * `finishSetup` is live, and reads as what it is.
+     *
+     * It is the one non-`ready` state that is not a failure: the site fills, the Send
+     * button is known, and the only thing missing is the reply — which cannot exist
+     * until an application has gone in. So this press sends *and* starts the second
+     * setup pass, and the label says the second half out loud. A button that quietly
+     * begins a second job is worse than a grey one, and the banner above it has
+     * already said the same thing at length.
+     */
+    const finishing = data.applyState === 'finishSetup';
+    const apply = btn(
+      finishing ? ACTION_LABELS.applyFinishSetup : ACTION_LABELS.apply,
+      () => this.cb.onApply(),
+      true,
+    );
+    if (data.applyState !== 'ready' && !finishing) {
       this.retire(apply, data.applyState === 'noConfirmation'
         ? 'Apply — this site has no confirmation configured, press to find out why'
         : 'Apply — no Send button found on this page, press to find out why');

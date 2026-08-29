@@ -15,7 +15,8 @@ import {
   ACTION_LABELS, RECORD_FLOW_HINT, RECORD_FLOW_TEXT, SELECTOR_STRENGTH_TEXT, SETUP_STATUS_TEXT,
 } from '../shared/labels';
 import {
-  RECORDING_WARNINGS, compileRecording, type CompiledSetup, type Recording,
+  RECORDING_NOTES, RECORDING_WARNINGS, compileRecording, type CompiledSetup,
+  type Recording,
 } from '../shared/recording';
 
 const noop = () => {};
@@ -27,7 +28,8 @@ function callbacks(over: Partial<SetupCallbacks> = {}): SetupCallbacks {
     onPickField: noop, onClearField: noop, onPickRedirect: noop, onClearRedirect: noop,
     onPickSubmit: noop, onClearSubmit: noop, onPickSuccess: noop, onClearSuccess: noop,
     onRename: noop, onOpenOptions: noop, onClose: noop, onDismissHelp: noop,
-    onStartRecording: noop, onRebindStep: noop, onRepickStep: noop, onRemoveStep: noop,
+    onStartRecording: noop, onMarkConfirmation: noop, onRebindStep: noop,
+    onRepickStep: noop, onRemoveStep: noop,
     onSaveRecording: noop, onDiscardRecording: noop,
     ...over,
   };
@@ -838,8 +840,39 @@ describe('reviewing a recording', () => {
     const s = render(data({ recording, compiled }));
     panel!.showReview(true);
     const notes = [...s.querySelectorAll('.cf-flow-detail')].map((n) => n.textContent);
-    expect(notes).toContain(RECORDING_WARNINGS.noSuccess);
     expect(notes).toContain(RECORDING_WARNINGS.fragileTargets);
+  });
+
+  /**
+   * The first pass ending without a confirmation is its *expected* outcome, not a
+   * failure — the element does not exist until an application has really gone in, and
+   * this pass stops short of sending one. So it is drawn as an `ok` note rather than a
+   * `warn`: for as long as there was one recording, the half that worked reported
+   * itself as broken on every site.
+   */
+  it('hands on to the second pass in the affirmative, below the warnings', () => {
+    // With the Send button marked, which is where a first pass ends. Without one
+    // there is nothing to hand on to — the second pass has no button to press.
+    const base = recorded().recording;
+    const { recording, compiled } = recorded({
+      steps: [...base.steps, {
+        id: 's4', at: 2600, leg: 'posting', url: 'https://acme.com/job/1', action: 'click',
+        label: 'Submit application', bind: 'submit', bindSource: 'auto',
+        target: { selector: '#send', strength: 'strong', strategy: 'id' },
+      }],
+    });
+    const s = render(data({ recording, compiled }));
+    panel!.showReview(true);
+    const note = [...s.querySelectorAll('.cf-flow.ok .cf-flow-detail')]
+      .map((n) => n.textContent);
+    expect(note).toContain(RECORDING_NOTES.afterSendPending);
+
+    // Warnings first: reading what happens next before what needs looking at now
+    // makes the outstanding half sound optional.
+    const all = [...s.querySelectorAll('.cf-flow')];
+    const warn = all.findIndex((n) => n.classList.contains('warn'));
+    const ok = all.findIndex((n) => n.classList.contains('ok'));
+    expect(warn).toBeLessThan(ok);
   });
 
   it('offers Save and Discard, with Save the only primary', () => {

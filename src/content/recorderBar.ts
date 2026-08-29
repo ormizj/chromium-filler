@@ -34,7 +34,7 @@ import { TEXT_FIELDS } from '../shared/fieldKeys';
 import type { FieldKey } from '../shared/types';
 import {
   isFieldBind, type BindKey, type ConfigBindKey, type RecordFlow, type RecordLeg,
-  type RecordedStep,
+  type RecordPhase, type RecordedStep,
 } from '../shared/recording';
 import type { RecorderMode } from './recorder';
 import { BASE_CSS } from '../ui/shadowCss';
@@ -44,6 +44,13 @@ import barCss from './recorderBar.css?inline';
 export interface RecorderBarCallbacks {
   /** Interact: arm one gesture, or cancel an arm that is already up. */
   onInteract(): void;
+  /**
+   * "That was not the Send button." Drops the mark the hold made and arms one
+   * gesture that is allowed to be send-shaped — see `recorder.ts`'s hold.
+   */
+  onForceSend(): void;
+  /** The after-sending pass's one action: go and point at the site's reply. */
+  onMarkConfirmation(): void;
   /** Declare: name a thing, and let the picker find it. */
   onDeclare(bind: BindKey): void;
   /** Throw the whole recording away and start it again from the posting. */
@@ -53,6 +60,12 @@ export interface RecorderBarCallbacks {
 }
 
 export interface RecorderBarState {
+  /**
+   * Which half of the setup this is, and so which of the bar's two shapes it draws.
+   * `beforeSend` is the full toolbar over an inert page; `afterSend` is one question
+   * over a live one.
+   */
+  phase: RecordPhase;
   flow: RecordFlow;
   /** Which page of a handoff this is. It decides what the menu leads with. */
   leg: RecordLeg;
@@ -63,6 +76,12 @@ export interface RecorderBarState {
   last?: RecordedStep;
   /** What has already been marked, so the menu can lead with what has not. */
   bound: BindKey[];
+  /**
+   * One thing to say about the press that just happened, when it was not simply
+   * recorded — today, only that a send was held. Transient: it is cleared by the next
+   * step, because it is about *that* press and nothing else.
+   */
+  notice?: string;
 }
 
 const INFO_MARKS: ConfigBindKey[] = [
@@ -161,11 +180,21 @@ export class RecorderBar {
 
     const bar = el('div', 'cf-bar');
     bar.setAttribute('role', 'toolbar');
-    bar.setAttribute('aria-label', 'Recording this site');
+    bar.setAttribute('aria-label', data.phase === 'afterSend'
+      ? 'Finishing this site’s setup'
+      : 'Recording this site');
+    if (data.phase === 'afterSend') bar.classList.add('cf-bar-after');
+    // The held send's explanation is a paragraph, and a paragraph cannot share a row
+    // with four controls — see the wrap rule in `recorderBar.css`. Only on the first
+    // pass: the after-sending bar is three children wide and its sentence *is* the
+    // content, so wrapping there put Done above the line it dismisses.
+    if (data.notice && data.phase !== 'afterSend') bar.classList.add('cf-bar-notice');
     // Source order is the wide layout: state, what just happened, the two options,
     // the way out. Narrow re-orders it with `order`, which is where the readout drops
     // to a row of its own.
-    bar.append(this.state(data), this.lastStep(data), this.options(data), this.exits());
+    bar.append(...(data.phase === 'afterSend'
+      ? [this.state(data), this.lastStep(data), this.afterSendActions(data)]
+      : [this.state(data), this.lastStep(data), this.options(data), this.exits()]));
     this.shadow.append(bar);
     if (scroll) {
       const list = this.shadow.querySelector('.cf-rec-menu');
@@ -179,6 +208,20 @@ export class RecorderBar {
     live.setAttribute('aria-hidden', 'true');
     const secs = Math.floor((Date.now() - this.startedAt) / 1000);
     const count = el('span', 'cf-rec-count');
+    if (data.phase === 'afterSend') {
+      // No clock and no step count: this pass records nothing and lasts as long as
+      // the site's reply takes to appear. A ticking timer over "waiting for the
+      // confirmation" reads as a deadline, and there is none.
+      //
+      // And once the mark is written the pass is *over*, so the live dot goes with
+      // it. A pulsing red dot beside a report that the site is finished says the
+      // opposite of the sentence next to it.
+      wrap.setAttribute('role', 'status');
+      if (data.notice) wrap.append(text('span', 'Setup finished'));
+      else wrap.append(live, text('span', 'Finishing setup'));
+      this.clockEl = undefined;
+      return wrap;
+    }
     // Two spans, one string: the clock is written on its own every second, and the
     // separator stays inside the wrapper so the readout reads exactly as it always
     // did (the E2E's step-count helper reads `.cf-rec-count` whole).
@@ -287,6 +330,28 @@ export class RecorderBar {
     const what = el('div', 'cf-rec-what');
 
     const { last } = data;
+    if (data.phase === 'afterSend') {
+      // The whole of what this pass has to say, and it has to be a sentence: the user
+      // pressed Apply on a job page and is now looking at a bar they did not ask for,
+      // over a page that has just changed under them. Once the mark is written the
+      // same line carries the report instead — one place to look, either way.
+      what.classList.add('cf-rec-ask');
+      what.append(text('span', data.notice
+        ?? 'Your application went in. Point at the message the site shows back, and '
+          + 'this site is finished.'));
+      wrap.append(what);
+      return wrap;
+    }
+    if (data.notice) {
+      // Louder than the ordinary readout, and it has to be: it is the answer to "why
+      // did that button do nothing", and it is competing with the page underneath.
+      what.classList.add('cf-rec-notice');
+      what.append(text('span', data.notice));
+      wrap.append(what, inWrap(btn(
+        ACTION_LABELS.notTheSendButton, () => { this.closePopovers(); this.cb.onForceSend(); },
+      )));
+      return wrap;
+    }
     if (data.mode !== 'idle') {
       what.append(text('span', 'The page is live — use it as you normally would.'));
     } else if (last) {
@@ -299,6 +364,33 @@ export class RecorderBar {
     }
 
     wrap.append(what);
+    return wrap;
+  }
+
+  /**
+   * The after-sending pass's whole middle: one thing to do, and one way to leave.
+   *
+   * No Interact, no Declare, no Undo, no Reset. The page is live — the user is really
+   * applying — so there is nothing to hand back to them, and this pass records
+   * nothing, so there is nothing to take back. A menu here would be a list of one.
+   *
+   * "Not yet" rather than "Cancel": nothing is being abandoned. The site keeps
+   * everything the first pass taught it, and the offer comes round again the next
+   * time Apply is pressed.
+   */
+  private afterSendActions(data: RecorderBarState): HTMLElement {
+    const wrap = el('div', 'cf-rec-exits');
+    // Once the mark is written there is nothing left to ask, and the bar is only
+    // still up to say so — a live "Mark the confirmation" beside that report would
+    // invite the user to do the finished thing again.
+    if (data.notice) {
+      wrap.append(inWrap(btn(ACTION_LABELS.done, () => this.cb.onDone(), 'primary')));
+      return wrap;
+    }
+    wrap.append(
+      inWrap(btn(ACTION_LABELS.notYet, () => this.cb.onDone())),
+      inWrap(btn(ACTION_LABELS.markConfirmation, () => this.cb.onMarkConfirmation(), 'primary')),
+    );
     return wrap;
   }
 

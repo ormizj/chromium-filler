@@ -138,6 +138,39 @@ button.cf-btn.cf-record-choice {
 }
 
 /*
+ * The two halves of setting a site up, named before the buttons that start the first.
+ *
+ * A list rather than a numbered rail: the rail is the *wizard's*, and six numbered
+ * steps beside two passes would read as eight things to do. The tone is `--muted`
+ * because this is a description of what is about to happen and not an instruction —
+ * the instruction is the two buttons directly under it.
+ *
+ * An inset (`--surface`) on the panel's paper, like every other block on this card
+ * that is a thing *within* the sheet rather than a thing standing on it.
+ */
+.cf-passes {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  margin: 0 0 var(--space-3);
+  padding: var(--space-3);
+  background: var(--surface);
+  border-radius: var(--radius-card);
+}
+
+.cf-pass-name {
+  font-size: var(--text-sm);
+  font-weight: 500;
+}
+
+.cf-pass-detail {
+  margin-top: 2px;
+  font-size: var(--text-xs);
+  line-height: 1.45;
+  color: var(--muted);
+}
+
+/*
  * What the extension can already read on the page behind the offer: a count line
  * and a chip per field it recognised.
  *

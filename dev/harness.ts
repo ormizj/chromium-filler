@@ -40,7 +40,7 @@ import { RECORDER_HOST_ID } from '../src/content/extensionUi';
 import { detectForConfig, DETECTABLE_FIELDS } from '../src/content/fieldDetect';
 import { highlight } from '../src/content/fill';
 import { FIELD_LABELS } from '../src/shared/fieldKeys';
-import { ACTION_LABELS } from '../src/shared/labels';
+import { ACTION_LABELS, heldSendNotice } from '../src/shared/labels';
 import {
   compileRecording, type RecordFlow, type Recording, type RecordedStep,
 } from '../src/shared/recording';
@@ -331,6 +331,11 @@ const MODAL_STATES: Record<string, Partial<ModalData>> = {
   // has no confirmation element, so a submission's outcome could not be read
   // back. A different note entirely — pair it with `&note=apply`.
   'apply-unverified': { applyState: 'noConfirmation' },
+  // The same missing confirmation, with the setting that turns it into an offer left
+  // on — so Apply is *live*, coral, and says what else the press will start. It is
+  // the commonest thing a set-up site can look like before it has ever been applied
+  // to, and the only state where the banner and the primary are both about setup.
+  'finish-setup': { applyState: 'finishSetup' },
   // Sent and confirmed. The banner, the retired Apply, and the pill all change,
   // and none of it is reachable without actually submitting a real application.
   applied: { applied: true },
@@ -452,6 +457,7 @@ function bootSetup(): void {
     onClearSuccess: () => console.log('[harness] clear confirmation'),
     onRename: (n, p) => console.log('[harness] rename', n, p),
     onStartRecording: (f) => console.log('[harness] start recording', f),
+    onMarkConfirmation: () => console.log('[harness] mark the confirmation'),
     onRebindStep: (id, b) => console.log('[harness] rebind step', id, b),
     onRepickStep: (id) => console.log('[harness] re-pick step', id),
     onRemoveStep: (id) => console.log('[harness] remove step', id),
@@ -681,31 +687,53 @@ function bootSetup(): void {
    * the bar up. The bar is its own surface and never takes a pill slot, so this is
    * also the check that it does not land on top of one.
    *
-   * Three states, because the bar has three renderings and two of them are only
-   * reachable by pressing something, which a screenshot cannot do. `recording` is the
-   * resting bar over an inert page; `recording-armed` is what Interact does — the page
-   * live under the user's finger, which has to *look* like a mode; `recording-reset` is
-   * the warning behind Reset, the one control here with no way back, and the one thing
-   * on the bar that has to be read before it is answered.
+   * Six states, because the bar has six renderings and five of them are only reachable
+   * by pressing something, which a screenshot cannot do. `recording` is the resting bar
+   * over an inert page; `recording-armed` is what Interact does — the page live under
+   * the user's finger, which has to *look* like a mode; `recording-reset` is the warning
+   * behind Reset, the one control here with no way back.
+   *
+   * The other three are the seam the two-pass setup is built on, and they are the ones
+   * most worth looking at. `recording-held` is a press that would have sent the
+   * application, refused and marked instead — a full sentence and an escape hatch in a
+   * bar that is otherwise one line of readout, so it is the state most likely to break
+   * the narrow layout. `after-send` and `after-send-saved` are the second pass's own
+   * bar: one question over a live page, and the report that replaces it. Neither can be
+   * reached in this harness by pressing anything, because both are downstream of a real
+   * application being sent.
    */
-  if (state === 'recording' || state === 'recording-armed' || state === 'recording-reset') {
+  const BAR_STATES = [
+    'recording', 'recording-armed', 'recording-reset', 'recording-held',
+    'after-send', 'after-send-saved',
+  ];
+  if (BAR_STATES.includes(state)) {
     panel.minimize();
     panel.setSlot(0);
     const bar = new RecorderBar({
       onInteract: () => console.log('[harness] interact'),
+      onForceSend: () => console.log('[harness] not the Send button'),
       onDeclare: (b) => console.log('[harness] declare', b),
+      onMarkConfirmation: () => console.log('[harness] mark the confirmation'),
       onReset: () => console.log('[harness] reset recording'),
       onUndo: () => console.log('[harness] undo step'),
       onDone: () => console.log('[harness] recording done'),
     });
     const { steps } = recordedState('internal').recording!;
+    const after = state.startsWith('after-send');
     bar.render({
+      phase: after ? 'afterSend' : 'beforeSend',
       flow: 'internal',
       leg: 'posting',
       stepCount: steps.length,
       mode: state === 'recording-armed' ? 'armed' : 'idle',
       last: steps[1],
       bound: ['field:email'],
+      notice: state === 'recording-held'
+        ? heldSendNotice('Submit application')
+        : state === 'after-send-saved'
+          ? 'Saved. This site can read its own confirmations now — Apply works here '
+            + 'from now on.'
+          : undefined,
     });
     // Pressed rather than posed: the confirm is opened by the same click a user makes,
     // so the harness cannot show a state the bar itself cannot reach.

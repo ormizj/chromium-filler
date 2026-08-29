@@ -41,7 +41,7 @@ function setupCallbacks(over: Partial<SetupCallbacks> = {}): SetupCallbacks {
     onPickField: noop, onClearField: noop, onPickRedirect: noop, onClearRedirect: noop,
     onPickSubmit: noop, onClearSubmit: noop, onPickSuccess: noop, onClearSuccess: noop,
     onRename: noop, onOpenOptions: noop, onClose: noop, onDismissHelp: noop,
-    onStartRecording: noop, onRebindStep: noop, onRepickStep: noop, onRemoveStep: noop,
+    onStartRecording: noop, onMarkConfirmation: noop, onRebindStep: noop, onRepickStep: noop, onRemoveStep: noop,
     onSaveRecording: noop, onDiscardRecording: noop,
     ...over,
   };

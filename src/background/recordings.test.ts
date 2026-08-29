@@ -33,15 +33,15 @@ describe('one tab, one recording', () => {
   });
 
   it('keeps the steps in the order they happened', async () => {
-    await startRecording(1, 'internal', BOARD);
+    await startRecording(1, 'internal', BOARD, 'beforeSend');
     await pushStep(1, step({ id: 'a' }));
     await pushStep(1, step({ id: 'b' }));
     expect((await getRecording(1))?.steps.map((s) => s.id)).toEqual(['a', 'b']);
   });
 
   it('keeps two tabs apart', async () => {
-    await startRecording(1, 'internal', BOARD);
-    await startRecording(2, 'external', 'https://other.test/job');
+    await startRecording(1, 'internal', BOARD, 'beforeSend');
+    await startRecording(2, 'external', 'https://other.test/job', 'beforeSend');
     await pushStep(1, step({ id: 'only-1' }));
     expect((await getRecording(2))?.steps).toEqual([]);
     expect((await getRecording(2))?.flow).toBe('external');
@@ -53,7 +53,7 @@ describe('one tab, one recording', () => {
   });
 
   it('hands the recording back once and then forgets it', async () => {
-    await startRecording(1, 'internal', BOARD);
+    await startRecording(1, 'internal', BOARD, 'beforeSend');
     await pushStep(1, step());
     expect((await stopRecording(1))?.steps).toHaveLength(1);
     expect(await getRecording(1)).toBeUndefined();
@@ -66,7 +66,7 @@ describe('one tab, one recording', () => {
    */
   it('forgets a recording that has been open far too long', async () => {
     vi.useFakeTimers();
-    await startRecording(1, 'internal', BOARD);
+    await startRecording(1, 'internal', BOARD, 'beforeSend');
     vi.setSystemTime(Date.now() + 3 * 60 * 60_000);
     expect(await getRecording(1)).toBeUndefined();
   });
@@ -79,7 +79,7 @@ describe('crossing the handoff', () => {
    * notice, so that is where the destination is learned.
    */
   it('learns the employer’s URL from the first step that arrives from there', async () => {
-    await startRecording(1, 'external', BOARD);
+    await startRecording(1, 'external', BOARD, 'beforeSend');
     await pushStep(1, step({ leg: 'posting' }));
     expect((await getRecording(1))?.destinationUrl).toBeUndefined();
 
@@ -88,7 +88,7 @@ describe('crossing the handoff', () => {
   });
 
   it('keeps the first destination URL, not the last', async () => {
-    await startRecording(1, 'external', BOARD);
+    await startRecording(1, 'external', BOARD, 'beforeSend');
     await pushStep(1, step({ leg: 'destination', url: ATS }));
     await pushStep(1, step({ leg: 'destination', url: `${ATS}/step-2` }));
     expect((await getRecording(1))?.destinationUrl).toBe(ATS);
@@ -100,7 +100,7 @@ describe('crossing the handoff', () => {
    * content script asks whether it is recording, the tab that knew has gone.
    */
   it('passes the recording to a tab opened by the recording tab', async () => {
-    await startRecording(1, 'external', BOARD);
+    await startRecording(1, 'external', BOARD, 'beforeSend');
     await pushStep(1, step({ id: 'on-the-board' }));
 
     await inheritRecording(1, 2);
@@ -124,14 +124,14 @@ describe('crossing the handoff', () => {
  */
 describe('changing your mind mid-recording', () => {
   it('undoes the last step', async () => {
-    await startRecording(1, 'internal', BOARD);
+    await startRecording(1, 'internal', BOARD, 'beforeSend');
     await pushStep(1, step({ id: 'a' }));
     await pushStep(1, step({ id: 'b' }));
     expect((await popStep(1))?.steps.map((s) => s.id)).toEqual(['a']);
   });
 
   it('survives an undo with nothing to undo', async () => {
-    await startRecording(1, 'internal', BOARD);
+    await startRecording(1, 'internal', BOARD, 'beforeSend');
     expect((await popStep(1))?.steps).toEqual([]);
   });
 });

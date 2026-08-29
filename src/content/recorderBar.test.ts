@@ -14,17 +14,23 @@ import {
   RecorderBar, bindLabel, type RecorderBarCallbacks, type RecorderBarState,
 } from './recorderBar';
 import type { BindKey } from '../shared/recording';
-import { ACTION_LABELS } from '../shared/labels';
+import { ACTION_LABELS, heldSendNotice } from '../shared/labels';
 import { RECORDER_HOST_ID } from './extensionUi';
 
 const noop = () => {};
 
 function callbacks(over: Partial<RecorderBarCallbacks> = {}): RecorderBarCallbacks {
-  return { onInteract: noop, onDeclare: noop, onReset: noop, onUndo: noop, onDone: noop, ...over };
+  return {
+    onInteract: noop, onForceSend: noop, onDeclare: noop, onMarkConfirmation: noop,
+    onReset: noop, onUndo: noop, onDone: noop, ...over,
+  };
 }
 
 function state(over: Partial<RecorderBarState> = {}): RecorderBarState {
-  return { flow: 'internal', leg: 'posting', stepCount: 2, mode: 'idle', bound: [], ...over };
+  return {
+    phase: 'beforeSend', flow: 'internal', leg: 'posting', stepCount: 2, mode: 'idle',
+    bound: [], ...over,
+  };
 }
 
 let bar: RecorderBar | undefined;
@@ -275,5 +281,113 @@ describe('picking something out of the Declare menu', () => {
     expect(toggle.getAttribute('aria-expanded')).toBe('false');
     toggle.click();
     expect(menu(shadow)).toBeTruthy();
+  });
+});
+
+/* ---------------- The seam: a press that would send ---------------- */
+
+/**
+ * The first pass cannot send, and the bar is the only thing that can say why the
+ * button the user just pressed did nothing. Without this line and the way past it,
+ * the honest reading of a dead Send button is that the extension is broken.
+ */
+describe('a held send', () => {
+  it('says what happened, and offers the way past it', () => {
+    let forced = 0;
+    const s = render(
+      state({ notice: heldSendNotice('Submit application') }),
+      callbacks({ onForceSend: () => { forced += 1; } }),
+    );
+    expect(s.querySelector('.cf-rec-notice')?.textContent).toContain('Submit application');
+
+    button(s, ACTION_LABELS.notTheSendButton).click();
+    expect(forced).toBe(1);
+  });
+
+  /** It replaces the readout rather than joining it: two lines fight at 390px. */
+  it('takes the place of what usually happened', () => {
+    const s = render(state({ notice: 'held', last: undefined }));
+    expect(s.querySelector('.cf-rec-what')?.textContent).toBe('held');
+  });
+
+  /** Everything the first pass is for is still there behind it. */
+  it('leaves the rest of the bar alone', () => {
+    const s = render(state({ notice: 'held' }));
+    expect(button(s, ACTION_LABELS.interact)).toBeTruthy();
+    expect(button(s, ACTION_LABELS.stopRecording)).toBeTruthy();
+  });
+});
+
+/* ---------------- The second pass ---------------- */
+
+/**
+ * One question over a page nothing is holding still. The user has just applied for
+ * real and is looking at a bar they did not ask for, so what it says has to be a
+ * sentence — and what it offers has to be one thing.
+ */
+describe('the after-sending bar', () => {
+  const after = (over: Partial<RecorderBarState> = {}) =>
+    render(state({ phase: 'afterSend', ...over }));
+
+  it('asks for the one mark, and nothing else', () => {
+    const s = after();
+    expect(button(s, ACTION_LABELS.markConfirmation)).toBeTruthy();
+    expect(button(s, ACTION_LABELS.notYet)).toBeTruthy();
+    // No page to hand back, and nothing recorded to take back.
+    for (const gone of [
+      ACTION_LABELS.interact, ACTION_LABELS.declare,
+      ACTION_LABELS.undo, ACTION_LABELS.resetRecording,
+    ]) expect(button(s, gone)).toBeUndefined();
+  });
+
+  it('makes the mark the primary, and only it', () => {
+    const s = after();
+    const primaries = [...s.querySelectorAll('.cf-btn.primary')];
+    expect(primaries).toHaveLength(1);
+    expect(primaries[0].textContent).toBe(ACTION_LABELS.markConfirmation);
+  });
+
+  /**
+   * No clock and no step count. This pass records nothing and lasts as long as the
+   * site takes to answer, and a ticking timer over "waiting for the confirmation"
+   * reads as a deadline that does not exist.
+   */
+  it('counts nothing, because it records nothing', () => {
+    const s = after({ stepCount: 7 });
+    expect(s.querySelector('.cf-rec-clock')).toBeNull();
+    expect(s.querySelector('.cf-rec-count')?.textContent ?? '').not.toContain('7');
+  });
+
+  it('reaches the picker through its one button', () => {
+    let marked = 0;
+    const s = render(state({ phase: 'afterSend' }), callbacks({ onMarkConfirmation: () => { marked += 1; } }));
+    button(s, ACTION_LABELS.markConfirmation).click();
+    expect(marked).toBe(1);
+  });
+
+  /**
+   * Once the mark is written the bar is only still up to report it, so the ask has to
+   * go: a live "Mark the confirmation" beside "Saved" invites the user to do the
+   * finished thing again, on a page where there is nothing left to point at.
+   */
+  it('turns into its own report once the mark lands', () => {
+    const s = after({ notice: 'Saved. This site can read its own confirmations now.' });
+    expect(s.querySelector('.cf-rec-what')?.textContent).toContain('Saved.');
+    expect(button(s, ACTION_LABELS.markConfirmation)).toBeUndefined();
+    expect(button(s, ACTION_LABELS.done)).toBeTruthy();
+  });
+
+  /**
+   * The pass is over, so the live dot goes with it. A pulsing red dot beside a report
+   * that the site is finished says the opposite of the sentence next to it.
+   */
+  it('says it is running while it waits', () => {
+    expect(after().querySelector('.cf-rec-live')).not.toBeNull();
+  });
+
+  it('stops claiming to be running once it has finished', () => {
+    const done = after({ notice: 'Saved.' });
+    expect(done.querySelector('.cf-rec-live')).toBeNull();
+    expect(done.querySelector('.cf-rec-state')?.textContent).toContain('finished');
   });
 });

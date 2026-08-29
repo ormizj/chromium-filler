@@ -61,6 +61,20 @@ export const SCENARIOS = [
     expect: 'the Send button and the confirmation are saved, and the Send click never reaches prep',
   },
   {
+    /*
+     * The false positive the held send has to survive. `looksLikeSend` matches
+     * "apply", and ModalLever's "Apply for this role" is the button that *opens* the
+     * form — held with no way past it, the first pass could not be run here at all.
+     * Also the site the second pass is exercised on, being one Apply away from a real
+     * confirmation.
+     */
+    id: 'record-apply-lever',
+    flow: 'recording',
+    title: 'ModalLever — record where the button that opens the form says "Apply"',
+    url: site(HOSTS.board, 'modal-lever'),
+    expect: 'the held press is refusable, and the real Send button is still held after it',
+  },
+  {
     id: 'record-external',
     flow: 'recording',
     title: 'MixedBoard \u2192 employer ATS — record across a handoff',

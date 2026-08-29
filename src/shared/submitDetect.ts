@@ -108,6 +108,22 @@ function isSubmitType(el: HTMLElement): boolean {
   return false;
 }
 
+/**
+ * Could this element ever be nominated as the Send button?
+ *
+ * Exported so the recorder's held press and this detector share one answer. The
+ * recorder holds a press that reads like a send, and a *label* is not enough on its
+ * own: "Apply on company website" is the apply link of every two-step posting on
+ * every board, and holding that would mean the first pass could never cross a
+ * handoff — the exact flow the second half of a recording exists for. An anchor that
+ * navigates is a handoff; only a control this function accepts can be the thing that
+ * sends. If `findSubmitControl` would never pick it, the hold has no business
+ * refusing it.
+ */
+export function isSubmitCandidate(el: Element): boolean {
+  return el.matches(CANDIDATE_SELECTOR);
+}
+
 /** 0 when the control is vetoed or says nothing; higher is a better candidate. */
 function score(el: HTMLElement): number {
   const sources = sourcesFor(el);
