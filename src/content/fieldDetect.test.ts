@@ -1,5 +1,5 @@
 import { describe, it, expect, afterEach } from 'vitest';
-import { detectFields } from './fieldDetect';
+import { detectFields, detectForConfig, DETECTABLE_FIELDS } from './fieldDetect';
 import type { FieldKey } from '../shared/types';
 
 function mount(html: string): HTMLElement {
@@ -228,5 +228,83 @@ describe('detectFields — cover-letter file input', () => {
     const by = get(root);
     expect(by.get('coverLetter')?.element?.id).toBe('cl-text');
     expect(by.get('resume')?.element?.id).toBe('cv');
+  });
+});
+
+/**
+ * Detection as a site is *configured*, which is what all three real callers want —
+ * the fill flow, the setup panel and the sweep a recording paints over the page.
+ *
+ * The one thing it adds over `detectFields` is the CV fold-in, and the reason that
+ * is not just an entry in `fieldOverrides` is that `cvUpload` is a file selector on
+ * a field of its own. Before this it was re-applied by hand at every call site.
+ */
+describe('detectForConfig — detection as the site is configured', () => {
+  it('folds the saved CV upload in over whatever the heuristics found', () => {
+    const root = mount(`
+      <input type="file" id="attachment" />
+      <input type="file" id="the-cv" />
+    `);
+    const got = detectForConfig({
+      root, fields: DETECTABLE_FIELDS, config: { cvUpload: '#the-cv' },
+    }).find((d) => d.field === 'resume')!;
+
+    expect(got.element).toBe(root.querySelector('#the-cv'));
+    expect(got.source).toBe('override');
+    expect(got.confidence).toBe('high');
+    expect(got.selectorUsed).toBe('#the-cv');
+  });
+
+  /**
+   * A saved selector that has stopped matching must leave the guess alone rather
+   * than overwrite it with nothing — the same rule `findSubmitControl` follows, and
+   * the same failure if broken: the CV silently stops being attached.
+   */
+  it('leaves the heuristic alone when the saved upload no longer resolves', () => {
+    const root = mount('<input type="file" name="resume" />');
+    const got = detectForConfig({
+      root, fields: DETECTABLE_FIELDS, config: { cvUpload: '#gone' },
+    }).find((d) => d.field === 'resume')!;
+
+    expect(got.element).toBe(root.querySelector('input'));
+    expect(got.source).not.toBe('override');
+  });
+
+  /** Overrides still beat the heuristics, exactly as `detectFields` has them do. */
+  it('passes the field overrides through', () => {
+    const root = mount('<input id="a" /><input id="b" name="email" />');
+    const got = detectForConfig({
+      root, fields: DETECTABLE_FIELDS, config: { fieldOverrides: { email: '#a' } },
+    }).find((d) => d.field === 'email')!;
+    expect(got.element).toBe(root.querySelector('#a'));
+  });
+
+  /** `autoDetect: false` turns the guessing off; the fold-in is not guessing. */
+  it('still folds the CV in with auto-detection switched off', () => {
+    const root = mount('<input type="file" id="the-cv" /><input name="email" />');
+    const got = detectForConfig({
+      root, fields: DETECTABLE_FIELDS, config: { autoDetect: false, cvUpload: '#the-cv' },
+    });
+    expect(got.find((d) => d.field === 'resume')!.element).toBe(root.querySelector('#the-cv'));
+    expect(got.find((d) => d.field === 'email')!.element).toBeNull();
+  });
+
+  /**
+   * The destination leg of a recorded handoff. That content script runs on the
+   * employer's site, where `findMatchingConfig` returns nothing and
+   * `ensureConfigForUrl` deliberately does not run until Save — so a sweep there has
+   * to mean "the heuristics, and nothing saved" rather than throw.
+   */
+  it('runs on a site nothing has ever been saved for', () => {
+    const root = mount('<input id="email" /><input type="file" name="cv" />');
+    const got = detectForConfig({ root, fields: DETECTABLE_FIELDS });
+    expect(got.find((d) => d.field === 'email')!.element).toBe(root.querySelector('#email'));
+    expect(got.find((d) => d.field === 'resume')!.element).not.toBeNull();
+  });
+
+  /** The CV leads, because it is the one document an application cannot go without. */
+  it('lists the CV first', () => {
+    expect(DETECTABLE_FIELDS[0]).toBe('resume');
+    expect(DETECTABLE_FIELDS).toHaveLength(16);
   });
 });

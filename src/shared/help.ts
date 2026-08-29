@@ -438,7 +438,7 @@ export const SETUP_STEP_HELP: Record<SetupStepKey, GroupHelp> = {
     example: '*://boards.acme.com/jobs/*',
     rows: [
       {
-        label: 'Apply on this site / on the employer\'s site',
+        label: 'Apply on this site / on the employer’s site',
         body: 'Records one application and writes the config from it. The two differ '
           + 'only in what the bar asks you to mark; what actually happens wins either '
           + 'way, so a wrong guess here costs nothing.',
@@ -651,7 +651,9 @@ export const CONCEPT_HELP: Record<ConceptKey, HelpEntry> = {
       + 'It records where things are, never what you typed, and saves nothing until you '
       + 'have read the summary at the end and pressed Save. Nothing is submitted on your '
       + 'behalf: the application that goes in during a recording is the one you send '
-      + 'yourself.',
+      + 'yourself. If it goes wrong, "Undo" takes back the last step and "Reset" throws '
+      + 'the whole recording away and starts it again from the posting, with the page '
+      + 'reloaded back to how it was found.',
     when: 'Any site you have not set up. The two buttons ask where the application '
       + 'actually happens — on this site, or on the employer\'s own after a handoff — '
       + 'and getting it wrong costs nothing, because what really happened wins.',

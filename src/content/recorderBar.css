@@ -44,12 +44,18 @@
  * Under 640px the bar spans the screen, like the sheets do — a centred pill with
  * four controls in it wraps into a block at 390px otherwise.
  *
- * It wraps into **three** rows, in a deliberate order: what is being recorded and
- * the way out share the first, the two options take the second, and the readout of
- * what just happened — the one thing here that is not a control — takes the third.
- * Left to source order the two options moved depending on how long the readout
- * happened to be, and Undo/Done moved with them. The controls that are always there
- * must not move, which is exactly what a HUD is for.
+ * It wraps into **four** rows, in a deliberate order: what is being recorded, then the
+ * three ways out, then the two options, then the readout of what just happened — the
+ * one thing here that is not a control. Left to source order the options moved
+ * depending on how long the readout happened to be, and the exits moved with them. The
+ * controls that are always there must not move, which is exactly what a HUD is for.
+ *
+ * It was three rows while the exits were two buttons, sharing the first with the
+ * readout. `Reset` is the third, and the row will not hold it: at 390px the state
+ * readout ends around x=175 and Undo began around x=258, so the ~80px of slack is
+ * gone the moment the clock reaches two digits or the count reaches ten. A row that
+ * reflows while the user is looking at it is the failure this order exists to stop,
+ * so the exits take a row instead of borrowing one.
  */
 @media (max-width: 640px) {
   .cf-bar {
@@ -62,7 +68,9 @@
   }
 
   .cf-rec-state { order: 1; }
-  .cf-rec-exits { order: 2; }
+  /* A row of its own, because three controls will not share one with the readout at
+     390px — see the end-of-file block for the rest of what that costs. */
+  .cf-rec-exits { order: 2; flex-basis: 100%; }
 
   /*
    * Order only. Everything else these two need at this width is at the **end** of
@@ -191,14 +199,12 @@
  * and downward otherwise — the same "open away from the edge you are docked to" rule
  * the modal's overflow menu follows.
  */
-.cf-rec-menu {
+.cf-rec-menu,
+.cf-rec-confirm {
   position: absolute;
   right: 0;
   top: calc(100% + var(--space-1));
   z-index: 1;
-  max-height: 60vh;
-  overflow-y: auto;
-  min-width: 240px;
   padding: var(--space-1);
   background: var(--bg);
   border: 1px solid var(--border);
@@ -206,11 +212,45 @@
   box-shadow: var(--shadow-2);
 }
 
+.cf-rec-menu {
+  max-height: 60vh;
+  overflow-y: auto;
+  min-width: 240px;
+}
+
 @media (pointer: coarse) {
-  .cf-rec-menu {
+  .cf-rec-menu,
+  .cf-rec-confirm {
     top: auto;
     bottom: calc(100% + var(--space-1));
   }
+}
+
+/*
+ * The warning behind Reset. It anchors right like the menu, so on a wide bar — where
+ * Reset sits near the right-hand end — it opens back across the bar rather than out
+ * past its edge. On a narrow one Reset is the *leftmost* third of a row of its own and
+ * that would run off the left of the screen, so the end-of-file block flips it. The
+ * cap keeps it inside 390px either way.
+ */
+.cf-rec-confirm {
+  width: max-content;
+  max-width: min(280px, calc(100vw - 2 * var(--space-4)));
+  padding: var(--space-2);
+}
+
+.cf-rec-confirm-text {
+  color: var(--fg);
+}
+
+/* The two answers, with the destructive one held against the far edge — away from the
+   Reset button that opened this, so the second press is never a repeat of the first
+   landing in the same place. */
+.cf-rec-confirm-row {
+  display: flex;
+  justify-content: flex-end;
+  gap: var(--space-1);
+  margin-top: var(--space-2);
 }
 
 .cf-rec-menu-head {
@@ -250,14 +290,29 @@
   /* Two options, one row, equal halves — the popup's idiom. Left to shrink-to-fit,
      "Click one thing…" is half again the width of "Interact", so the Declare button
      would move under the thumb every time the page went live. */
-  .cf-rec-options > * {
+  .cf-rec-options > *,
+  .cf-rec-exits > * {
     flex: 1 1 0;
     min-width: 0;
   }
 
-  .cf-rec-options .cf-btn {
+  .cf-rec-options .cf-btn,
+  .cf-rec-exits .cf-btn {
     width: 100%;
     min-width: 0;
     box-sizing: border-box;
+  }
+
+  /* The wide layout pushes the exits to the right-hand end of a shared row. On a row
+     of their own there is no end to be pushed to, and the margin would eat a third. */
+  .cf-rec-exits {
+    margin-left: 0;
+  }
+
+  /* Reset is the leftmost third here, not the right-hand end, so the warning has to
+     open out from under it rather than back across a bar that is not there. */
+  .cf-rec-confirm {
+    right: auto;
+    left: 0;
   }
 }

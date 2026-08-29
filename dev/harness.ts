@@ -36,6 +36,11 @@ import { startPicker } from '../src/content/picker';
 import { describeElement } from '../src/shared/elementChain';
 import { SETUP_STEP_ORDER, type SetupStepKey } from '../src/shared/setupSteps';
 import { RecorderBar } from '../src/content/recorderBar';
+import { RECORDER_HOST_ID } from '../src/content/extensionUi';
+import { detectForConfig, DETECTABLE_FIELDS } from '../src/content/fieldDetect';
+import { highlight } from '../src/content/fill';
+import { FIELD_LABELS } from '../src/shared/fieldKeys';
+import { ACTION_LABELS } from '../src/shared/labels';
 import {
   compileRecording, type RecordFlow, type Recording, type RecordedStep,
 } from '../src/shared/recording';
@@ -129,17 +134,28 @@ async function bootPage(name: 'popup' | 'options'): Promise<void> {
 function fakePosting(): void {
   document.body.style.cssText =
     'margin:0;padding:20px;font:15px/1.6 system-ui,sans-serif;background:#fff;color:#111827';
+  // The controls carry real handles — `for`/`id`, a `name`, a file input — because
+  // `&marks=1` runs the *real* `detectForConfig` over this posting rather than posing
+  // its chips. Without them detection claims nothing and the marks are a blank page,
+  // which is the one thing that rendering exists to disprove. It is a fairer stand-in
+  // for a job form either way: a posting whose fields nothing can identify is not one.
+  const field = 'width:100%;padding:8px;border:1px solid #d1d5db;border-radius:6px';
+  const lbl = 'display:block;margin:16px 0 4px;font-weight:600';
   document.body.innerHTML = `
     <h1 style="font-size:24px;margin:0 0 12px">Staff Platform Engineer</h1>
     <p style="color:#4b5563">Acme is hiring a Staff Platform Engineer to own the
     deployment pipeline end to end. You will work across infrastructure, developer
     tooling, and release engineering.</p>
-    <label style="display:block;margin:16px 0 4px;font-weight:600">Full name</label>
-    <input style="width:100%;padding:8px;border:1px solid #d1d5db;border-radius:6px" value="Ada Lovelace" />
-    <label style="display:block;margin:16px 0 4px;font-weight:600">Email</label>
-    <input style="width:100%;padding:8px;border:1px solid #d1d5db;border-radius:6px" value="ada@example.com" />
-    <label style="display:block;margin:16px 0 4px;font-weight:600">Cover letter</label>
-    <textarea rows="4" style="width:100%;padding:8px;border:1px solid #d1d5db;border-radius:6px">I love building widgets.</textarea>
+    <label for="full_name" style="${lbl}">Full name</label>
+    <input id="full_name" name="full_name" style="${field}" value="Ada Lovelace" />
+    <label for="email" style="${lbl}">Email</label>
+    <input id="email" name="email" type="email" style="${field}" value="ada@example.com" />
+    <label for="phone" style="${lbl}">Phone</label>
+    <input id="phone" name="phone" style="${field}" />
+    <label for="cover_letter" style="${lbl}">Cover letter</label>
+    <textarea id="cover_letter" name="cover_letter" rows="4" style="${field}">I love building widgets.</textarea>
+    <label for="resume" style="${lbl}">Résumé / CV</label>
+    <input id="resume" name="resume" type="file" style="margin-top:4px" />
   `;
 }
 
@@ -509,6 +525,23 @@ function bootSetup(): void {
    * so the panel is all verdict and redirect selectors, and every form-field row
    * is legitimately grey. That is what `state=external` shows.
    */
+  /**
+   * A site nobody has ever taught the extension anything about: nothing saved, no
+   * page actions. That is exactly what `isUnconfigured` tests, and so what routes the
+   * panel to the offer. Named once because two states are that site — one where the
+   * heuristics found something and one where they found nothing.
+   */
+  const unconfigured: Partial<SetupData> = {
+    prep: [],
+    submitCv: [],
+    beforeFollow: [],
+    fields: BASE_SETUP.fields.map((f) => ({ ...f, hasSave: false })),
+    containers: BASE_SETUP.containers.map((c) => ({ ...c, hasSave: false })),
+    redirect: BASE_SETUP.redirect.map((r) => ({ ...r, hasSave: false })),
+    submit: { ...BASE_SETUP.submit, hasSave: false },
+    success: { ...BASE_SETUP.success, status: 'none' as const, note: 'not set', hasSave: false },
+  };
+
   const SETUP_STATES: Record<string, Partial<SetupData>> = {
     default: {},
     /**
@@ -571,25 +604,50 @@ function bootSetup(): void {
      * What Site setup opens on for a site nobody has configured — which is the state
      * every new site is in, and so the most-seen screen in the whole panel.
      */
-    offer: {
-      prep: [],
-      submitCv: [],
-      beforeFollow: [],
-      fields: BASE_SETUP.fields.map((f) => ({ ...f, hasSave: false })),
-      containers: BASE_SETUP.containers.map((c) => ({ ...c, hasSave: false })),
-      redirect: BASE_SETUP.redirect.map((r) => ({ ...r, hasSave: false })),
-      submit: { ...BASE_SETUP.submit, hasSave: false },
-      success: { ...BASE_SETUP.success, status: 'none' as const, note: 'not set', hasSave: false },
+    offer: unconfigured,
+    /**
+     * The offer on a page detection can see nothing on. Its own rendering because it
+     * is the shape the count line exists for — all three statuses stay on the line
+     * even at zero, since the line is a key as well as a tally, and the chip row goes
+     * rather than draw a heading over nothing. `BASE_SETUP`'s fixture finds five of
+     * six, so it can never show either.
+     */
+    'offer-empty': {
+      ...unconfigured,
+      fields: BASE_SETUP.fields.map((f) => ({
+        ...f, status: 'none' as const, note: 'not found', hasSave: false,
+      })),
     },
     review: recordedState('internal'),
     recording: recordedState('internal'),
     'recording-armed': recordedState('internal'),
+    'recording-reset': recordedState('internal'),
     /**
      * The same review for a posting that handed off. Two configs come out of it
      * rather than one, and the lead sentence is different — which is exactly the
      * kind of thing that goes unnoticed until someone reads it on a phone.
      */
     'review-external': recordedState('external'),
+    /**
+     * The two ends of Save, which used to be a drop into the wizard and so had no
+     * rendering of its own at all. They are one screen with the coral on different
+     * buttons, and that swap is the whole point of it — so both need a state, or
+     * only whichever one the fixture happens to produce ever gets looked at.
+     *
+     * `saved` is the ordinary outcome of a recording: the confirmation was never
+     * declared, so `send` still has work and "Review configuration" is the primary.
+     */
+    saved: {
+      success: {
+        key: 'successSelector',
+        label: 'Confirmation element',
+        status: 'none',
+        note: 'not set — Apply is greyed out',
+        hasSave: false,
+      },
+    },
+    /** The recording that got everything: nothing outstanding, and Done is the primary. */
+    'saved-clean': {},
     external: {
       name: 'ExternalBoard',
       urlPattern: '*://*/sites/external-board.html*',
@@ -613,25 +671,30 @@ function bootSetup(): void {
   // The two review states are a mode, not data — the panel decides whether it is
   // showing them, for the same reason it owns which step is open.
   if (state.startsWith('review')) panel.showReview(true);
-  if (state === 'offer') panel.showOffer(true);
+  if (state.startsWith('offer')) panel.showOffer();
+  // The flow is a mode too, and cleared by the time this screen shows on a real
+  // page — so the harness names it rather than deriving it from a recording.
+  if (state.startsWith('saved')) panel.showSaved('internal');
 
   /**
    * What the page looks like *during* a recording: the panel folded to its pill and
    * the bar up. The bar is its own surface and never takes a pill slot, so this is
    * also the check that it does not land on top of one.
    *
-   * Two states, because the bar has two renderings and the loud one is the whole
-   * point of it. `recording` is the resting bar over an inert page; `recording-armed`
-   * is what Interact does — the page live under the user's finger, which is a thing
-   * that has to *look* like a mode and is otherwise reachable only by pressing a
-   * button, which a screenshot cannot do.
+   * Three states, because the bar has three renderings and two of them are only
+   * reachable by pressing something, which a screenshot cannot do. `recording` is the
+   * resting bar over an inert page; `recording-armed` is what Interact does — the page
+   * live under the user's finger, which has to *look* like a mode; `recording-reset` is
+   * the warning behind Reset, the one control here with no way back, and the one thing
+   * on the bar that has to be read before it is answered.
    */
-  if (state === 'recording' || state === 'recording-armed') {
+  if (state === 'recording' || state === 'recording-armed' || state === 'recording-reset') {
     panel.minimize();
     panel.setSlot(0);
     const bar = new RecorderBar({
       onInteract: () => console.log('[harness] interact'),
       onDeclare: (b) => console.log('[harness] declare', b),
+      onReset: () => console.log('[harness] reset recording'),
       onUndo: () => console.log('[harness] undo step'),
       onDone: () => console.log('[harness] recording done'),
     });
@@ -644,6 +707,13 @@ function bootSetup(): void {
       last: steps[1],
       bound: ['field:email'],
     });
+    // Pressed rather than posed: the confirm is opened by the same click a user makes,
+    // so the harness cannot show a state the bar itself cannot reach.
+    if (state === 'recording-reset') {
+      const host = document.getElementById(RECORDER_HOST_ID) as HTMLElement | null;
+      host?.shadowRoot?.querySelectorAll<HTMLButtonElement>('.cf-rec-exits .cf-btn')
+        .forEach((b) => { if (b.textContent === ACTION_LABELS.resetRecording) b.click(); });
+    }
   }
 
   // `&step=…` opens one of the six wizard steps. Each is a distinct rendering
@@ -654,6 +724,27 @@ function bootSetup(): void {
   const step = params.get('step');
   if (step && (SETUP_STEP_ORDER as readonly string[]).includes(step)) {
     panel.setStep(step as SetupStepKey);
+  }
+
+  /**
+   * The marks on the page behind the card — the other half of the same feature, and
+   * the half no shadow-root screenshot can show: they are drawn on the *host* page's
+   * light DOM, so they are invisible to everything that inspects the panel.
+   *
+   * A **parameter, not a state** (the `pills=1` precedent), because a mark is a
+   * rendering of the page rather than of the panel and has to be able to co-exist
+   * with any `state` or `step` — which a state could not, since `setStep()` forces
+   * `mode='wizard'`.
+   *
+   * It runs the real `detectForConfig` over `fakePosting()` rather than posing three
+   * chips, because the thing worth looking at is what the real path produces: which
+   * of the fake posting's controls the heuristics actually claim, and where a chip
+   * lands when the field it names is the first thing on the page.
+   */
+  if (params.get('marks') === '1') {
+    for (const d of detectForConfig({ root: document, fields: DETECTABLE_FIELDS })) {
+      if (d.element) highlight(d.element, d.confidence, FIELD_LABELS[d.field]);
+    }
   }
 
   // Both sheets folded, so their pills stack in the rail. The one arrangement

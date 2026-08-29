@@ -41,11 +41,12 @@ footer overflow menu.
 
 `&state=…` picks which **flow** the surface is showing — setup also has
 `offer` (what a never-configured site opens on — the most-seen screen in the
-panel), `recording` and `recording-armed` (the bar up over a page held inert, and
-the same bar with the page live for one gesture — the panel folded to its pill in
-both) and `review` /
+panel), `recording`, `recording-armed` and `recording-reset` (the bar up over a page
+held inert, the same bar with the page live for one gesture, and the warning behind
+Reset — the panel folded to its pill in all three), `review` /
 `review-external`, which are the two renderings a real page can only reach by
-applying to a job; modal: `long`, `redirect`,
+applying to a job, and `saved` / `saved-clean`, the two ends of Save — the second
+being the only way to see the coral move from `Review configuration` onto `Done`; modal: `long`, `redirect`,
 `redirect-followed`, `app-link`, `landed`, `empty`, `listing`, `failed-fill`, `apply-unset`,
 `apply-unverified`, `applied`, `already-applied`, `already-applied-redirect`,
 `flush`, `fullscreen`; setup: `external`, `help`,
@@ -65,6 +66,19 @@ link to them, which is most of why the confirmed state went unexamined.
 whole job, and a three-line description proves nothing about it.
 `setup&state=help` is the first-run panel with the legend open, which is
 otherwise reachable exactly once per profile: dismissing it persists.
+`setup&state=offer-empty` is the offer on a page detection can see nothing on — the
+shape the count line exists for, and one `BASE_SETUP` (which finds five of six) can
+never produce.
+
+**`&marks=1` is a parameter, not a state**, and draws the on-page name chips over
+`fakePosting()`. A parameter because a mark is a rendering of the *page* rather than
+of the panel, so it has to pair with any `state` or `step` — which a state could not,
+`setStep()` forcing `mode='wizard'`. It runs the real `detectForConfig` rather than
+posing three chips, which is why `fakePosting()`'s controls carry real `for`/`id`
+handles: a posting whose fields nothing can identify would render the marks as a blank
+page, the one thing that view exists to disprove. Pair it with `state=recording` for
+what the feature is actually for — the bar up, the panel a pill, and every field the
+extension recognised named on the page.
 
 `&step=site|prep|kind|info|fields|send` opens one of the setup wizard's six
 steps. Only one is ever on screen, so without this the other five are reachable
@@ -227,7 +241,11 @@ and that dot is what the E2E `.cf-view .cf-dot.none` assertions see.
 **The report's key is its count line, above the rows.** `.cf-summary` is
 `● n filled · ◐ n to check · ○ n unmatched` — the dot, the count and the word
 from `STATUS_TEXT` in one item, all three statuses present even at zero, because
-the line is a key as well as a tally. As a separate legend under the rows it was
+the line is a key as well as a tally. Two surfaces draw it now — the report, and the
+setup panel's offer over the fields it recognised — so the rule and its builder live
+where shared things live: `.cf-summary` in `primitives.css`, `summaryLine()` in
+`src/ui/`. **The words are an argument, not a constant**: `STATUS_TEXT` on the modal,
+`SETUP_STATUS_TEXT` on the panel, for the reason under labels.ts below. As a separate legend under the rows it was
 read after the colours it explains, if at all: on a sixteen-field report the key
 was a scroll past everything it was meant to help with. The Job view's three stat
 tiles carry the same dot for the same reason — their number is coloured by
@@ -255,6 +273,8 @@ pure, unit-tested logic):
   "LinkedIn" where the employer should be.
   `picker.ts` = click/tap-to-pick override: click to select, click the same spot
   again to step one level in, Confirm to save (`shared/elementChain.ts`).
+  `fill.ts`'s `highlight` takes an optional **label**, and `fieldTags.ts` draws it as
+  a name chip beside the outline; `clearHighlights` is the single teardown for both.
 - **`src/background/service_worker.ts`** — opens options, handles the `SUBMITTED`
   message (mark URL applied + optional tab close), and owns the two-step redirect
   watcher (below). `session.ts` owns the queue session (below).
@@ -398,17 +418,28 @@ in the popup's session chips).
 
 `src/shared/labels.ts` is the wording counterpart to help.ts: `FLOW_TEXT`
 (the seven flow states above, keyed `Record<FlowKey, …>`), `STATUS_TEXT`
-(tile / word / aria for each `MatchConfidence`) and `ACTION_LABELS` (Apply, Skip,
-Confirm, Pick, …), typed `Record<>` so a new status or action fails
-`npm run typecheck` until it is named. Every surface renders its status words and
+(tile / word / aria for each `MatchConfidence`), `SETUP_STATUS_TEXT` (the same three
+outcomes worded for *setting a site up*, keyed `Record<RowStatus, …>`) and
+`ACTION_LABELS` (Apply, Skip, Confirm, Pick, …), typed `Record<>` so a new status or
+action fails `npm run typecheck` until it is named.
+
+**The two status catalogs disagree about `none`, and that is the point of there being
+two.** `STATUS_TEXT` words the result of a *fill*, where an unmatched row is a field
+nothing on the page matched. On the setup surfaces `detectFields` returns a row per
+*wanted* field, so a grey row means the page never asked for it — the ordinary state
+of most of the sixteen on any real form, and the exact rule `setupSteps.fields`
+encodes when it counts only the CV as work. So `SETUP_STATUS_TEXT.none` is "not on
+this page", and borrowing "unmatched" there would tell a user eleven of their fields
+had failed on the one screen whose job is to say what already works. `high`/`low`
+differ in tense too: nothing has been filled yet on that screen. Every surface renders its status words and
 button verbs from here — the modal legend, summary, stat tiles, the setup rows
 and the popup badge no longer disagree. `fieldStatus.STATUS_LABELS` re-exports
 the aria forms from it.
 
 `src/ui/palette.ts` is the **one** legitimate copy of the token colours, for the
-two marks drawn on the *host* page (the field highlight in `fill.ts`, the
-click-to-pick toolbar in `picker.ts`) — content-script light-DOM never sees
-tokens.css, so it cannot read a `var(--…)`.
+three marks drawn on the *host* page (the field highlight in `fill.ts`, the name
+chips beside it in `fieldTags.ts`, and the click-to-pick toolbar in `picker.ts`) —
+content-script light-DOM never sees tokens.css, so it cannot read a `var(--…)`.
 
 `src/ui/designSystem.test.ts` is the guardrail that makes "zero inconsistencies,
 now and in the future" mechanical: it fails the build if any CSS/TS outside the
@@ -825,14 +856,62 @@ whole-form assignment) on the `input` step an armed click into a field produces.
 bar no longer carries a control to refuse it: that moved to the review's bind select,
 which is why that select now offers the sixteen profile fields under an `<optgroup>`.
 
-At ≤640px the bar wraps to **three** rows in a fixed order — state and the exits share
-the first, the two options take the second, the readout takes the third — because left
-to source order the options moved with the length of the readout and took Undo/Done
-with them. The two options are **equal halves**, and both are wrapped in an identical
-`.cf-rec-wrap` to make that true: a bare `<button>` beside a `<div>` under
+**The exits are three sizes of changing your mind** — `Reset` · `Undo` · `Done` —
+and Reset is the one with no way back, so it asks first.
+
+`Undo` can only ever take a step out of the *list*; it cannot take back what the step
+did. The "Show more" is still open, the form is still on page three, and after a
+handoff the browser is on the employer's site entirely — so a recording carried on
+after a few undos is compiled against a page state no later visit ever reaches, and
+`prep` replays into it. That is why Reset **reloads**: a clean list against a dirty
+page is the half-fix, and the worse one.
+
+Four things it does, each with a test:
+
+- **It re-sends `RECORD_START`, and there is no `RECORD_RESET`.**
+  `background/recordings.ts` already overwrites the tab's entry unconditionally, which
+  is exactly a clean slate: empty `steps`, fresh `startedAt`, and no `destinationUrl`
+  — the last of which is what stops `compileRecording` still believing a handoff
+  happened.
+- **It re-sends the recording's own `postingUrl`, never `location.href`.** Resetting
+  from the employer's ATS must not redefine the posting as the ATS page, or the
+  handoff could never be recorded again. So on the posting leg Reset is a reload and
+  on the destination leg it is a walk back to the board — which is also why the
+  confirm is worded per leg (`resetRecordingPrompt` in `labels.ts`): on one of them
+  "start again" means leaving the page you are looking at.
+- **It tears nothing down by hand.** Unload does that. `run()` stands down on
+  `this.recorder` existing, so clearing it here would open a window in which an
+  autofill could start against a page that is about to be replaced. Nor does it reset
+  `this.recording`: the next content script reads the empty recording back through
+  `resumeRecording()`, which already derives `leg: 'posting'` and — `destinationUrl`
+  being gone — no longer synthesizes the `navigate` step.
+- **It goes through `webUrl` like every other href handed to the browser**, even
+  though a `postingUrl` captured from a content script is always http(s). A refusal
+  falls back to `location.reload()`, so the control can never do nothing.
+
+The confirm is a popover on the same mechanism as the Declare menu, and **only one of
+the two is ever up** — they overlap, and the second to open would sit on the first
+with nothing saying which press it belongs to. Both flags live on the instance, so the
+one-second clock leaves them alone. `.btn-danger` had to be **paired at shadow
+specificity** in `primitives.css` (`.btn-danger, button.cf-btn.btn-danger`) exactly as
+`.btn-ghost` already is: `button.cf-btn` names a class of its own, so the bare rule
+lost both the colour and the border and Reset drew as an ordinary secondary button.
+
+At ≤640px the bar wraps to **four** rows in a fixed order — state, the three exits,
+the two options, the readout — because left to source order the options moved with the
+length of the readout and took the exits with them. It was three while the exits were
+two buttons sharing the first row: at 390px the state readout ends around x=175 and
+Undo began around x=258, so a third control eats the last of that slack the moment the
+clock reaches two digits or the count reaches ten, and a row that reflows while the
+user is looking at it is the failure this order exists to stop. Both the options and
+the exits are **equal halves/thirds**, and every child of both is wrapped in an
+identical `.cf-rec-wrap` to make that true: a bare `<button>` beside a `<div>` under
 `flex-basis: 0` adds its own padding on top of its share and comes out 191/169. Those
 narrow overrides live at the **end** of `recorderBar.css`, after the component rules
-they beat — at equal specificity source order is the only thing deciding them.
+they beat — at equal specificity source order is the only thing deciding them. The
+confirm popover anchors `right` on a wide bar (Reset sits near its right-hand end, so
+it opens back across the bar rather than past its edge) and is flipped to `left` in
+that narrow block, where Reset is the leftmost third of a row of its own.
 
 **The mark menu is re-ordered by leg, never filtered by it.** Ordering is worth doing:
 on the board half of a two-step posting the apply link is what there is to mark.
@@ -841,10 +920,68 @@ destination leg, the page where the application is actually sent, with no way to
 the Send button or the confirmation at all. A mark that is unlikely here costs a line
 in a menu; a mark that is missing costs the recording.
 
+#### What it shows you while you record
+**The page is marked up by name, on both legs.** `highlight` (`fill.ts`) draws a
+coloured outline and nothing else, so a form with nine outlined inputs says nine
+things were found and never which one is Email — and while a recording runs that is
+the *only* field feedback there is, the panel being folded to its pill.
+`content/fieldTags.ts` puts a name on each mark: the host page's own light DOM,
+inline-styled from `ui/palette.ts`, `pointer-events: none`, positioned from
+`getBoundingClientRect()` and re-placed on every scroll (captured, so inner scrollers
+count) and resize, batched into one rAF pass for the whole set.
+
+Six things it gets right, each with a test:
+
+- **`highlight(el, confidence, label?)` is the only entry and `clearHighlights` the
+  only exit.** The chips are part of the mark, so four call sites each remembering to
+  clear a second thing is how one of them ends up not doing it — and the symptom is a
+  name pinned over a page nothing is marked on any more.
+- **A label-less `highlight` re-colours the chip rather than removing it.**
+  `confirmField` passes no label because nothing is being renamed, only whether the
+  value went in has changed; dropping the chip there would unname the one field the
+  user has just acted on.
+- **Above the control and aligned to its *right* edge.** The gap above a form control
+  is where the form's own `<label>` lives, so above-left sits on top of the very words
+  it is echoing — on every field of every form. Labels are short and controls are
+  wide. When there is no room above (the topmost field of a form scrolled to the top,
+  i.e. the commonest field on the page) it drops *inside* the control, never below,
+  because below is where the next field's chip goes.
+- **A zero-area or off-screen element is hidden, never cleared.** The `display: none`
+  file input behind a custom "Upload CV" button is the commonest shape of `resume` on
+  an ATS; and an element scrolls back, so its mark has to come with it.
+- **`TAG_ATTR` is in `extensionUi`'s `OWN_SELECTOR`**, so the picker's `elementChain`
+  and the recorder's three `isExtensionUi` guards all skip them. `pointer-events: none`
+  already keeps them out of hit-testing; a mark must also **never contain a form
+  control**, or `detectFields` could claim one. They are `aria-hidden`: they sit in the
+  *page's* DOM and would otherwise be read in the form's own order, a second and worse
+  copy of every label it already has.
+- **`markDetectedFields` runs when the recorder attaches, after the bar.** The bar is
+  the only thing saying the page is inert, and marks ahead of it are unexplained. It
+  clears first, which is what makes the two legs the same page: the posting leg used
+  to inherit whatever `refreshSetup` had drawn a moment earlier and the destination
+  leg — a fresh content script on the employer's site — had nothing at all. **Fields
+  only**: `refreshSetup` also names the Send button, but that is the panel's *guess*,
+  and a chip reading "Send button" beside something the user is about to press for
+  real reads as an instruction the extension is in no position to give. `pickForBind`
+  chips what it is told instead, `bindLabel(bind)` — declare the Confirmation and then
+  the Send button and, unlabelled, they are two identical green outlines on exactly
+  the two marks that gate Apply.
+
+Two consequences elsewhere. **`detectForConfig` (`fieldDetect.ts`) takes an optional
+config**, and that is not tidiness: the destination leg runs where
+`findMatchingConfig` returns nothing and `ensureConfigForUrl` deliberately does not
+run until Save, so a sweep there has to mean "the heuristics, and nothing saved". It
+is also where the `cvUpload` fold-in finally lives once instead of at each of its
+three call sites. And **`closeSetup` does not clear while a recording is live**: the
+panel is reachable from its pill mid-recording, and its Done means "finished with the
+panel", not "finished with the marks" — nothing would re-draw them until the recording
+ended.
+
 #### Where it is offered
-**The panel has three screens, and a never-configured site opens on the offer** —
-`SetupPanel.mode` is `offer` | `wizard` | `review`, chosen once, on the instance
-(same rule as `step`).
+**The panel has four screens, and a never-configured site opens on the offer** —
+`SetupPanel.mode` is `offer` | `wizard` | `review` | `saved`, on the instance (same
+rule as `step`). Only the *opening* one is chosen once; the other three are commands
+(`showOffer`, `showReview`, `showSaved`), because they are places in a task.
 
 The offer is a screen of its own and not a block on wizard step 1, and that
 distinction is the whole feature working or not. The panel does not *open* on step 1:
@@ -856,9 +993,74 @@ it tests **saved** selectors only: every heuristic on the page reports itself as
 match, so counting those would call a fresh site configured on the strength of
 guesses stored nowhere.
 
+**The offer has no footer, and that is the screen.** It carried two buttons and
+neither was an outcome. "Set up by hand ›" pointed at the six-step wizard from the
+one screen built to avoid it — and the wizard is what put `submitSelector` and
+`successSelector` last in a queue of twenty-five, which is why they went unset on
+nearly every site and why recording exists at all. `Done` closed the panel having
+taught the extension nothing: the site is still unconfigured, so the next posting on
+it opens on this same screen. So the only way *on* is to record, and the header `×`
+stays what it always was — the way to get the card out of the way (it minimizes to
+the pill), not a way to finish with the site.
+
+The wizard is not lost, it is downstream: record → review → Save → `Review
+configuration` (`savedFooter`). Anyone who has taught this site anything never sees
+the offer at all, because `render` only routes here while `isUnconfigured` — and that
+tests *saved* selectors, so one Pick from the review modal's report flips it. The
+accepted cost: **a user who wants to configure a site by hand without applying to a
+job has no in-panel route.** Options → Sites is theirs, which is where the wizard's
+own "Advanced (JSON)" already deep-links. `showOffer()` takes no argument for the same
+reason — nothing turns the offer off any more.
+
 Step 1 keeps a smaller version of the lead, worded for **re-recording** a site to
 correct or add to what is saved — and there both Record buttons are secondary, with
 Next keeping the footer's primary. Anyone in the wizard has already chosen that path.
+
+**Each Record button carries a caption, and the pick is declared safe to get wrong.**
+`RECORD_FLOW_TEXT` (`labels.ts`, `Record<RecordFlow, { label, detail }>`) is the one
+home for both — they were duplicated into `ACTION_LABELS`, which no longer names them.
+As bare labels the two buttons asked the one question a user is on this panel because
+they cannot yet answer, and "this site" versus "the employer's site" is exactly that
+question. `RECORD_FLOW_HINT` is the other half: the pick only orders the recorder
+bar's Declare menu, so a wrong one costs nothing — a fact that lived in
+`CONCEPT_HELP.recording.when`, which the offer screen does not render. It shows on the
+offer only; step 1 already ends on "Or correct it by hand below."
+
+**The offer says what the extension can already read on the page.** `refreshSetup`
+runs the full detection sweep on every render, in every mode — so a complete
+`data.fields` had always been in hand here and this screen read none of it. "Teach the
+extension this site" gave no sense of how much teaching was left, and the rows that
+would have said were two taps down a rail the offer does not draw. `detected()` is a
+count line (`ui/summaryLine.ts`) and a `.chip` per field found, and three rules make
+it:
+
+- **After the Record buttons, not before.** The screen's job is the offer; a count
+  above it demotes the two things the screen exists for — the same reason the flow
+  banner's resting state rides in the modal's *footer* rather than over its title.
+  Read in order: this is what recording does · do it · here is what you already have.
+- **All three statuses stay on the line at zero**, because it is a key as much as a
+  tally — the rule `.cf-summary` has always followed, which is why the line and its
+  CSS moved to `ui/` and `primitives.css` when a second surface wanted them.
+- **`none` is worded from `SETUP_STATUS_TEXT`, never `STATUS_TEXT`.** Detection
+  returns a row per *wanted* field, so a grey row here means the page never asked for
+  it — nine of them is the ordinary state of any real form. `STATUS_TEXT.none.word`
+  ("unmatched") would blame the site for the commonest case, which is the exact
+  cry-wolf failure `setupSteps.fields` counts only the CV to avoid. Only the rows that
+  found something get a chip: a `none` row has no element and so nothing to name.
+
+Not on wizard step 1. Step 5 already lists every field with its selector *and* a Pick,
+and the rail carries that step's dot and its "N to do" chip on every step — so a
+second, unactionable copy under the re-record buttons is the clutter the
+`cf-record-hint` / `cf-record-or` split already refuses.
+
+Two things `choiceBtn` gets right that are easy to lose. The caption is *supporting*
+text, so the button keeps the bare label as its accessible **name** (`aria-label`) and
+carries the caption on `aria-describedby` — built from both, the name becomes "Apply
+on this site The application form is on this page…", which is worse to hear and worse
+to match on (five E2E lookups do). And `.cf-record-choice` is **paired at
+`button.cf-btn` specificity** in `setupPanel.css`, the same trap `.btn-danger` fell
+into: the bare class is (0,1,0) and loses to (0,1,1), so `white-space: normal` never
+landed and every caption ran off the right-hand edge as one `nowrap` line.
 
 #### Reviewing it
 Stopping compiles and opens the panel's **review**: the timeline, each row carrying
@@ -875,6 +1077,34 @@ itself is exactly a field. This is now the only place a wrong guess can be refus
 it has to offer them; grouped, because flat they run straight past the marks above.
 The order comes from `fieldMarks()`, exported from `recorderBar.ts` rather than
 re-listed, which is the same rule the label catalog exists for.
+
+#### Finishing it
+**Save reports; it does not become the wizard.** It used to: `saveRecording` wrote
+both patches and then fell through to `showReview(false)`, so finishing a recording
+landed the user four steps into the manual surface with nothing saying it had worked.
+`mode: 'saved'` is that report — which shape was written (the one fact the timeline
+behind it was arguing about), and the steps `stepStates` says still have work, since
+those are the entire reason to go into the wizard rather than close the panel.
+
+**Which of its two buttons is coral is the whole screen.** Work outstanding → `Review
+configuration` takes the primary; nothing outstanding → `Done` does. Both renderings
+have a harness state (`saved`, `saved-clean`), because a swap only one fixture can
+produce is a swap nobody looks at.
+
+**The Controller sets the mode *before* it refreshes**, and that ordering is the fix
+for a bug that predates the screen: `showReview(false)` derived its landing step from
+`this.data`, which is still the **pre-save** render — `refreshSetup` runs afterwards
+and `placed` is already true, so it never recomputes — and the panel opened on work
+the patch had just done. Everything this screen counts is counted from the render that
+follows the write.
+
+**Discard is the back door, and goes wherever the panel would have opened**: the offer
+when `isUnconfigured`, the wizard otherwise. Refusing a recording on a site with
+nothing saved should leave recording one press away, not four steps into the wizard
+the user has just declined to use. `clearRecording` is split out of `discardRecording`
+because Save and Discard both finish with the recording and then go to different
+screens — and it has to run before either renders, or `refreshSetup` hands the panel a
+`compiled` it would put the review back up from.
 
 `SetupPanel.mode` is **on the instance, never in `SetupData`** — same rule as `step`,
 and the same failure if broken: `refreshSetup` re-renders on every edit, so a mode
@@ -1469,6 +1699,27 @@ needs no `downloads` permission, and an MV3 service worker has no
   application. For the same reason the capture-phase suppression covers
   `pointerdown`/`mousedown`/`mouseup`/`dblclick`/`contextmenu` and not just
   `click`: a site that acts on `mousedown` would otherwise act once per step.
+- **The recorder bar's clock must never repaint the bar.** Its ticker writes
+  `.cf-rec-clock`'s text and nothing else (`RecorderBar.tick`). It used to call
+  `paint()`, which removes and rebuilds `.cf-bar` — including the open Declare
+  menu, a `60vh` scrolling list of ~28 marks that deliberately survives a repaint
+  (`this.menu` is on the instance). So reaching a profile field, or the
+  description, was a race against a one-second timer, and any focused item in it
+  was destroyed just as often. The clock is `aria-hidden` for the other half of
+  the same fact: it sits in the bar's one `role="status"` region, which would
+  otherwise re-announce every second. `paint()` still rebuilds on a real state
+  change, and carries the menu's `scrollTop` across — same rule as the sheets'
+  `captureUserPlace`, restore included, *after* the bar is in the document.
+- **Every mark the extension draws on the host page carries an `OWN_SELECTOR`
+  attribute and contains no form control.** `fieldTags.ts`'s chips are in the page's
+  own light DOM, so without `TAG_ATTR` in `extensionUi.ts` they are pickable by
+  `elementChain`, recordable as steps, and — if one ever wrapped an `<input>` —
+  detectable as a field. `pointer-events: none` is the belt, not the braces.
+- **A label-less `highlight` re-colours an existing chip; it must never remove one.**
+  `confirmField` re-colours a field's outline after a Confirm and passes no label,
+  because nothing has been renamed. Removing the chip there unnames the one field the
+  user has just acted on; leaving the stripe alone leaves a yellow chip on a green
+  mark. `retintTag` is the whole of it.
 - Field matching normalizes attributes with diacritics stripped, so "Résumé"
   matches "resume" (`normalizeAttr` in `src/shared/fieldKeys.ts`).
 - **Playwright must use `channel: 'chromium'`** — the headless shell can't load

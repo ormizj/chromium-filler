@@ -17,13 +17,18 @@
  * The armed state is loud on purpose. The page has just gone live under the
  * user's finger, and the bar is the only thing that can say so.
  *
+ * The right-hand end is three sizes of changing your mind — **Reset** throws the
+ * recording away and starts it again from the posting, **Undo** takes back the last
+ * step, **Done** finishes. Only the first of those cannot be walked back, so it is
+ * the only one that asks a question before it acts.
+ *
  * It is a **toolbar, not a `Sheet`**. It never takes a pill slot, so the "one slot,
  * two sheets" arbitration between the review modal and the setup panel is untouched;
  * and it stays small because while it is up the page underneath is the thing the
  * user is working in.
  */
 
-import { ACTION_LABELS, BIND_LABELS } from '../shared/labels';
+import { ACTION_LABELS, BIND_LABELS, resetRecordingPrompt } from '../shared/labels';
 import { FIELD_LABELS, orderFields } from '../shared/fieldKeys';
 import { TEXT_FIELDS } from '../shared/fieldKeys';
 import type { FieldKey } from '../shared/types';
@@ -41,6 +46,8 @@ export interface RecorderBarCallbacks {
   onInteract(): void;
   /** Declare: name a thing, and let the picker find it. */
   onDeclare(bind: BindKey): void;
+  /** Throw the whole recording away and start it again from the posting. */
+  onReset(): void;
   onUndo(): void;
   onDone(): void;
 }
@@ -93,8 +100,16 @@ export class RecorderBar {
   private data?: RecorderBarState;
   /** Whether the Declare menu is open. On the instance: a repaint must not close it. */
   private menu = false;
+  /**
+   * Whether the Reset confirm is open. On the instance for the same reason as `menu`,
+   * and it matters more here: the question is about to be answered with a press, and a
+   * popover that vanished on the next clock tick would take the press with it.
+   */
+  private confirming = false;
   private startedAt = Date.now();
   private ticker?: ReturnType<typeof setInterval>;
+  /** The elapsed-time span, kept so the tick can write it without a repaint. */
+  private clockEl?: HTMLElement;
 
   constructor(cb: RecorderBarCallbacks) {
     this.cb = cb;
@@ -108,9 +123,12 @@ export class RecorderBar {
     this.shadow.append(style);
     document.documentElement.append(this.host);
 
-    // The elapsed time is the only thing that changes on its own, and a recording
-    // runs for minutes — a second is as often as it can possibly need repainting.
-    this.ticker = setInterval(() => { if (this.data) this.paint(); }, 1000);
+    // The elapsed time is the only thing that changes on its own, so it is the only
+    // thing a tick may touch. Repainting for it — which is what this used to do —
+    // rebuilt the open Declare menu once a second, and a menu is a scroll position
+    // and a focused item as much as it is a list: scrolling down to a profile field
+    // meant racing the timer back to the top of it.
+    this.ticker = setInterval(() => this.tick(), 1000);
   }
 
   render(state: RecorderBarState): void {
@@ -125,9 +143,20 @@ export class RecorderBar {
 
   /* ---------------- Painting ---------------- */
 
+  /** One second later, and nothing else has happened. Write the clock and stop. */
+  private tick(): void {
+    if (!this.data || !this.clockEl) return;
+    this.clockEl.textContent = clock(Math.floor((Date.now() - this.startedAt) / 1000));
+  }
+
   private paint(): void {
     const data = this.data;
     if (!data) return;
+    // The menu deliberately survives a repaint (`this.menu` is on the instance), and
+    // half of surviving is coming back to the same place — same rule as the sheets'
+    // `captureUserPlace`. Restored *after* the bar is in the document, or an element
+    // with no height yet clamps it to 0.
+    const scroll = this.menu ? this.shadow.querySelector('.cf-rec-menu')?.scrollTop : undefined;
     this.shadow.querySelector('.cf-bar')?.remove();
 
     const bar = el('div', 'cf-bar');
@@ -138,6 +167,10 @@ export class RecorderBar {
     // to a row of its own.
     bar.append(this.state(data), this.lastStep(data), this.options(data), this.exits());
     this.shadow.append(bar);
+    if (scroll) {
+      const list = this.shadow.querySelector('.cf-rec-menu');
+      if (list) list.scrollTop = scroll;
+    }
   }
 
   private state(data: RecorderBarState): HTMLElement {
@@ -146,7 +179,16 @@ export class RecorderBar {
     live.setAttribute('aria-hidden', 'true');
     const secs = Math.floor((Date.now() - this.startedAt) / 1000);
     const count = el('span', 'cf-rec-count');
-    count.textContent = `${clock(secs)} · ${data.stepCount} step${data.stepCount === 1 ? '' : 's'}`;
+    // Two spans, one string: the clock is written on its own every second, and the
+    // separator stays inside the wrapper so the readout reads exactly as it always
+    // did (the E2E's step-count helper reads `.cf-rec-count` whole).
+    const elapsed = text('span', clock(secs), 'cf-rec-clock');
+    // The one part of the live region that must not be announced. It changes every
+    // second, and a status region that changes every second reads the whole bar out
+    // every second — which is the opposite of what it is here for.
+    elapsed.setAttribute('aria-hidden', 'true');
+    this.clockEl = elapsed;
+    count.append(elapsed, text('span', ` · ${data.stepCount} step${data.stepCount === 1 ? '' : 's'}`));
     // One live region for the whole bar, and it is this: a screen-reader user needs
     // to know the recording is running and how much of it there is, not to hear
     // every button relabel itself.
@@ -169,7 +211,7 @@ export class RecorderBar {
     // drawn as one.
     const interact = btn(
       armed ? ACTION_LABELS.interactArmed : ACTION_LABELS.interact,
-      () => { this.menu = false; this.cb.onInteract(); },
+      () => { this.closePopovers(); this.cb.onInteract(); },
       armed ? 'cf-rec-armed' : '',
     );
     interact.setAttribute('aria-pressed', String(armed));
@@ -187,7 +229,9 @@ export class RecorderBar {
   private declareButton(data: RecorderBarState): HTMLElement {
     const wrap = el('div', 'cf-rec-wrap');
     const toggle = btn(ACTION_LABELS.declare, () => {
-      this.menu = !this.menu;
+      const open = !this.menu;
+      this.closePopovers();
+      this.menu = open;
       this.paint();
     });
     toggle.setAttribute('aria-expanded', String(this.menu));
@@ -251,12 +295,91 @@ export class RecorderBar {
     return wrap;
   }
 
+  /**
+   * The three ways out, and they are three different sizes of changing your mind:
+   * Reset throws the recording away, Undo takes back the last step, Done finishes.
+   *
+   * Reset leads and Done stays last. Done is where the thumb already goes, and the
+   * destructive control must not sit against the primary — a misplaced press there
+   * would trade "I have finished applying" for "throw the last ten minutes away".
+   *
+   * Every child is a `.cf-rec-wrap`, not just the one that needs the positioning
+   * context: at 390px this row is three equal thirds, and equal only because the
+   * three boxes are the same shape. A bare `<button>` beside a `<div>` under
+   * `flex-basis: 0` adds its own padding on top of its share — the same 191/169 the
+   * options row above already documents.
+   */
   private exits(): HTMLElement {
     const wrap = el('div', 'cf-rec-exits');
+
     const undo = btn(ACTION_LABELS.undo, () => this.cb.onUndo());
     if (!this.data?.stepCount) undo.setAttribute('aria-disabled', 'true');
-    wrap.append(undo, btn(ACTION_LABELS.stopRecording, () => this.cb.onDone(), 'primary'));
+
+    wrap.append(
+      this.resetButton(),
+      inWrap(undo),
+      inWrap(btn(ACTION_LABELS.stopRecording, () => this.cb.onDone(), 'primary')),
+    );
     return wrap;
+  }
+
+  /**
+   * Reset, and the question it asks first.
+   *
+   * It is the one control on the bar with no way back — Undo is a step at a time and
+   * Done ends the recording with the report intact, but this drops every step *and*
+   * navigates. So it follows Options → Queue's Clear all: a press opens the warning,
+   * and the warning carries the verb.
+   */
+  private resetButton(): HTMLElement {
+    const wrap = el('div', 'cf-rec-wrap');
+    const toggle = btn(ACTION_LABELS.resetRecording, () => {
+      const open = !this.confirming;
+      this.closePopovers();
+      this.confirming = open;
+      this.paint();
+    }, 'btn-danger');
+    // Same convention as Undo beside it, and as the modal's blocked Apply: never the
+    // `disabled` property, which swallows the press that asks why the control is grey.
+    if (!this.data?.stepCount) toggle.setAttribute('aria-disabled', 'true');
+    toggle.setAttribute('aria-expanded', String(this.confirming));
+    wrap.append(toggle);
+    if (this.confirming) wrap.append(this.buildConfirm());
+    return wrap;
+  }
+
+  private buildConfirm(): HTMLElement {
+    const box = el('div', 'cf-rec-confirm');
+    box.setAttribute('role', 'group');
+    box.setAttribute('aria-label', ACTION_LABELS.resetRecording);
+
+    const data = this.data;
+    box.append(text(
+      'div',
+      resetRecordingPrompt(data?.stepCount ?? 0, data?.leg ?? 'posting'),
+      'cf-rec-confirm-text',
+    ));
+
+    const row = el('div', 'cf-rec-confirm-row');
+    row.append(
+      btn(ACTION_LABELS.cancel, () => { this.confirming = false; this.paint(); }),
+      btn(ACTION_LABELS.resetRecordingConfirm, () => {
+        this.confirming = false;
+        this.cb.onReset();
+      }, 'btn-danger'),
+    );
+    box.append(row);
+    return box;
+  }
+
+  /**
+   * Two popovers hang off this bar and only one may ever be up: they overlap, and the
+   * second to open would sit on the first with nothing saying which press it belongs
+   * to. Every control that opens one closes the other through here.
+   */
+  private closePopovers(): void {
+    this.menu = false;
+    this.confirming = false;
   }
 }
 
@@ -273,6 +396,13 @@ function text(tag: string, content: string, className?: string): HTMLElement {
   node.textContent = content;
   if (className) node.className = className;
   return node;
+}
+
+/** One control in the box the narrow layout's equal-thirds rule measures. */
+function inWrap(control: HTMLElement): HTMLElement {
+  const wrap = el('div', 'cf-rec-wrap');
+  wrap.append(control);
+  return wrap;
 }
 
 function btn(label: string, onClick: () => void, extra = ''): HTMLButtonElement {

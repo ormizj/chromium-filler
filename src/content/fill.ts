@@ -5,6 +5,7 @@
 
 import type { MatchConfidence } from '../shared/types';
 import { currentPalette } from '../ui/palette';
+import { tagElement, retintTag, clearTags } from './fieldTags';
 
 /** Set `value` via the native setter so React's value tracker sees the change. */
 function setNativeValue(el: HTMLInputElement | HTMLTextAreaElement, value: string): void {
@@ -103,10 +104,25 @@ function highlightColor(confidence: MatchConfidence): string {
   return confidence === 'high' ? p.ok : confidence === 'low' ? p.warn : p.err;
 }
 
-export function highlight(el: HTMLElement, confidence: MatchConfidence): void {
+/**
+ * Outline what was recognised, and — given a `label` — say what it was recognised
+ * *as*.
+ *
+ * The label is optional because the two callers want different things. A fill has
+ * the review modal to report it field by field, so an outline there is a pointer
+ * into a report that is already open. Setting a site up has no such report on
+ * screen — the panel folds to its pill the moment a recording starts — so out there
+ * the name has to be on the page or it is nowhere. See `fieldTags.ts`.
+ */
+export function highlight(el: HTMLElement, confidence: MatchConfidence, label?: string): void {
   el.setAttribute(HL_ATTR, confidence);
   el.style.setProperty('outline', `2px solid ${highlightColor(confidence)}`, 'important');
   el.style.setProperty('outline-offset', '1px', 'important');
+  // A label names the mark; no label re-colours whatever name is already on it.
+  // `confirmField` takes the second path — it is reporting an outcome, not renaming
+  // a field — and dropping the chip there would unname the one field just acted on.
+  if (label) tagElement(el, label, confidence);
+  else retintTag(el, confidence);
 }
 
 export function clearHighlights(root: ParentNode = document): void {
@@ -116,4 +132,8 @@ export function clearHighlights(root: ParentNode = document): void {
     el.style.removeProperty('outline-offset');
     el.removeAttribute(HL_ATTR);
   });
+  // One teardown, not two. The chips are part of the mark, and four call sites each
+  // remembering to clear a second thing is how one of them ends up not doing it —
+  // leaving labels pinned over a page nothing is marked on any more.
+  clearTags();
 }

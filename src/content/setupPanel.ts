@@ -30,8 +30,11 @@ import {
   type SetupSnapshot, type SetupStepKey, type SetupVerdict, type StepState,
 } from '../shared/setupSteps';
 import type { PostingKind } from '../shared/redirect';
-import { ACTION_LABELS } from '../shared/labels';
+import {
+  ACTION_LABELS, RECORD_FLOW_HINT, RECORD_FLOW_TEXT, SETUP_STATUS_TEXT,
+} from '../shared/labels';
 import { helpButton, helpPanel, richText } from '../ui/help';
+import { summaryLine } from '../ui/summaryLine';
 import { Sheet, type SheetCallbacks, type SheetData } from './sheet';
 import setupCss from './setupPanel.css?inline';
 
@@ -171,7 +174,7 @@ export class SetupPanel extends Sheet<SetupData> {
   /** Whether the opening step has been chosen; it is picked once, not per render. */
   private placed = false;
   /**
-   * Which of the panel's three screens is up. **On the instance, never in
+   * Which of the panel's four screens is up. **On the instance, never in
    * `SetupData`** — same rule as `step`, and the same failure if it is broken:
    * `refreshSetup` re-renders on every edit, so a mode derived from the data would
    * throw the user out of the review each time they re-marked a row.
@@ -181,8 +184,19 @@ export class SetupPanel extends Sheet<SetupData> {
    * does not *open* on step 1 — `firstStepWithWork` sends a returning user to the
    * earliest unfinished step, and a brand-new config always has work on `fields` or
    * `send`. As a block it was four presses of Back away from anyone who needed it.
+   *
+   * `saved` is the other end of the same journey, and exists for the same reason.
+   * Save used to hand the user straight to the wizard — four steps into the manual
+   * surface, with nothing saying the recording had worked. Reviewing the config by
+   * hand is worth *offering*; it is not where finishing a recording leads.
    */
-  private mode: 'offer' | 'wizard' | 'review' = 'wizard';
+  private mode: 'offer' | 'wizard' | 'review' | 'saved' = 'wizard';
+  /**
+   * Which shape of application was just saved. Held here because `saved` renders
+   * after the Controller has cleared `compiled` — the recording is finished with by
+   * then, and this screen is about the config that came out of it.
+   */
+  private savedFlow: RecordFlow = 'internal';
   /** The `?` explanations the user opened — a re-scan mid-read must not close one. */
   private openHelp = new Set<SetupStepKey>();
   /** The legend, once dismissed, stays folded for the rest of this page too. */
@@ -218,19 +232,46 @@ export class SetupPanel extends Sheet<SetupData> {
    * not reappear every time it does.
    */
   showReview(on: boolean): void {
-    this.mode = on ? 'review' : 'wizard';
-    // Coming out of a review lands on the earliest step that still needs anything,
-    // which after a good recording is usually nothing at all.
-    if (!on && this.data) this.step = Math.max(0, firstStepWithWork(stepStates(this.data)));
+    if (on) {
+      this.mode = 'review';
+      this.repaint();
+      return;
+    }
+    // Refusing a recording is not the same as finishing one, so this is the *back*
+    // door: it goes wherever the panel would have opened. On a site with nothing
+    // saved that is the offer, which leaves recording again one press away rather
+    // than four steps into a wizard the user has just declined to use.
+    this.mode = this.data && isUnconfigured(this.data) ? 'offer' : 'wizard';
+    if (this.data) this.step = Math.max(0, firstStepWithWork(stepStates(this.data)));
     this.repaint();
   }
 
   /**
-   * Show the opening offer, or leave it for the wizard. Exposed so the dev harness
-   * can render it and the Controller can put it back after a discarded recording.
+   * The recording was saved. Report it, and offer the wizard rather than becoming it.
+   *
+   * A command like `showReview` and for the identical reason: this is a place in a
+   * task, not a fact about the data, so a re-render must not put the user back here
+   * once they have moved on. The Controller sets the mode *before* it refreshes, so
+   * the outstanding-work list below is counted from the config that was just
+   * written — reading it from the pre-save render is what made the old landing step
+   * point at work the patch had already done.
    */
-  showOffer(on: boolean): void {
-    this.mode = on ? 'offer' : 'wizard';
+  showSaved(flow: RecordFlow): void {
+    this.savedFlow = flow;
+    this.mode = 'saved';
+    this.repaint();
+  }
+
+  /**
+   * Show the opening offer. Exposed so the dev harness can render it and the
+   * Controller can put it back after a discarded recording.
+   *
+   * No parameter, because there is no longer anything that turns it *off*. The
+   * offer used to carry a "Set up by hand ›" that walked past it into the wizard;
+   * `showReview(false)` is the only other caller and it assigns `mode` itself.
+   */
+  showOffer(): void {
+    this.mode = 'offer';
     this.repaint();
   }
 
@@ -311,7 +352,12 @@ export class SetupPanel extends Sheet<SetupData> {
     }
 
     if (this.mode === 'offer') {
-      card.append(header, this.offerBody(), this.offerFooter());
+      card.append(header, this.offerBody(data));
+      return card;
+    }
+
+    if (this.mode === 'saved') {
+      card.append(header, this.savedBody(data), this.savedFooter(data));
       return card;
     }
 
@@ -471,10 +517,21 @@ export class SetupPanel extends Sheet<SetupData> {
 
     const actions = el('div', 'cf-record-actions');
     actions.append(
-      btn(ACTION_LABELS.record, () => this.cb.onStartRecording('internal'), isOffer),
-      btn(ACTION_LABELS.recordExternal, () => this.cb.onStartRecording('external')),
+      choiceBtn(RECORD_FLOW_TEXT.internal.label, RECORD_FLOW_TEXT.internal.detail,
+        () => this.cb.onStartRecording('internal'), isOffer),
+      choiceBtn(RECORD_FLOW_TEXT.external.label, RECORD_FLOW_TEXT.external.detail,
+        () => this.cb.onStartRecording('external')),
     );
     wrap.append(actions);
+
+    if (isOffer) {
+      // Only on the offer. Anyone reading this block on step 1 has recorded the site
+      // once already, and that path ends on "Or correct it by hand below." — two grey
+      // lines under the buttons is clutter where one is guidance.
+      const hint = el('p', 'cf-record-hint');
+      hint.textContent = RECORD_FLOW_HINT;
+      wrap.append(hint);
+    }
 
     if (!isOffer) {
       const or = el('p', 'cf-record-or');
@@ -486,13 +543,27 @@ export class SetupPanel extends Sheet<SetupData> {
 
   /**
    * The opening screen for a site nobody has set up: what recording is, the two
-   * flows, and one way past to the wizard.
+   * flows, and what the extension can already see without being taught anything.
    *
    * It is the whole card rather than a block on a step because it is an *offer*, and
    * an offer competing with a progress rail and six numbered steps reads as the least
    * of seven things to do. The rail comes back the moment the wizard does.
+   *
+   * **It has no footer, and that is the screen.** It carried two buttons and neither
+   * was an outcome. "Set up by hand ›" pointed at the six-step wizard from the one
+   * screen built to avoid it — and the wizard is what put `submitSelector` and
+   * `successSelector` last in a queue of twenty-five, which is why they went unset on
+   * nearly every site and why recording exists. `Done` closed the panel having taught
+   * the extension nothing: the site is still unconfigured and the next posting on it
+   * opens on this same screen. So the only way *on* is to record, and the header `×`
+   * stays what it always was — the way to get the card out of the way, not a way to
+   * finish with the site.
+   *
+   * The wizard is not lost, it is downstream: record → review → Save → "Review
+   * configuration". Anyone who has taught this site anything never sees this screen
+   * at all, because `render` only routes here while `isUnconfigured`.
    */
-  private offerBody(): HTMLElement {
+  private offerBody(data: SetupData): HTMLElement {
     const body = el('div', 'cf-body');
 
     const head = el('div', 'cf-step-head');
@@ -503,7 +574,7 @@ export class SetupPanel extends Sheet<SetupData> {
     const lead = el('p', 'cf-step-lead');
     lead.append(...richText(CONCEPT_HELP.recording.body));
     head.append(lead);
-    body.append(head, this.recordLead(true));
+    body.append(head, this.recordLead(true), this.detected(data));
 
     const marking = el('p', 'cf-record-or');
     marking.textContent = CONCEPT_HELP.marking.short ?? '';
@@ -512,16 +583,134 @@ export class SetupPanel extends Sheet<SetupData> {
   }
 
   /**
-   * One way out, and it is not a primary: the two Record buttons above it are what
-   * this screen is for, and a coral "Set up by hand" would point at the long way
-   * round on the one screen built to avoid it.
+   * What the extension can already read on the page behind this card.
+   *
+   * `refreshSetup` runs the full detection sweep on every render, in every mode — so
+   * a complete `data.fields` has always been in hand here and this screen read none
+   * of it. What it asked for ("teach me this site") gave no sense of how much
+   * teaching was left, and the same rows were two taps down a rail this screen does
+   * not draw. Now the ask is concrete: here is the head start, record the rest.
+   *
+   * **After the buttons, not before.** The screen's job is the offer, and a count
+   * above it demotes the two things the screen exists for — the same reason the flow
+   * banner's resting state rides in the modal's footer rather than over its title.
+   * Read in order: this is what recording does · do it · and here is what you already
+   * have.
+   *
+   * Two things it must not say. The count line keeps all three statuses **at zero**,
+   * because it is a key as much as a tally. And `none` is worded "not on this page"
+   * from `SETUP_STATUS_TEXT`, never `STATUS_TEXT`'s "unmatched": detection returns a
+   * row per *wanted* field, so nine `none`s is the ordinary state of any real form
+   * and calling that unmatched blames the site — the exact cry-wolf failure
+   * `setupSteps.fields` counts only the CV to avoid.
    */
-  private offerFooter(): HTMLElement {
+  private detected(data: SetupData): HTMLElement {
+    const wrap = el('div', 'cf-detected');
+    wrap.append(sectionHead('What I can already read here'));
+
+    const counts: Record<RowStatus, number> = { high: 0, low: 0, none: 0 };
+    for (const row of data.fields) counts[row.status] += 1;
+    wrap.append(summaryLine((['high', 'low', 'none'] as const).map((status) => ({
+      dot: DOT[status],
+      count: counts[status],
+      word: SETUP_STATUS_TEXT[status].word,
+      aria: SETUP_STATUS_TEXT[status].aria,
+    }))));
+
+    // Named, in `data.fields` order — which `orderFields` has already put in reading
+    // order — because "5 found" answers how many and not which. Only the rows that
+    // found something: a `none` row has no element and so nothing to name, and it is
+    // already counted on the line above.
+    const found = data.fields.filter((r) => r.status !== 'none');
+    if (found.length) {
+      const chips = el('div', 'cf-detected-chips');
+      for (const row of found) {
+        const chip = el('span', `chip ${DOT[row.status]}`);
+        const suffix = SETUP_STATUS_TEXT[row.status].chip;
+        chip.textContent = suffix ? `${row.label} · ${suffix}` : row.label;
+        chips.append(chip);
+      }
+      wrap.append(chips);
+    } else {
+      // A heading promising what it can read, over three zeros, reads as a bug. The
+      // count line still goes up — it is a key, and a reader has to be able to learn
+      // the three dots from it — but the answer to "what did you find" has to be a
+      // sentence when the answer is "nothing", and it belongs pointing back at the
+      // buttons above rather than leaving the zero to speak for itself.
+      const none = el('p', 'cf-record-or');
+      none.textContent = 'Nothing here looks like a field it knows yet. '
+        + 'Recording is how it learns.';
+      wrap.append(none);
+    }
+    return wrap;
+  }
+
+  /* ---------------- Finished ---------------- */
+
+  /**
+   * What was saved, and what is still missing.
+   *
+   * The whole card, not a banner over the wizard, because this is a *stop*: the
+   * recording is over and the user is deciding whether they are done with the site.
+   * Two things earn their place here and nothing else does — which shape of
+   * application was written (the one fact the timeline behind it was arguing about),
+   * and the steps that still have work, since those are the entire reason to go into
+   * the wizard rather than close the panel.
+   *
+   * The outstanding list is `stepStates`, the same model the rail counts from, so it
+   * cannot disagree with the chips the user sees a press later.
+   */
+  private savedBody(data: SetupData): HTMLElement {
+    const body = el('div', 'cf-body');
+
+    const head = el('div', 'cf-step-head');
+    const title = el('h2', 'cf-step-title');
+    title.textContent = 'Site setup saved';
+    const lead = el('p', 'cf-step-lead');
+    // The same distinction the review's own lead draws, in the past tense: what the
+    // user is being told now is what got written, not what is about to be.
+    lead.textContent = this.savedFlow === 'external'
+      ? 'This posting handed off, so it was saved as two: what to press on this site, '
+        + 'and how to fill and send the employer’s form.'
+      : 'The whole application happens on this site, so it was saved as one: what to '
+        + 'fill here, and which button sends it.';
+    head.append(title, lead);
+    body.append(head);
+
+    const todo = stepStates(data).filter((state) => state.todo > 0);
+    if (todo.length) {
+      for (const state of todo) {
+        body.append(this.reviewNote(`${SETUP_STEP_TITLES[state.key]} — `
+          + `${state.todo} thing${state.todo === 1 ? '' : 's'} still to do.`));
+      }
+    } else {
+      const clear = el('p', 'cf-record-or');
+      clear.textContent = 'Nothing else needs you.';
+      body.append(clear);
+    }
+    return body;
+  }
+
+  /**
+   * Two ways on, and **which of them is coral is the whole point of the screen**.
+   *
+   * With something outstanding the wizard is the next action, so it takes the
+   * primary; with nothing outstanding it is a detour and Done takes it. Order is the
+   * footer's usual one — secondary first, primary second, as Back/Next and
+   * Discard/Save already are — so the coral moves but the shape does not.
+   */
+  private savedFooter(data: SetupData): HTMLElement {
     const footer = el('div', 'cf-footer');
-    footer.append(
-      btn('Set up by hand ›', () => this.showOffer(false)),
-      btn(ACTION_LABELS.done, () => this.cb.onClose()),
-    );
+    const work = firstStepWithWork(stepStates(data)) >= 0;
+    const review = () => {
+      this.mode = 'wizard';
+      this.step = Math.max(0, firstStepWithWork(stepStates(data)));
+      this.repaint();
+    };
+    const done = () => this.cb.onClose();
+    footer.append(...(work
+      ? [btn(ACTION_LABELS.done, done), btn('Review configuration', review, true)]
+      : [btn('Review configuration', review), btn(ACTION_LABELS.done, done, true)]));
     return footer;
   }
 
@@ -967,6 +1156,34 @@ function btn(text: string, onClick: () => void, primary = false, k?: string): HT
   // `data-k` is how `Sheet` finds this control again after a rebuild. Only the
   // controls worth returning focus to carry one; see `Sheet.place`.
   if (k) b.dataset.k = k;
+  return b;
+}
+
+/**
+ * A button that has to explain itself: a label and a line saying what it means.
+ *
+ * The two record buttons were bare labels, and "this site" versus "the employer's
+ * site" is exactly the distinction a user is on the panel because they do not yet
+ * have. The caption is the answer, and it is *supporting* text — so the button keeps
+ * the bare label as its accessible **name** and carries the caption as its
+ * description. Letting the name be built from both would have made it
+ * "Apply on this site The application form is on this page…", which is a worse thing
+ * to hear read aloud and a worse thing to search for.
+ */
+let choiceId = 0;
+function choiceBtn(label: string, detail: string, onClick: () => void, primary = false): HTMLButtonElement {
+  const b = btn('', onClick, primary);
+  b.classList.add('cf-record-choice');
+  b.setAttribute('aria-label', label);
+
+  const name = document.createElement('b');
+  name.textContent = label;
+  const note = document.createElement('small');
+  note.id = `cf-choice-${++choiceId}`;
+  note.textContent = detail;
+  b.setAttribute('aria-describedby', note.id);
+
+  b.append(name, note);
   return b;
 }
 

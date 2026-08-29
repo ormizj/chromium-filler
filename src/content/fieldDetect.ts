@@ -6,7 +6,7 @@
  * `high`; a placeholder-only match is `low` (reported, not auto-filled).
  */
 
-import type { FieldKey, MatchConfidence, MatchSource } from '../shared/types';
+import type { FieldKey, MatchConfidence, MatchSource, SiteConfig } from '../shared/types';
 import { FIELD_KEYWORDS, AUTOCOMPLETE_MAP, TEXT_FIELDS, normalizeAttr } from '../shared/fieldKeys';
 import { query } from '../shared/query';
 
@@ -153,6 +153,55 @@ export function guessField(el: HTMLElement): { field: FieldKey; confidence: Matc
 
   if (best) return { field: best, confidence: confidenceFor(bestWeight) };
   return isFile ? { field: 'resume', confidence: 'low' } : null;
+}
+
+/** Every field the extension knows how to look for: the CV, then the text fields. */
+export const DETECTABLE_FIELDS: FieldKey[] = ['resume' as FieldKey, ...TEXT_FIELDS];
+
+/**
+ * Detection as *this site is configured*: the heuristics, the field overrides, and
+ * the CV upload folded in.
+ *
+ * The fold-in is the whole reason this exists. `cvUpload` is a `SiteConfig` field of
+ * its own rather than an entry in `fieldOverrides` — the CV is a file and the
+ * overrides map is text selectors — so every caller that wanted "detection, as
+ * saved" had to re-apply it by hand afterwards, and the three that do it now would
+ * have been three copies of the same eight lines.
+ *
+ * `config` is **optional**, and that is not tidiness: the destination leg of a
+ * recorded handoff runs in a fresh content script on the employer's site, where
+ * `findMatchingConfig` returns nothing and `ensureConfigForUrl` deliberately does
+ * not run until Save. A sweep there has to mean "the heuristics, and nothing saved".
+ */
+export interface ConfiguredDetectOptions {
+  root: ParentNode;
+  fields: FieldKey[];
+  config?: Pick<SiteConfig, 'fieldOverrides' | 'autoDetect' | 'cvUpload'>;
+}
+
+export function detectForConfig(opts: ConfiguredDetectOptions): DetectedField[] {
+  const { root, fields, config } = opts;
+  const detected = detectFields({
+    root,
+    fields,
+    overrides: config?.fieldOverrides,
+    autoDetect: config?.autoDetect !== false,
+  });
+
+  if (config?.cvUpload) {
+    const el = query(root, config.cvUpload);
+    const resume = detected.find((d) => d.field === 'resume');
+    // Only when it still resolves. A saved upload selector that has stopped matching
+    // must leave the heuristic's answer alone rather than overwrite it with nothing —
+    // the same rule `findSubmitControl` follows when its saved selector goes stale.
+    if (el && resume) {
+      resume.element = el;
+      resume.source = 'override';
+      resume.confidence = 'high';
+      resume.selectorUsed = config.cvUpload;
+    }
+  }
+  return detected;
 }
 
 export function detectFields(opts: DetectOptions): DetectedField[] {

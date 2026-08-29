@@ -15,6 +15,7 @@ import { findMatchingConfig } from '../shared/matcher';
 import { generateSelector, pickSelector } from '../shared/selector';
 import { query } from '../shared/query';
 import { isExternalUrl } from '../shared/redirect';
+import { webUrl } from '../shared/appLink';
 import { DEFAULT_SETTINGS } from '../shared/defaults';
 import {
   getState, getSettings, patchSettings, saveFieldOverride, clearFieldOverride,
@@ -31,8 +32,9 @@ import {
 } from '../shared/recording';
 import { BUILD_ID } from '../shared/buildId';
 import { getDoc, cvFileToFile } from '../shared/cvStore';
-import { TEXT_FIELDS, FIELD_LABELS, orderFields } from '../shared/fieldKeys';
+import { FIELD_LABELS, orderFields } from '../shared/fieldKeys';
 import { matchStatus, orderReport } from '../shared/fieldStatus';
+import { BIND_LABELS } from '../shared/labels';
 import {
   MSG, type FollowRedirectResponse, type Message, type RecordingResponse,
   type SessionState, type StatusResponse,
@@ -43,7 +45,7 @@ import { findSubmitControl } from '../shared/submitDetect';
 import { waitForSelector } from './waitForForm';
 import { runPrepSteps } from './prep';
 import { extractJob, previewContainer, type ExtractedJob } from './extract';
-import { detectFields } from './fieldDetect';
+import { detectForConfig, DETECTABLE_FIELDS } from './fieldDetect';
 import { detectRedirect, type RedirectDetection } from './redirectDetect';
 import { fillTextField, fillFileInput, highlight, clearHighlights } from './fill';
 import { startPicker } from './picker';
@@ -465,18 +467,7 @@ class Controller {
     // with it — the rows they sat on may not even exist in what follows.
     this.confirmedFields.clear();
 
-    const detected = detectFields({
-      root: document,
-      fields: this.wantedFields(),
-      overrides: config.fieldOverrides,
-      autoDetect: config.autoDetect !== false,
-    });
-    // Resume override lives on cvUpload.
-    if (config.cvUpload) {
-      const el = query(document, config.cvUpload);
-      const resume = detected.find((d) => d.field === 'resume');
-      if (el && resume) { resume.element = el; resume.source = 'override'; resume.confidence = 'high'; resume.selectorUsed = config.cvUpload; }
-    }
+    const detected = detectForConfig({ root: document, fields: this.wantedFields(), config });
 
     this.matches = detected.map((d) => {
       const value = d.field === 'resume' ? undefined : this.profile.values[d.field];
@@ -826,10 +817,49 @@ class Controller {
     this.recorderBar = new RecorderBar({
       onInteract: () => this.toggleArmed(),
       onDeclare: (bind) => this.pickForBind(bind, leg),
+      onReset: () => void this.resetRecording(),
       onUndo: () => void this.undoStep(),
       onDone: () => void this.stopRecording(),
     });
     this.paintBar();
+    // After the bar, never before: the bar is the only thing on screen that says the
+    // page is inert, and marks appearing ahead of it are unexplained.
+    this.markDetectedFields();
+  }
+
+  /**
+   * What the extension can already see, named on the page the user is about to
+   * apply on.
+   *
+   * **Both legs, and the same sweep on each.** The posting leg used to keep whatever
+   * `refreshSetup` had happened to draw a moment earlier — containers, a guessed Send
+   * button, the redirect element — and the destination leg, a fresh content script on
+   * the employer's site that has never run detection, showed nothing at all. Clearing
+   * first is what makes the two the same page.
+   *
+   * **Fields only.** `refreshSetup` also names the Send button, but that is the
+   * panel's guess about a control, and putting a chip reading "Send button" beside
+   * something the user is about to press for real reads as an instruction the
+   * extension is in no position to give. The bar's Declare menu is how those two get
+   * named here, and `pickForBind` chips what it is told.
+   *
+   * The config is optional all the way down (`detectForConfig`), because on the
+   * destination leg there routinely is none.
+   */
+  private markDetectedFields(): void {
+    try {
+      clearHighlights();
+      const detected = detectForConfig({
+        root: document, fields: DETECTABLE_FIELDS, config: this.config,
+      });
+      for (const d of detected) {
+        if (d.element) highlight(d.element, d.confidence, FIELD_LABELS[d.field]);
+      }
+    } catch (e) {
+      // A sweep is a nicety; a recording that would not attach is not. Never let the
+      // second fail for the first.
+      console.warn(LOG, 'recording: field sweep failed', e);
+    }
   }
 
   private async onRecordedStep(step: RecordedStep): Promise<void> {
@@ -857,6 +887,47 @@ class Controller {
   }
 
   /**
+   * Reset. Throw the recording away and begin it again where it began.
+   *
+   * Undo can only ever take a step out of the *list*; it cannot take back what the
+   * step did. The "Show more" is still open, the form is still on page three, and
+   * after a handoff the browser is on the employer's site entirely — so a recording
+   * carried on after a few undos is being made against a page state no later visit
+   * ever reaches, and `prep` replays into it. That is why this reloads: a clean list
+   * against a dirty page is the half-fix, and the worse one.
+   *
+   * `RECORD_START` is already the clean slate — it overwrites the tab's entry
+   * unconditionally — so there is no `RECORD_RESET`. It is re-sent with the
+   * recording's **own** `postingUrl`, never `location.href`: resetting from the
+   * employer's ATS must not redefine the posting as the ATS page, or the handoff
+   * could never be recorded again. Clearing `destinationUrl` with it is the other
+   * half of that, and what stops `compileRecording` still believing a handoff
+   * happened.
+   */
+  private async resetRecording(): Promise<void> {
+    const recording = this.recording;
+    if (!recording) return;
+    this.cancelPicker?.();
+
+    // Awaited: the navigation below tears this context down, and a message still in
+    // flight when it does would leave the old steps in the store.
+    await chrome.runtime.sendMessage({
+      type: MSG.RECORD_START, flow: recording.flow, postingUrl: recording.postingUrl,
+    } satisfies Message);
+
+    // Nothing is torn down by hand. Unload does it, and `run()` stands down on
+    // `this.recorder` existing — clearing it here would open a window in which an
+    // autofill could start against a page that is about to be replaced.
+    //
+    // Through `webUrl` like every other href this extension hands the browser, even
+    // though a `postingUrl` captured from a content script's `location.href` is always
+    // http(s). A refusal falls back to a reload, so the control can never do nothing.
+    const target = webUrl(recording.postingUrl);
+    if (!target || target === location.href) location.reload();
+    else location.assign(target);
+  }
+
+  /**
    * Mark something that is not what just happened — the description two screens up,
    * the confirmation banner that has just appeared. It goes through the same picker
    * every other override does, and produces a step like any other so the review can
@@ -881,7 +952,10 @@ class Controller {
         bind,
         bindSource: 'user',
       });
-      highlight(element as HTMLElement, 'high');
+      // The receipt for the naming that just happened. Declare the Confirmation and
+      // then the Send button and, unlabelled, they are two identical green outlines
+      // with nothing saying which is which — on exactly the two marks that gate Apply.
+      highlight(element as HTMLElement, 'high', bindLabel(bind));
     }, bindLabel(bind));
   }
 
@@ -967,15 +1041,35 @@ class Controller {
       const destination = await ensureConfigForUrl(compiled.destination.url);
       await applyConfigPatch(destination.id, compiled.destination);
     }
-    this.discardRecording();
+
+    // Report it, then offer the wizard — this used to *be* the wizard, which dropped
+    // the user four steps into the manual surface with nothing saying the recording
+    // had worked. The order matters: the mode is set first so no wizard frame is
+    // painted on the way past, and the refresh that follows is what the saved
+    // screen's outstanding-work list is counted from. Counting it from the render
+    // still on screen would count work this patch has just done.
+    const { flow } = compiled;
+    this.clearRecording();
+    this.setupPanel?.showSaved(flow);
+    await this.refreshSetup();
   }
 
   /** Leave the review, keeping whatever was already in the config. */
   private discardRecording(): void {
-    this.recording = undefined;
-    this.compiled = undefined;
+    this.clearRecording();
     this.setupPanel?.showReview(false);
     void this.refreshSetup();
+  }
+
+  /**
+   * Done with the recording itself. Split out because Save and Discard both finish
+   * with it and then go to different screens — and the recording has to be gone
+   * before either renders, or `refreshSetup` hands the panel a `compiled` it would
+   * put the review back up from.
+   */
+  private clearRecording(): void {
+    this.recording = undefined;
+    this.compiled = undefined;
   }
 
   /* ---------------- On-page Setup mode ---------------- */
@@ -1043,7 +1137,11 @@ class Controller {
    */
   private closeSetup(): void {
     this.cancelPicker?.();
-    clearHighlights();
+    // Not while a recording is running. These marks belong to the recording, not to
+    // the panel — Done here means "finished with the panel", and the panel is
+    // reachable mid-recording from its pill. Wiping them would leave the user
+    // applying over a bare page with nothing to re-draw them until the recording ends.
+    if (!this.recorder) clearHighlights();
     this.setupPanel?.destroy();
     this.setupPanel = undefined;
     // Re-render an existing report against the config that was just edited —
@@ -1133,24 +1231,17 @@ class Controller {
       });
 
     // Form fields: run detection (overrides + heuristics) exactly like the fill flow.
-    const detected = detectFields({
-      root: document,
-      fields: [...TEXT_FIELDS, 'resume' as FieldKey],
-      overrides: config.fieldOverrides,
-      autoDetect: config.autoDetect !== false,
-    });
-    if (config.cvUpload) {
-      const el = query(document, config.cvUpload);
-      const resume = detected.find((d) => d.field === 'resume');
-      if (el && resume) { resume.element = el; resume.source = 'override'; resume.confidence = 'high'; resume.selectorUsed = config.cvUpload; }
-    }
+    const detected = detectForConfig({ root: document, fields: DETECTABLE_FIELDS, config });
 
     const fields: SetupRow[] = detected.map((d) => {
       const fillable = d.element ? isFillable(d.element, d.field === 'resume') : false;
       // A saved override that points at a non-fillable node (e.g. a label/div)
       // resolves but can't be filled — surface it as a warning, not false-green.
       const status = d.element && !fillable ? 'low' : d.confidence;
-      if (d.element) highlight(d.element, status);
+      // Named on the page, not just outlined. Nine coloured outlines say nine things
+      // were found and never which one is Email — and while a recording runs this is
+      // the only field feedback there is, the panel being folded to its pill.
+      if (d.element) highlight(d.element, status, FIELD_LABELS[d.field]);
       const hasSave = d.field === 'resume' ? !!config.cvUpload : !!config.fieldOverrides?.[d.field];
       const where = d.element ? (d.selectorUsed ?? generateSelector(d.element)) : '';
       const note = d.element && !fillable ? `not a form field — re-pick · ${where}`
@@ -1180,7 +1271,13 @@ class Controller {
       config.submitSelector,
       detected.map((d) => d.element).filter((e): e is HTMLElement => e != null),
     );
-    if (found.element) highlight(found.element, found.source === 'override' ? 'high' : 'low');
+    // The most consequential mark on the page, and the one an outline can least
+    // answer for: on most sites this control is *guessed* from its label, and "Save
+    // job" sits an inch from the real one. `BIND_LABELS` because the Declare menu
+    // already names this exact object — one vocabulary, not two spellings.
+    if (found.element) {
+      highlight(found.element, found.source === 'override' ? 'high' : 'low', BIND_LABELS.submit);
+    }
     const foundLabel = found.element
       ? clip(found.element.textContent ?? '', 40) || generateSelector(found.element)
       : '';
@@ -1207,7 +1304,7 @@ class Controller {
     // The confirmation element. Unlike every other row, "not set" is never fine:
     // it is what marks a posting applied, and Apply will not send without it.
     const successEl = config.successSelector ? query(document, config.successSelector) : null;
-    if (successEl) highlight(successEl, 'high');
+    if (successEl) highlight(successEl, 'high', BIND_LABELS.success);
     const successRow: SetupRow = {
       key: 'successSelector',
       label: 'Confirmation element',

@@ -30,6 +30,7 @@ import { ACTION_LABELS, STATUS_TEXT } from '../../shared/labels';
 import { flowBanner, type ApplyState } from '../../shared/flowState';
 import { CONCEPT_HELP } from '../../shared/help';
 import { helpButton, helpPanel } from '../../ui/help';
+import { summaryLine } from '../../ui/summaryLine';
 import { Sheet, type SheetCallbacks, type SheetData } from '../sheet';
 import modalCss from './modal.css?inline';
 
@@ -583,17 +584,15 @@ export class FillerModal extends Sheet<ModalData> {
     // Each count wears its own dot instead: icon, number, word. A status stays on
     // the line at zero, because this is a key as well as a tally.
     const counts = statCounts(data.matches);
-    const summary = el('p', 'cf-summary');
-    for (const status of ['high', 'low', 'none'] as const) {
-      const dot = el('span', `cf-dot ${status}`);
-      dot.setAttribute('role', 'img');
-      dot.setAttribute('aria-label', STATUS_LABELS[status]);
-      const label = el('span');
-      // One vocabulary with the tiles and the rows — the words come from labels.ts.
-      label.textContent = `${counts[status]} ${STATUS_TEXT[status].word}`;
-      summary.append(dot, label);
-    }
-    body.append(summary);
+    // One vocabulary with the tiles and the rows — the words come from labels.ts —
+    // and one construction with the setup panel's offer screen, which draws the same
+    // line over the fields it recognised. Both live in `ui/summaryLine.ts`.
+    body.append(summaryLine((['high', 'low', 'none'] as const).map((status) => ({
+      dot: status,
+      count: counts[status],
+      word: STATUS_TEXT[status].word,
+      aria: STATUS_LABELS[status],
+    }))));
 
     // Rendered in the order the fill left them, never re-sorted here. `orderReport`
     // runs once, in `Controller.detectAndFill` — the report is the record of a

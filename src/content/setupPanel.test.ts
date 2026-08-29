@@ -11,7 +11,9 @@ import { describe, it, expect, afterEach } from 'vitest';
 import { SetupPanel, type SetupCallbacks, type SetupData } from './setupPanel';
 import { REDIRECT_HELP, SETUP_STEP_HELP, SETUP_STEP_TITLES } from '../shared/help';
 import { SETUP_STEP_ICONS, SETUP_STEP_ORDER } from '../shared/setupSteps';
-import { ACTION_LABELS, SELECTOR_STRENGTH_TEXT } from '../shared/labels';
+import {
+  ACTION_LABELS, RECORD_FLOW_HINT, RECORD_FLOW_TEXT, SELECTOR_STRENGTH_TEXT, SETUP_STATUS_TEXT,
+} from '../shared/labels';
 import {
   RECORDING_WARNINGS, compileRecording, type CompiledSetup, type Recording,
 } from '../shared/recording';
@@ -58,9 +60,35 @@ function data(over: Partial<SetupData> = {}): SetupData {
   };
 }
 
+/**
+ * A brand-new config: nothing saved, no page actions — which is what
+ * `isUnconfigured` tests and so what routes the panel to the offer.
+ */
+function fresh(over: Partial<SetupData> = {}): SetupData {
+  return data({
+    prep: [],
+    containers: [{ key: 'jobTitle', label: 'Job title', status: 'high', note: 'auto · h1', hasSave: false }],
+    // One row of each status, because the offer screen now counts and names them and
+    // a fixture that cannot produce a `low` cannot show the one chip that is worded.
+    fields: [
+      { key: 'resume', label: 'CV / Résumé', status: 'none', note: 'not found', hasSave: false },
+      { key: 'email', label: 'Email', status: 'high', note: 'auto · #email', hasSave: false },
+      { key: 'phone', label: 'Phone', status: 'low', note: 'auto (low) · .f input', hasSave: false },
+    ],
+    submit: { key: 'submitSelector', label: 'Send button', status: 'none', note: 'not found', hasSave: false },
+    success: { key: 'successSelector', label: 'Confirmation element', status: 'none', note: 'not set', hasSave: false },
+    ...over,
+  });
+}
+
 let panel: SetupPanel | undefined;
 
 function render(d: SetupData, cb = callbacks()): ShadowRoot {
+  // Tear down anything already mounted. Both hosts carry the same element id, so a
+  // second panel left the *first* one's shadow root as what `getElementById` returns
+  // — every assertion after it silently read a stale card, and `afterEach` only ever
+  // destroyed the last panel, so the leak outlived the test that caused it.
+  panel?.destroy();
   panel = new SetupPanel(cb);
   panel.render(d);
   return (document.getElementById('chromium-filler-setup-host') as HTMLElement).shadowRoot!;
@@ -649,13 +677,52 @@ describe('the record lead', () => {
     const started: string[] = [];
     const s = render(data(), callbacks({ onStartRecording: (f) => started.push(f) }));
     const buttons = [...s.querySelectorAll<HTMLButtonElement>('.cf-record-actions .cf-btn')];
-    expect(buttons.map((b) => b.textContent)).toEqual([
-      ACTION_LABELS.record, ACTION_LABELS.recordExternal,
+    expect(buttons.map((b) => b.querySelector('b')!.textContent)).toEqual([
+      RECORD_FLOW_TEXT.internal.label, RECORD_FLOW_TEXT.external.label,
     ]);
 
     buttons[0].click();
     buttons[1].click();
     expect(started).toEqual(['internal', 'external']);
+  });
+
+  /**
+   * The complaint that produced this: two bare labels, and "this site" versus "the
+   * employer's site" is exactly the distinction someone is on this panel because
+   * they do not yet have. The caption is the answer, and it is *supporting* text —
+   * so the button's accessible name stays the bare label and the caption rides on
+   * `aria-describedby`. Both halves matter: the E2E finds these by name.
+   */
+  it('explains each flow without letting the caption into the button’s name', () => {
+    const s = render(data());
+    const buttons = [...s.querySelectorAll<HTMLButtonElement>('.cf-record-actions .cf-btn')];
+
+    expect(buttons.map((b) => b.querySelector('small')!.textContent)).toEqual([
+      RECORD_FLOW_TEXT.internal.detail, RECORD_FLOW_TEXT.external.detail,
+    ]);
+    expect(buttons.map((b) => b.getAttribute('aria-label'))).toEqual([
+      RECORD_FLOW_TEXT.internal.label, RECORD_FLOW_TEXT.external.label,
+    ]);
+    for (const b of buttons) {
+      expect(s.getElementById(b.getAttribute('aria-describedby')!)!.textContent)
+        .toBe(b.querySelector('small')!.textContent);
+    }
+  });
+
+  /**
+   * The pick only orders the recorder bar's Declare menu — `compileRecording`
+   * derives the flow from the legs the steps arrived on — so the sentence saying
+   * so belongs where the question is asked. It lived in `CONCEPT_HELP.recording.when`,
+   * which the offer screen does not render.
+   */
+  it('says the choice is safe to get wrong, on the offer', () => {
+    expect(render(fresh()).querySelector('.cf-record-hint')!.textContent).toBe(RECORD_FLOW_HINT);
+  });
+
+  /** Not in the wizard: that path already ends on "Or correct it by hand below.", and
+   *  anyone reading it has recorded the site once already. */
+  it('leaves the hint off the wizard, which has its own way out', () => {
+    expect(render(data()).querySelector('.cf-record-hint')).toBeNull();
   });
 
   /**
@@ -803,19 +870,209 @@ describe('reviewing a recording', () => {
   });
 });
 
-describe('where the panel opens', () => {
-  /** A brand-new config: nothing saved, no page actions. */
-  const fresh = () => data({
-    prep: [],
-    containers: [{ key: 'jobTitle', label: 'Job title', status: 'high', note: 'auto · h1', hasSave: false }],
-    fields: [
-      { key: 'resume', label: 'CV / Résumé', status: 'none', note: 'not found', hasSave: false },
-      { key: 'email', label: 'Email', status: 'high', note: 'auto · #email', hasSave: false },
-    ],
-    submit: { key: 'submitSelector', label: 'Send button', status: 'none', note: 'not found', hasSave: false },
-    success: { key: 'successSelector', label: 'Confirmation element', status: 'none', note: 'not set', hasSave: false },
+/**
+ * The other end of a recording. Save used to hand the user straight to the wizard —
+ * four steps into the manual surface, with nothing saying the recording had worked —
+ * so this screen is the report, and the wizard is what it offers rather than what it
+ * is. The Controller sets the mode and then refreshes, so everything counted here is
+ * counted from the config that was just written.
+ */
+describe('finishing a recording', () => {
+  const footer = (s: ShadowRoot) =>
+    [...s.querySelectorAll<HTMLButtonElement>('.cf-footer .cf-btn')];
+
+  it('reports the save instead of becoming the wizard', () => {
+    const s = render(data());
+    panel!.showSaved('internal');
+
+    expect(s.querySelector('.cf-step-title')!.textContent).toBe('Site setup saved');
+    expect(s.querySelector('.cf-rail')).toBeNull();
   });
 
+  /** Which shape was written is the one fact the review behind it was arguing about. */
+  it('says which shape of application was saved', () => {
+    const s = render(data());
+    panel!.showSaved('external');
+    expect(s.querySelector('.cf-step-lead')!.textContent).toContain('handed off');
+
+    panel!.showSaved('internal');
+    expect(s.querySelector('.cf-step-lead')!.textContent).toContain('on this site');
+  });
+
+  /**
+   * The steps that still have work are the entire reason to go into the wizard
+   * rather than close the panel, so they are named — from `stepStates`, the same
+   * model the rail counts from, so this cannot disagree with the chips a press later.
+   */
+  it('names what is still outstanding', () => {
+    const s = render(fresh());
+    panel!.showSaved('internal');
+    const notes = [...s.querySelectorAll('.cf-flow.warn .cf-flow-detail')]
+      .map((n) => n.textContent);
+    expect(notes.some((n) => n?.startsWith(SETUP_STEP_TITLES.send))).toBe(true);
+  });
+
+  it('says so when nothing is', () => {
+    const s = render(data());
+    panel!.showSaved('internal');
+    expect(s.querySelector('.cf-flow.warn')).toBeNull();
+    expect(s.querySelector('.cf-record-or')!.textContent).toBe('Nothing else needs you.');
+  });
+
+  /**
+   * The swap is the whole point of the screen. With something outstanding the wizard
+   * is the next action and takes the coral; with nothing outstanding it is a detour
+   * and Done takes it. Exactly one either way — the same rule the review's footer and
+   * every wizard step follow.
+   */
+  it('puts the coral on the wizard only while something still needs doing', () => {
+    const s = render(fresh());
+    panel!.showSaved('internal');
+    expect(s.querySelectorAll('.cf-btn.primary')).toHaveLength(1);
+    expect(footer(s).map((b) => b.textContent))
+      .toEqual([ACTION_LABELS.done, 'Review configuration']);
+    expect(footer(s)[1].classList).toContain('primary');
+  });
+
+  it('puts it on Done once nothing does', () => {
+    const s = render(data());
+    panel!.showSaved('internal');
+    expect(s.querySelectorAll('.cf-btn.primary')).toHaveLength(1);
+    expect(footer(s).map((b) => b.textContent))
+      .toEqual(['Review configuration', ACTION_LABELS.done]);
+    expect(footer(s)[1].classList).toContain('primary');
+  });
+
+  it('closes the panel from Done, and opens the wizard from Review', () => {
+    let closed = 0;
+    const s = render(data(), callbacks({ onClose: () => { closed += 1; } }));
+    panel!.showSaved('internal');
+    footer(s).find((b) => b.textContent === ACTION_LABELS.done)!.click();
+    expect(closed).toBe(1);
+
+    footer(s).find((b) => b.textContent === 'Review configuration')!.click();
+    expect(s.querySelector('.cf-rail')).not.toBeNull();
+  });
+
+  /**
+   * A place in a task, not a fact about the data — the same rule `step` and the
+   * review follow, and the same failure if broken: `refreshSetup` re-renders on
+   * every edit, so this would reappear over whatever the user moved on to.
+   */
+  it('stays put across a re-render, and does not come back after Review', () => {
+    const d = data();
+    const s = render(d);
+    panel!.showSaved('internal');
+    panel!.render(d);
+    expect(s.querySelector('.cf-step-title')!.textContent).toBe('Site setup saved');
+
+    footer(s).find((b) => b.textContent === 'Review configuration')!.click();
+    panel!.render(d);
+    expect(s.querySelector('.cf-rail')).not.toBeNull();
+  });
+});
+
+/**
+ * Discard is the back door, and it goes wherever the panel would have opened.
+ * Refusing a recording on a site with nothing saved should leave recording one press
+ * away — not four steps into the wizard the user has just declined to use.
+ */
+describe('discarding a recording', () => {
+  it('returns to the offer on a site with nothing saved', () => {
+    const s = render(fresh());
+    panel!.showReview(true);
+    panel!.showReview(false);
+    expect(s.querySelector('.cf-step-title')!.textContent).toBe('Teach the extension this site');
+    expect(s.querySelector('.cf-rail')).toBeNull();
+  });
+
+  it('returns to the wizard on a site being re-recorded', () => {
+    const s = render(data());
+    panel!.showReview(true);
+    panel!.showReview(false);
+    expect(s.querySelector('.cf-rail')).not.toBeNull();
+  });
+});
+
+/**
+ * The offer used to say what recording *is* and nothing about the page behind it —
+ * even though `refreshSetup` computes a complete `data.fields` on every render, in
+ * every mode, and hands it over. So "teach the extension this site" gave no sense of
+ * how much teaching was left, and the rows that would have said were two taps down a
+ * rail this screen does not draw.
+ */
+describe('what the offer says is already recognised', () => {
+  const summary = (s: ShadowRoot) => s.querySelector('.cf-detected .cf-summary')!;
+  const chips = (s: ShadowRoot) =>
+    [...s.querySelectorAll('.cf-detected-chips .chip')].map((c) => c.textContent);
+
+  it('counts every field row by outcome', () => {
+    // The fixture is one of each.
+    expect(summary(render(fresh())).textContent)
+      .toBe(`1 ${SETUP_STATUS_TEXT.high.word}1 ${SETUP_STATUS_TEXT.low.word}1 ${SETUP_STATUS_TEXT.none.word}`);
+  });
+
+  /**
+   * The line is a key as much as a tally: a reader who has never seen a yellow dot
+   * learns nothing from a line that leaves the yellow one out because it happens to
+   * be zero. Same rule as the review modal's `.cf-summary`, which it now shares.
+   */
+  it('keeps all three statuses on the line at zero', () => {
+    const s = render(fresh({
+      fields: [{ key: 'email', label: 'Email', status: 'high', note: 'auto · #email', hasSave: false }],
+    }));
+    expect(summary(s).querySelectorAll('.cf-dot')).toHaveLength(3);
+    expect(summary(s).textContent).toContain(`0 ${SETUP_STATUS_TEXT.none.word}`);
+  });
+
+  /**
+   * The wording trap this screen exists to avoid. `detectFields` returns a row per
+   * *wanted* field, so nine `none`s is the ordinary state of any real form — calling
+   * that "unmatched" blames the site for the commonest case, which is the same
+   * cry-wolf failure `setupSteps.fields` counts only the CV to sidestep.
+   */
+  it('says a field the page never asked for is not on the page, not unmatched', () => {
+    const text = summary(render(fresh())).textContent!;
+    expect(text).toContain(SETUP_STATUS_TEXT.none.word);
+    expect(text).not.toMatch(/unmatched/i);
+  });
+
+  /**
+   * "5 found" answers how many and not which, and which is the thing someone about to
+   * teach the site needs. In `data.fields` order, which `orderFields` has already put
+   * in reading order.
+   */
+  it('names what it found, and nothing it did not', () => {
+    expect(chips(render(fresh())))
+      .toEqual(['Email', `Phone · ${SETUP_STATUS_TEXT.low.chip}`]);
+  });
+
+  /**
+   * A page that offers nothing keeps the count line — it is a key, and a reader has
+   * to be able to learn the three dots from it — but the answer to "what did you
+   * find" has to be a sentence when the answer is "nothing". A heading promising what
+   * it can read, over three zeros and an empty chip row, reads as a bug.
+   */
+  it('says so in words when it found nothing, rather than showing three zeros', () => {
+    const s = render(fresh({
+      fields: [{ key: 'email', label: 'Email', status: 'none', note: 'not found', hasSave: false }],
+    }));
+    expect(s.querySelector('.cf-detected .cf-summary')).not.toBeNull();
+    expect(s.querySelector('.cf-detected-chips')).toBeNull();
+    expect(s.querySelector('.cf-detected .cf-record-or')!.textContent).toMatch(/nothing here/i);
+  });
+
+  /**
+   * Not on wizard step 1. Step 5 already lists every field row with its selector, and
+   * a second rendering of the same counts under the re-record buttons is the clutter
+   * the `cf-record-hint` / `cf-record-or` split already refuses.
+   */
+  it('is on the offer alone', () => {
+    expect(render(data()).querySelector('.cf-detected')).toBeNull();
+  });
+});
+
+describe('where the panel opens', () => {
   /**
    * The bug this screen exists for. The record buttons started life as a block on
    * wizard step 1 — and the panel does not *open* on step 1: `firstStepWithWork`
@@ -836,16 +1093,34 @@ describe('where the panel opens', () => {
     expect(s.querySelector('.cf-rail')).not.toBeNull();
   });
 
-  it('gets out of the way when asked, and does not come back on a re-render', () => {
+  /**
+   * The offer has no footer, and that is the screen. It carried "Set up by hand ›"
+   * and "Done", and neither was an outcome: the first pointed at the six-step wizard
+   * from the one screen built to avoid it — the wizard that put `submitSelector` and
+   * `successSelector` last in a queue of twenty-five — and the second closed the
+   * panel having taught the extension nothing, leaving the next posting on the site
+   * to open on this very screen again.
+   *
+   * The re-render matters as much as the first paint: `refreshSetup` repaints on
+   * every edit, and a way past that came back on the second paint would be a way past.
+   */
+  it('offers no way past itself, on this paint or the next', () => {
     const d = fresh();
     const s = render(d);
-    s.querySelector<HTMLButtonElement>('.cf-footer .cf-btn')!.click();
-    expect(s.querySelector('.cf-rail')).not.toBeNull();
+    expect(s.querySelector('.cf-footer')).toBeNull();
+    expect(s.querySelector('.cf-rail')).toBeNull();
 
     panel!.render(d);
-    expect(s.querySelector('.cf-rail')).not.toBeNull();
+    expect(s.querySelector('.cf-footer')).toBeNull();
+    expect(s.querySelector('.cf-rail')).toBeNull();
   });
 
+  /**
+   * With the footer gone the Record buttons are the only buttons on the card, so
+   * "exactly one primary" is now the assertion that the *offer* has one action rather
+   * than the assertion that it does not compete with a footer. Both are worth having;
+   * this is the one that survived.
+   */
   it('offers both flows from the offer screen, with Record the only primary', () => {
     const started: string[] = [];
     const s = render(fresh(), callbacks({ onStartRecording: (f) => started.push(f) }));

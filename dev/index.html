@@ -144,10 +144,15 @@
              here nobody looks at them. -->
         <div class="states">
           <a href="./frame.html?page=setup&amp;state=offer">the offer (a new site)</a>
+          <a href="./frame.html?page=setup&amp;state=offer-empty">the offer, nothing found on the page</a>
+          <a href="./frame.html?page=setup&amp;state=offer&amp;marks=1">the offer, with the page marked up</a>
           <a href="./frame.html?page=setup&amp;state=recording">recording (bar + pill)</a>
           <a href="./frame.html?page=setup&amp;state=recording-armed">recording, armed (the page is live)</a>
+          <a href="./frame.html?page=setup&amp;state=recording-reset">recording, resetting (the warning behind Reset)</a>
           <a href="./frame.html?page=setup&amp;state=review">review a recording</a>
           <a href="./frame.html?page=setup&amp;state=review-external">review a two-step recording</a>
+          <a href="./frame.html?page=setup&amp;state=saved">saved, with work left (Review is primary)</a>
+          <a href="./frame.html?page=setup&amp;state=saved-clean">saved, nothing left (Done is primary)</a>
         </div>
         <div class="states">
           <a href="./frame.html?page=setup">quick apply (opens on the work left)</a>
@@ -160,6 +165,10 @@
           <!-- Open this one in a wide tab: it is a desktop-only rendering. -->
           <a href="./frame.html?page=setup&amp;state=flush">flush to the edge</a>
           <a href="./frame.html?page=setup&amp;pills=1">both folded (pills)</a>
+          <!-- The marks are on the HOST page's light DOM, so nothing that inspects
+               the panel can see them — and `marks` is a parameter rather than a
+               state so it pairs with any of the above. -->
+          <a href="./frame.html?page=setup&amp;marks=1">field marks on the page</a>
         </div>
         <iframe src="./frame.html?page=setup" title="Setup panel harness, phone width"></iframe>
       </div>

@@ -80,6 +80,87 @@
   color: var(--muted-2);
 }
 
+/*
+ * A record button that carries its own explanation. `--tap` stays the floor via
+ * `min-height` in primitives.css, and the caption is what makes it taller — so the
+ * height is `auto` here rather than a second number that would fight it.
+ *
+ * Left-aligned on both axes, because the two lines are a heading and a sentence
+ * rather than a label: centred, the caption's ragged last line reads as a wrap
+ * failure. The padding is the block's own, not the bare button's, since a two-line
+ * label inside a control sized for one is what pushed the text against the border.
+ *
+ * **Paired at `button.cf-btn` specificity**, the same trap `.btn-danger` fell into.
+ * The bare rule is (0,1,0) and loses to `button.cf-btn`'s (0,1,1) — so `white-space:
+ * normal` never landed, the caption stayed on one `nowrap` line, and the sentence ran
+ * straight out past the button's right-hand edge on every width.
+ */
+.cf-record-choice,
+button.cf-btn.cf-record-choice {
+  flex-direction: column;
+  /* `stretch`, not `flex-start`: a flex item sized to its content is sized to the
+     caption *unwrapped*, so the sentence ran straight out past the button's edge.
+     Filling the width is what lets it wrap; `text-align` is what keeps it left. */
+  align-items: stretch;
+  justify-content: center;
+  gap: var(--space-1);
+  height: auto;
+  padding: var(--space-3);
+  text-align: left;
+  white-space: normal;
+}
+
+.cf-record-choice small {
+  font-size: var(--text-xs);
+  font-weight: 400;
+  line-height: 1.4;
+  color: var(--muted-2);
+}
+
+/* On the coral fill the muted grey above is unreadable, so the caption drops back to
+   the button's own on-primary colour and is quietened with opacity instead. Same
+   trick, different ground: the caption must always read as the quieter of two lines. */
+.cf-record-choice.primary small {
+  color: var(--accent-fg);
+  opacity: 0.85;
+}
+
+/*
+ * The one sentence that turns the choice above back into a preference. It sits with
+ * the buttons rather than under the whole block, so it is read while the question is
+ * still being answered — `.cf-record-or` is the block's *exit*, and this is not one.
+ */
+.cf-record-hint {
+  margin: var(--space-2) 0 0;
+  font-size: var(--text-xs);
+  line-height: 1.4;
+  color: var(--muted-2);
+}
+
+/*
+ * What the extension can already read on the page behind the offer: a count line
+ * and a chip per field it recognised.
+ *
+ * No border and no fill — it is a *reading* of the page, not an object standing on
+ * the card, and boxing it would put a third bordered block on a screen whose two
+ * Record buttons are the thing to look at. The top margin is what separates it from
+ * them; the section head does the rest.
+ */
+.cf-detected {
+  margin-top: var(--space-5);
+}
+
+/* Wraps, because sixteen field names cannot be a row at 390px — and every chip is
+   one line, since a name broken over two reads as two fields. */
+.cf-detected-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+.cf-detected-chips .chip {
+  white-space: nowrap;
+}
+
 /* The review's per-step "what is this" control. Narrow enough to leave the row's
    selector note readable, which is the other half of judging a step. */
 .cf-bind-select {

@@ -2329,6 +2329,14 @@ async function clearConfigs(): Promise<void> {
 const bar = (page: Page) => page.locator('[data-cf-recorder="host"] .cf-bar');
 
 /**
+ * The chips naming each mark on the page. They are `aria-hidden` — the panel's rows
+ * are the accessible surface and these are the sighted shortcut to them — so they are
+ * found by attribute and text rather than by role.
+ */
+const mark = (page: Page, name: string) =>
+  page.locator('[data-cf-tag]').filter({ hasText: new RegExp(`^${name}`) });
+
+/**
  * Arm one page action. The page is inert while a recording runs, so *every* gesture
  * in these specs has to be paid for first — which is the feature, and what makes an
  * unarmed click below a real assertion rather than a formality.
@@ -2366,6 +2374,12 @@ async function stepCount(page: Page): Promise<string> {
   return (await bar(page).locator('.cf-rec-count').textContent()) ?? '';
 }
 
+/** Throw the recording away: press Reset, then answer the warning behind it. */
+async function startOver(page: Page): Promise<void> {
+  await bar(page).getByRole('button', { name: 'Reset', exact: true }).click();
+  await bar(page).getByRole('button', { name: 'Start over', exact: true }).click();
+}
+
 test('Recording: one application on this site becomes the whole config', async () => {
   await clearConfigs();
   const page = await context.newPage();
@@ -2376,8 +2390,36 @@ test('Recording: one application on this site becomes the whole config', async (
 
     const setup = page.locator('.cf-card[data-sheet="setup"]');
     await expect(setup).toBeVisible({ timeout: 20_000 });
+
+    // The offer has no footer, so recording is the only way on. It carried "Set up by
+    // hand ›" — which pointed at the six-step wizard from the one screen built to
+    // avoid it — and a "Done" that closed the panel having taught the extension
+    // nothing. The header × still minimizes, which is the way to get it out of the way.
+    await expect(setup.locator('.cf-footer')).toHaveCount(0);
+    await expect(setup.locator('.cf-rail')).toHaveCount(0);
+    // And it says what it can already read, so "teach me this site" is a concrete ask
+    // rather than a blank one. `not on this page` and never "unmatched": detection
+    // returns a row per *wanted* field, so most of the sixteen are grey on any form.
+    await expect(setup.locator('.cf-detected .cf-summary')).toContainText('not on this page');
+    await expect(setup.locator('.cf-detected .cf-summary')).not.toContainText('unmatched');
+    await expect(setup.locator('.cf-detected-chips .chip').filter({ hasText: 'Email' }))
+      .toBeVisible();
+
     await setup.getByRole('button', { name: 'Apply on this site' }).click();
     await expect(bar(page)).toBeVisible({ timeout: 10_000 });
+
+    // The page is marked up by name for the whole recording. The panel is a pill by
+    // now, so this is the only thing on screen saying which control is which — and a
+    // coloured outline alone never could.
+    await expect(mark(page, 'Email')).toBeVisible();
+    const chip = (await mark(page, 'Email').boundingBox())!;
+    const field = (await page.locator('#email').boundingBox())!;
+    // Above the control and aligned to its right-hand edge. Right, because the gap
+    // above a form control is where the form's own <label> lives — a chip pinned
+    // above-left sits on top of the very words it is echoing, on every field of
+    // every form. Labels are short and controls are wide, so the right end is free.
+    expect(chip.y + chip.height).toBeLessThanOrEqual(field.y + 1);
+    expect(Math.abs((chip.x + chip.width) - (field.x + field.width))).toBeLessThan(4);
 
     // The page is held still until something is armed. Reading a posting means
     // pressing things, and `prep` replays on every later visit — so a press nobody
@@ -2403,6 +2445,14 @@ test('Recording: one application on this site becomes the whole config', async (
     await expect(setup.getByText('Check what was recorded')).toBeVisible({ timeout: 10_000 });
     await setup.getByRole('button', { name: 'Save setup' }).click();
 
+    // Save reports, it does not become the wizard. This used to drop the user four
+    // steps into the manual surface with nothing saying the recording had worked —
+    // and this recording marked everything, so the wizard is a detour and Done is
+    // the coral one.
+    await expect(setup.getByText('Site setup saved')).toBeVisible({ timeout: 10_000 });
+    await expect(setup.locator('.cf-rail')).toHaveCount(0);
+    await expect(setup.getByRole('button', { name: 'Review configuration' })).toBeVisible();
+
     const config = await configFor(urlFor('record-internal'));
     // The two rows that gate Apply, which the wizard buried at the end of a queue of
     // twenty-five and which almost nobody ever set.
@@ -2415,6 +2465,17 @@ test('Recording: one application on this site becomes the whole config', async (
     const prep = JSON.stringify(config?.prep ?? []);
     expect(prep).not.toContain(config?.submitSelector as string);
     expect(prep).not.toContain('#submit');
+
+    // …and Done is the way out of the panel, not a way further into it.
+    await setup.getByRole('button', { name: 'Done' }).click();
+    await expect(page.locator('.cf-card[data-sheet="setup"]')).toHaveCount(0);
+
+    // Done destroys the panel, so Site setup has to be able to build a new one —
+    // the sequence the saved screen created and the one nothing else covers. It
+    // opens on the wizard now, because the recording configured the site.
+    await openSetupPanel(page);
+    await expect(page.locator('.cf-card[data-sheet="setup"]')).toBeVisible({ timeout: 20_000 });
+    await expect(page.locator('.cf-rail')).toBeVisible();
   } finally {
     await page.close();
   }
@@ -2443,6 +2504,13 @@ test('Recording: a handoff is saved as two configs, one per site', async () => {
     // script is a brand-new one that has never heard of the posting.
     await expect(bar(page)).toBeVisible({ timeout: 15_000 });
 
+    // And the employer's form is marked up too — the leg that used to have nothing at
+    // all, because nothing here had ever run detection. It is also the leg with no
+    // site config: `findMatchingConfig` finds none on this origin and
+    // `ensureConfigForUrl` deliberately does not run until Save, so the sweep has to
+    // mean "the heuristics, and nothing saved" rather than throw.
+    await expect(mark(page, 'Email')).toBeVisible({ timeout: 10_000 });
+
     await type(page, '#ats-email', 'ada@example.com');
     await press(page, '#ats-submit');
     await expect(page.locator('#ats-success')).toBeVisible({ timeout: 10_000 });
@@ -2463,6 +2531,179 @@ test('Recording: a handoff is saved as two configs, one per site', async () => {
     expect(employer?.submitSelector).toBeTruthy();
     expect(employer?.successSelector).toBeTruthy();
     expect(employer?.fieldOverrides).toMatchObject({ email: expect.any(String) });
+  } finally {
+    await page.close();
+  }
+});
+
+test('Recording: the Declare menu holds its place while the clock ticks', async () => {
+  // The bar repainted itself once a second to advance the elapsed time, which
+  // rebuilt the open menu with it — so scrolling down to a profile field, or to
+  // the description, was a race against a one-second timer. Scroll is layout, and
+  // layout is invisible to vitest; this is the half that has to be measured in a
+  // real browser.
+  await clearConfigs();
+  const page = await context.newPage();
+  try {
+    await page.setViewportSize({ width: 1280, height: 900 });
+    await page.goto(urlFor('record-internal'));
+    await openSetupPanel(page);
+
+    const setup = page.locator('.cf-card[data-sheet="setup"]');
+    await expect(setup).toBeVisible({ timeout: 20_000 });
+
+    // The offer has no footer, so recording is the only way on. It carried "Set up by
+    // hand ›" — which pointed at the six-step wizard from the one screen built to
+    // avoid it — and a "Done" that closed the panel having taught the extension
+    // nothing. The header × still minimizes, which is the way to get it out of the way.
+    await expect(setup.locator('.cf-footer')).toHaveCount(0);
+    await expect(setup.locator('.cf-rail')).toHaveCount(0);
+    // And it says what it can already read, so "teach me this site" is a concrete ask
+    // rather than a blank one. `not on this page` and never "unmatched": detection
+    // returns a row per *wanted* field, so most of the sixteen are grey on any form.
+    await expect(setup.locator('.cf-detected .cf-summary')).toContainText('not on this page');
+    await expect(setup.locator('.cf-detected .cf-summary')).not.toContainText('unmatched');
+    await expect(setup.locator('.cf-detected-chips .chip').filter({ hasText: 'Email' }))
+      .toBeVisible();
+
+    await setup.getByRole('button', { name: 'Apply on this site' }).click();
+    await expect(bar(page)).toBeVisible({ timeout: 10_000 });
+
+    // The page is marked up by name for the whole recording. The panel is a pill by
+    // now, so this is the only thing on screen saying which control is which — and a
+    // coloured outline alone never could.
+    await expect(mark(page, 'Email')).toBeVisible();
+    const chip = (await mark(page, 'Email').boundingBox())!;
+    const field = (await page.locator('#email').boundingBox())!;
+    // Above the control and aligned to its right-hand edge. Right, because the gap
+    // above a form control is where the form's own <label> lives — a chip pinned
+    // above-left sits on top of the very words it is echoing, on every field of
+    // every form. Labels are short and controls are wide, so the right end is free.
+    expect(chip.y + chip.height).toBeLessThanOrEqual(field.y + 1);
+    expect(Math.abs((chip.x + chip.width) - (field.x + field.width))).toBeLessThan(4);
+
+    await bar(page).getByRole('button', { name: 'Declare…', exact: true }).click();
+    const menu = bar(page).locator('.cf-rec-menu');
+    await expect(menu).toBeVisible();
+
+    // The list is ~28 marks in a 60vh box, so there is genuinely somewhere to go.
+    const scrolled = await menu.evaluate((el) => {
+      el.scrollTop = 200;
+      return el.scrollTop;
+    });
+    expect(scrolled).toBeGreaterThan(0);
+
+    // A mark on the element itself, so "the same list" is a fact about the node and
+    // not just about what it happens to be showing. A repaint would leave it behind.
+    await menu.evaluate((el) => el.setAttribute('data-probe', '1'));
+
+    const clock = await bar(page).locator('.cf-rec-clock').textContent();
+    await page.waitForTimeout(2200);
+
+    expect(await bar(page).locator('.cf-rec-clock').textContent()).not.toBe(clock);
+    expect(await menu.getAttribute('data-probe')).toBe('1');
+    expect(await menu.evaluate((el) => el.scrollTop)).toBe(scrolled);
+  } finally {
+    await page.close();
+  }
+});
+
+
+test('Recording: Reset throws the steps away and puts the page back', async () => {
+  // Undo can only take a step out of the *list*; it cannot take back what the step
+  // did. So Reset reloads — a clean list against a page still carrying the effects of
+  // six recorded clicks is the half-fix, and the one that quietly compiles a `prep`
+  // list for a state no later visit ever reaches. The reload is the assertion.
+  await clearConfigs();
+  const page = await context.newPage();
+  try {
+    await page.setViewportSize({ width: 1280, height: 900 });
+    await page.goto(urlFor('record-internal'));
+    await openSetupPanel(page);
+
+    const setup = page.locator('.cf-card[data-sheet="setup"]');
+    await expect(setup).toBeVisible({ timeout: 20_000 });
+
+    // The offer has no footer, so recording is the only way on. It carried "Set up by
+    // hand ›" — which pointed at the six-step wizard from the one screen built to
+    // avoid it — and a "Done" that closed the panel having taught the extension
+    // nothing. The header × still minimizes, which is the way to get it out of the way.
+    await expect(setup.locator('.cf-footer')).toHaveCount(0);
+    await expect(setup.locator('.cf-rail')).toHaveCount(0);
+    // And it says what it can already read, so "teach me this site" is a concrete ask
+    // rather than a blank one. `not on this page` and never "unmatched": detection
+    // returns a row per *wanted* field, so most of the sixteen are grey on any form.
+    await expect(setup.locator('.cf-detected .cf-summary')).toContainText('not on this page');
+    await expect(setup.locator('.cf-detected .cf-summary')).not.toContainText('unmatched');
+    await expect(setup.locator('.cf-detected-chips .chip').filter({ hasText: 'Email' }))
+      .toBeVisible();
+
+    await setup.getByRole('button', { name: 'Apply on this site' }).click();
+    await expect(bar(page)).toBeVisible({ timeout: 10_000 });
+
+    // The page is marked up by name for the whole recording. The panel is a pill by
+    // now, so this is the only thing on screen saying which control is which — and a
+    // coloured outline alone never could.
+    await expect(mark(page, 'Email')).toBeVisible();
+    const chip = (await mark(page, 'Email').boundingBox())!;
+    const field = (await page.locator('#email').boundingBox())!;
+    // Above the control and aligned to its right-hand edge. Right, because the gap
+    // above a form control is where the form's own <label> lives — a chip pinned
+    // above-left sits on top of the very words it is echoing, on every field of
+    // every form. Labels are short and controls are wide, so the right end is free.
+    expect(chip.y + chip.height).toBeLessThanOrEqual(field.y + 1);
+    expect(Math.abs((chip.x + chip.width) - (field.x + field.width))).toBeLessThan(4);
+
+    await type(page, '#email', 'ada@example.com');
+    await press(page, '#submit');
+    await expect(page.locator('#quick-success')).toBeVisible();
+    expect(await stepCount(page)).not.toContain('0 steps');
+
+    await startOver(page);
+
+    // A fresh content script on a fresh page, holding a recording with nothing in it.
+    await expect(bar(page)).toBeVisible({ timeout: 15_000 });
+    await expect(bar(page).locator('.cf-rec-count')).toContainText('0 steps');
+    expect(page.url()).toBe(urlFor('record-internal'));
+    // The page really was reloaded, so what the discarded steps did to it is gone too.
+    await expect(page.locator('#quick-success')).toBeHidden();
+    await expect(page.locator('#email')).toHaveValue('');
+  } finally {
+    await page.close();
+  }
+});
+
+test('Recording: Reset from the employer’s site goes back to the posting', async () => {
+  // The half that cannot be seen on one page: on the destination leg "start again"
+  // means leaving the page you are looking at. `RECORD_START` is re-sent with the
+  // recording's *own* postingUrl rather than `location.href`, or resetting here would
+  // quietly redefine the posting as the employer's form and the handoff could never
+  // be recorded again. The synthesized `navigate` step going with it is what says
+  // `destinationUrl` was really cleared.
+  await clearConfigs();
+  const page = await context.newPage();
+  try {
+    await page.setViewportSize({ width: 1280, height: 900 });
+    await page.goto(urlFor('record-external'));
+    await openSetupPanel(page);
+
+    const setup = page.locator('.cf-card[data-sheet="setup"]');
+    await expect(setup).toBeVisible({ timeout: 20_000 });
+    await setup.getByRole('button', { name: 'Apply on the employer’s site' }).click();
+    await expect(bar(page)).toBeVisible({ timeout: 10_000 });
+
+    await press(page, '#apply-external');
+    await page.waitForURL(/ats-form/, { timeout: 15_000 });
+    await expect(bar(page)).toBeVisible({ timeout: 15_000 });
+    await type(page, '#ats-email', 'ada@example.com');
+
+    await startOver(page);
+
+    await page.waitForURL(urlFor('record-external'), { timeout: 15_000 });
+    await expect(bar(page)).toBeVisible({ timeout: 15_000 });
+    // Zero, not one: the `navigate` step a resumed recording synthesizes on arrival
+    // would still be here if `destinationUrl` had survived the reset.
+    await expect(bar(page).locator('.cf-rec-count')).toContainText('0 steps');
   } finally {
     await page.close();
   }

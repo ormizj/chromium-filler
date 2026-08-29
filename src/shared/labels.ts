@@ -16,8 +16,9 @@
 
 import type { JobUrlStatus, MatchConfidence } from './types';
 import type { ExportField } from './jobExport';
-import type { ConfigBindKey } from './recording';
+import type { ConfigBindKey, RecordFlow, RecordLeg } from './recording';
 import type { SelectorStrength } from './selector';
+import type { RowStatus } from './setupSteps';
 
 export interface StatusText {
   /** Capitalised, for the stat-tile caption: "Filled" / "To check" / "Unmatched". */
@@ -37,6 +38,35 @@ export const STATUS_TEXT: Record<MatchConfidence, StatusText> = {
   high: { tile: 'Filled', word: 'filled', aria: 'filled' },
   low: { tile: 'To check', word: 'to check', aria: 'needs review' },
   none: { tile: 'Unmatched', word: 'unmatched', aria: 'not found' },
+};
+
+export interface SetupStatusText {
+  /** The count line's word: "5 found" / "2 to check" / "9 not on this page". */
+  word: string;
+  /** Appended to an on-page chip, or empty where the label alone says it. */
+  chip: string;
+  /** The spoken descriptor for a dot's `aria-label`, exactly as above. */
+  aria: string;
+}
+
+/**
+ * The same three outcomes, worded for **setting a site up** rather than for a
+ * fill — and the reason they need their own words is `none`.
+ *
+ * `detectFields` returns one row per *wanted* field, so on the setup surfaces a
+ * `none` means the page never asked for that field. That is the ordinary state of
+ * most of the sixteen on any real form, and it is exactly the rule
+ * `setupSteps.fields` encodes when it counts only the CV as work. Borrowing
+ * `STATUS_TEXT.none.word` here would put "9 unmatched" on a healthy page — the
+ * cry-wolf failure the whole step model is written against, and the same mistake
+ * `FLOW_TEXT.empty` used to make by blaming the site for an empty profile.
+ *
+ * `high`/`low` differ too, in tense: nothing has been filled yet on this screen.
+ */
+export const SETUP_STATUS_TEXT: Record<RowStatus, SetupStatusText> = {
+  high: { word: 'found', chip: '', aria: 'found on this page' },
+  low: { word: 'to check', chip: 'check', aria: 'found, needs checking' },
+  none: { word: 'not on this page', chip: '', aria: 'not on this page' },
 };
 
 /**
@@ -147,9 +177,9 @@ export type ActionKey =
   | 'siteSetup'
   | 'fullscreen'
   | 'exitFullscreen'
-  | 'record'
-  | 'recordExternal'
   | 'stopRecording'
+  | 'resetRecording'
+  | 'resetRecordingConfirm'
   | 'interact'
   | 'interactArmed'
   | 'declare'
@@ -198,11 +228,6 @@ export const ACTION_LABELS: Record<ActionKey, string> = {
   // which is exactly why they belong here and not inline as a string literal.
   fullscreen: 'Fullscreen',
   exitFullscreen: 'Exit fullscreen',
-  // The two ways to set a site up by doing it once. They name *where the
-  // application gets made*, not what the extension will do, because that is the
-  // question the user can actually answer while looking at the posting.
-  record: 'Apply on this site',
-  recordExternal: 'Apply on the employer’s site',
   // "Done", not "Stop": the user has finished applying, which is a thing they did,
   // not a recording they are operating.
   stopRecording: 'Done',
@@ -223,9 +248,78 @@ export const ACTION_LABELS: Record<ActionKey, string> = {
   // still needs a word for its empty option, and it is the same word.
   keepAsClick: 'Keep as a step',
   undo: 'Undo',
+  // The bar's third exit, and the only one that cannot be walked back: Undo is a step
+  // at a time, Done ends the recording, and this throws every step away and takes the
+  // page back to the posting. Named for the button the user asked for rather than for
+  // "start over", which is what the confirm behind it says.
+  resetRecording: 'Reset',
+  // The confirm's own verb, more specific than the control it hangs off — the same
+  // shape as Options → Queue's `Clear all` → `Delete`. Repeating "Reset" here would
+  // make the popover look like the button had simply moved.
+  resetRecordingConfirm: 'Start over',
   saveRecording: 'Save setup',
   discardRecording: 'Discard',
 };
+
+/* ---------------- The two ways to set a site up by doing it once ---------------- */
+
+/**
+ * The two shapes an application comes in, as the user is asked to name them.
+ *
+ * They name **where the application gets made**, not what the extension will do,
+ * because that is the question someone looking at a posting can actually answer.
+ * The `detail` is the whole reason this is a `Record<>` of objects rather than two
+ * strings in `ACTION_LABELS`: as bare labels the two buttons asked a question the
+ * screen never explained, and "this site" and "the employer's site" are the same
+ * words a board uses for two different things.
+ *
+ * `Record<RecordFlow, …>`, so a third flow fails `npm run typecheck` until it is
+ * both named and explained — the same guard `help.ts` gets from keying off
+ * `SiteConfig`. This is the one home for these strings: they were duplicated into
+ * `ACTION_LABELS` as well, which is the drift this file exists to prevent.
+ */
+export const RECORD_FLOW_TEXT: Record<RecordFlow, { label: string; detail: string }> = {
+  internal: {
+    label: 'Apply on this site',
+    detail: 'The application form is on this page — I fill it in and send it from here.',
+  },
+  external: {
+    label: 'Apply on the employer’s site',
+    detail: 'Applying here opens the employer’s own site, and I fill the form there.',
+  },
+};
+
+/**
+ * Why the choice above is safe to get wrong, said on the screen that asks it.
+ *
+ * `compileRecording` derives the flow from the legs the steps actually arrived on,
+ * so the pick only ever orders the recorder bar's Declare menu. That fact lived in
+ * `CONCEPT_HELP.recording.when` — which the offer screen does not render — so the
+ * one sentence that turns a fork in the road back into a preference was invisible
+ * exactly where the fork is. Not per-flow, so it is a sibling rather than a third key.
+ */
+export const RECORD_FLOW_HINT = 'Not sure? Pick either — the setup is saved from '
+  + 'what actually happens, not from what you pick here.';
+
+/**
+ * What Reset is about to do, in words, before it does it.
+ *
+ * The one line of prose in this file, and the only thing here that is built rather
+ * than looked up: it counts what is going, and it has to say a *different* thing on
+ * each leg because Reset does a different thing on each. On the posting it is a
+ * reload; on the employer's site it is a walk back to the board, which means leaving
+ * the page the user is looking at — and a warning that does not mention that is not a
+ * warning.
+ *
+ * It lives here rather than in `help.ts` because it is wording, not explanation: the
+ * long form of why recording works this way is `CONCEPT_HELP.recording`.
+ */
+export function resetRecordingPrompt(stepCount: number, leg: RecordLeg): string {
+  const steps = `${stepCount} step${stepCount === 1 ? '' : 's'}`;
+  return leg === 'destination'
+    ? `Discard ${steps} and start again on the posting? This page will be left.`
+    : `Discard ${steps} and record this site again? The page reloads.`;
+}
 
 /* ---------------- What a recorded element can be marked as ---------------- */
 

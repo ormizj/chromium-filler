@@ -104,13 +104,22 @@ button.cf-btn.primary:hover {
   filter: brightness(1.08);
 }
 
-.btn-danger {
+/*
+ * The destructive one. Paired at matching specificity for the same reason
+ * `.btn-ghost` is: `button.cf-btn` names a class of its own, so a bare `.btn-danger`
+ * loses its colour and its border the moment it is drawn inside a shadow surface —
+ * which is where the recorder bar's Reset lives, the one control on that bar with no
+ * way back. It reads as an ordinary secondary button until this is spelled twice.
+ */
+.btn-danger,
+button.cf-btn.btn-danger {
   color: var(--err);
   border-color: var(--err);
   background: transparent;
 }
 
-.btn-danger:hover {
+.btn-danger:hover,
+button.cf-btn.btn-danger:hover {
   background: var(--err-weak);
   border-color: var(--err);
 }
@@ -257,6 +266,32 @@ button.cf-btn.primary[aria-disabled='true'] {
 .cf-dot.none {
   background: var(--err);
   --i: var(--icon-x);
+}
+
+/**
+ * The counts and the key, in one line. Three colours mean nothing on their own,
+ * and as a separate legend the key sat *below* the rows it explains — past the
+ * point where anyone still needed telling. So each count carries the dot it is
+ * counting, and the line leads instead.
+ *
+ * Here rather than in a surface's own file because two of them draw it: the review
+ * modal over its report, and the setup panel's offer over the fields it already
+ * recognises on the page. Both pass all three statuses even at zero — the line is
+ * a key as well as a tally.
+ */
+.cf-summary {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-1) var(--space-4);
+  font-size: var(--text-sm);
+  color: var(--muted);
+  margin: 0 0 var(--space-3);
+}
+
+/* Each dot hugs the count it explains, rather than floating between pairs. */
+.cf-summary .cf-dot {
+  margin-right: calc(var(--space-4) * -1 + var(--space-2));
 }
 
 /* ---------------- Rows ---------------- */

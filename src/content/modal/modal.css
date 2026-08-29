@@ -294,26 +294,8 @@ button.cf-btn.cf-applied-btn[aria-disabled='true'] {
   flex: none;
 }
 
-/**
- * The counts and the report's key, in one line above the rows. Three colours and
- * a row of buttons mean nothing on their own, and the key used to sit under
- * sixteen rows — past the point where anyone still needed telling. So each count
- * carries the dot it is counting, and the line leads the report instead.
- */
-.cf-summary {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: var(--space-1) var(--space-4);
-  font-size: var(--text-sm);
-  color: var(--muted);
-  margin: 0 0 var(--space-3);
-}
-
-/* Each dot hugs the count it explains, rather than floating between pairs. */
-.cf-summary .cf-dot {
-  margin-right: calc(var(--space-4) * -1 + var(--space-2));
-}
+/* `.cf-summary` lives in primitives.css: the setup panel's offer screen draws the
+   same line over its detected fields. */
 
 /* The one thing a user most needs to know at this moment — that this report is a
    record rather than a plan — closing the report off with the hairline the key
