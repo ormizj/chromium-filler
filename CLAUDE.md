@@ -36,22 +36,30 @@ over a deliberately nested posting — it draws on the host page's own light DOM
 rather than in a shadow root and exists only while a pick is running, so it was
 the one surface with no harness state at all: every `onPick*` elsewhere in the
 harness is a console stub, which renders the *button* and never the toolbar it
-opens. `&label=…` names the field the bar says it is picking. `?page=modal&session=1` shows the queue strip and the
+opens. `&label=…` names the field the bar says it is picking, and `&state=long` gives
+it a full-length description to preview — the toolbar is `width: max-content`, so the
+clamp on the preview row is the only thing between it and the whole viewport, and two
+sentences prove nothing about that. `?page=modal&session=1` shows the queue strip and the
 footer overflow menu.
 
 `&state=…` picks which **flow** the surface is showing — setup also has
-`offer` (what a never-configured site opens on — the most-seen screen in the
-panel), `recording`, `recording-armed` and `recording-reset` (the bar up over a page
+`home-fresh`, `home-before-send` and `home-complete`, the three renderings of the
+screen Site setup opens on for **every** site and so the most-seen screen in the
+panel: the coral moving from `Record the first pass` to `Mark the confirmation` to
+`Done` as the two passes come in is the whole argument of it, and a swap only one
+fixture can produce is a swap nobody looks at; `recording`, `recording-armed` and `recording-reset` (the bar up over a page
 held inert, the same bar with the page live for one gesture, and the warning behind
 Reset — the panel folded to its pill in all three), `recording-held` (a press that
 would have sent the application, refused and marked instead — a full sentence and an
 escape hatch in a bar that is otherwise one line of readout, so the state most likely
-to break the narrow layout), and `after-send` / `after-send-saved` (the second pass's
+to break the narrow layout), `recording-declare` and `recording-declare-external` (the
+Declare menu open — ~26 marks under four heads with a caption on four of them, none of
+it on screen until something opens it, and the two states differ only in which group
+leads, which is the whole of what the leg decides), and `after-send` / `after-send-saved` (the second pass's
 own bar: one question over a live page, and the report that replaces it — neither
 reachable by pressing anything, both being downstream of a real application), `review` /
 `review-external`, which are the two renderings a real page can only reach by
-applying to a job, and `saved` / `saved-clean`, the two ends of Save — the second
-being the only way to see the coral move from `Review configuration` onto `Done`; modal: `long`, `redirect`,
+applying to a job; modal: `long`, `redirect`,
 `redirect-followed`, `app-link`, `landed`, `empty`, `listing`, `failed-fill`, `apply-unset`,
 `apply-unverified`, `finish-setup`, `applied`, `already-applied`, `already-applied-redirect`,
 `flush`, `fullscreen`; setup: `external`, `help`,
@@ -71,9 +79,11 @@ link to them, which is most of why the confirmed state went unexamined.
 whole job, and a three-line description proves nothing about it.
 `setup&state=help` is the first-run panel with the legend open, which is
 otherwise reachable exactly once per profile: dismissing it persists.
-`setup&state=offer-empty` is the offer on a page detection can see nothing on — the
+`setup&state=home-empty` is home on a page detection can see nothing on — the
 shape the count line exists for, and one `BASE_SETUP` (which finds five of six) can
-never produce.
+never produce. **`&saved=1`** pairs with any `home-*` state and leads the card with
+"Site setup saved", which is about the press that got there rather than about the
+site and so is unreachable without having just recorded one.
 
 **`&marks=1` is a parameter, not a state**, and draws the on-page name chips over
 `fakePosting()`. A parameter because a mark is a rendering of the *page* rather than
@@ -433,9 +443,14 @@ in the popup's session chips).
 `src/shared/labels.ts` is the wording counterpart to help.ts: `FLOW_TEXT`
 (the seven flow states above, keyed `Record<FlowKey, …>`), `STATUS_TEXT`
 (tile / word / aria for each `MatchConfidence`), `SETUP_STATUS_TEXT` (the same three
-outcomes worded for *setting a site up*, keyed `Record<RowStatus, …>`) and
-`ACTION_LABELS` (Apply, Skip, Confirm, Pick, …), typed `Record<>` so a new status or
-action fails `npm run typecheck` until it is named.
+outcomes worded for *setting a site up*, keyed `Record<RowStatus, …>`),
+`RECORD_PASS_TEXT` (the two passes — name, lead, action, the redo verb `again`, and
+the recorder bar's spoken toolbar name — keyed `Record<RecordPhase, …>`) and
+`ACTION_LABELS` (Apply,
+Skip, Confirm, Pick, …), typed `Record<>` so a new status, pass or action fails
+`npm run typecheck` until it is named. `markConfirmation` is deliberately *not* in
+`ACTION_LABELS`: it is one pass's own verb, so it lives with that pass, and the same
+label in two catalogs is exactly the drift this file exists to stop.
 
 **The two status catalogs disagree about `none`, and that is the point of there being
 two.** `STATUS_TEXT` words the result of a *fill*, where an unmatched row is a field
@@ -789,17 +804,20 @@ user press, only with a real submit control, and **nothing is recorded as applie
 until the user marks something**. Turning the setting off restores the old
 `noConfirmation` dead end exactly, and an E2E holds that branch.
 
-The panel's `send` step and the saved screen reach the same pass without pressing
-Send, for the user who applies by hand (`onMarkConfirmation`). `setupStage`
-(`setupSteps.ts`, pure) is `unconfigured` | `beforeSend` | `complete` — saved
-selectors only, same rule as `isUnconfigured`, because the heuristics find a Send
-button on nearly every page.
+The panel reaches the same pass without pressing Send, for the user who applies by
+hand (`onMarkConfirmation`) — from home's second pass block, and from the wizard's
+`send` step, where it is the confirmation row's **only** action while nothing is
+saved. Pick is the right control for every other row on that panel and the wrong one
+for this: it asks the user to point at something that is not on the page. `setupStage`
+(`setupSteps.ts`, pure) is `unconfigured` | `beforeSend` | `complete`, derived from
+`passStates` — saved selectors only, same rule as `isUnconfigured`, because the
+heuristics find a Send button on nearly every page.
 
 Two wording consequences. `RECORDING_WARNINGS.noSuccess` is no longer raised by a
 first pass: it became `RECORDING_NOTES.afterSendPending`, drawn as an **`ok`** note
 below the warnings, because a first pass ending without a confirmation is its
 *expected* outcome — worded as a failure, the half that worked reported itself as
-broken on every site. And the offer leads with a sentence and a `?` rather than
+broken on every site. And home leads with a sentence and a `?` rather than
 `CONCEPT_HELP.recording.body`, which grew to twenty-one lines of prose at 390px before
 the user could reach a control; the two-pass block under it carries what has to be
 read before pressing anything, and "nothing is submitted" is the part that was
@@ -892,7 +910,7 @@ produce. The posting is still marked applied — the user really did apply.
 
 #### The compiler
 `compileRecording` slices the timeline into the existing `SiteConfig` shape, so
-nothing downstream changes. Ten rules, one `describe` each in `recording.test.ts`:
+nothing downstream changes. Eleven rules, one `describe` each in `recording.test.ts`:
 
 1. **Legs decide which config a step lands in**, and what happened outranks the flow
    the user picked — in both directions. The choice only ever shaped what the bar
@@ -927,6 +945,20 @@ nothing downstream changes. Ten rules, one `describe` each in `recording.test.ts
 10. **The leg that sends the application owns the sending.** The destination never
     carries a `redirect` block; a posting that hands off never carries
     `submitSelector`/`successSelector`.
+11. **A pass only writes what it owns.** `marksFor` (pure, same file) is the one
+    answer to "what may be declared here", and `phaseAllowsBind` is the compiler's
+    half of it: the confirmation belongs to `afterSend` and to nothing else, and
+    everything else belongs to `beforeSend`. **The phase filters; the leg only
+    orders** — two different rules, and conflating them has caused one bug each way
+    round (the confirmation offered on a page it cannot exist on; the Send button
+    filtered off the destination leg, which is the page the application is really
+    sent from). A bind that does not belong raises `RECORDING_WARNINGS.wrongPhase`
+    and is dropped rather than written. Nothing a user does today can reach it — the
+    bar's menu and the review's select are both built from `marksFor` — but a
+    recording lives in `chrome.storage.session` and outlives the build that made it,
+    and the consequence of getting it wrong is the worst one here: a
+    `successSelector` captured on a page that was never a confirmation makes every
+    later fill on the site report itself as applied.
 
 **The `navigate` step is emitted on *resume*, by the content script that wakes up
 somewhere else.** No click knows in advance that it is the one that will leave, and
@@ -951,7 +983,8 @@ in. Placement mirrors `picker.ts`: bottom on a coarse pointer, top on a fine one
 `Interact` · `Declare…`. Neither is a default — while neither is chosen a click does
 nothing at all — so the question "is this a step, or is it a thing" is answered
 *before* the user acts rather than reconstructed from a list of nine clicks at the
-end. `Declare…`'s menu is the same `BindKey` list it always was; `Interact` is a
+end. `Declare…`'s menu is `marksFor(phase, flow, leg)` — see rule 11, which is what
+takes the Confirmation out of the first pass; `Interact` is a
 toggle, because the button holding the page live has to be the way back out of it.
 
 **Choosing a mark closes the menu and repaints, in that order, before `onDeclare`** —
@@ -1032,12 +1065,44 @@ confirm popover anchors `right` on a wide bar (Reset sits near its right-hand en
 it opens back across the bar rather than past its edge) and is flipped to `left` in
 that narrow block, where Reset is the leftmost third of a row of its own.
 
-**The mark menu is re-ordered by leg, never filtered by it.** Ordering is worth doing:
-on the board half of a two-step posting the apply link is what there is to mark.
-Filtering was a bug an E2E caught — keying the list off the *flow* alone left the
-destination leg, the page where the application is actually sent, with no way to mark
-the Send button or the confirmation at all. A mark that is unlikely here costs a line
-in a menu; a mark that is missing costs the recording.
+**The mark menu is re-ordered by leg and filtered by phase, never the other way
+round** — rule 11, and both halves have cost a bug. Ordering by leg is worth doing: on
+the board half of a two-step posting the apply link is what there is to mark.
+*Filtering* by it was the bug an E2E caught — keying the list off the flow alone left
+the destination leg, the page where the application is actually sent, with no way to
+mark the Send button at all. A mark that is unlikely here costs a line in a menu; a
+mark that is missing costs the recording. The phase is the one thing that really does
+filter, and it removes exactly one mark: the confirmation, which does not exist until
+an application has gone in and which the first pass deliberately stops short of
+sending one.
+
+**The groups are `markGroups` (`shared/recording.ts`, pure), and there are four.** Two
+surfaces draw them — the bar's menu and the review's `<select>` — and a recording is
+corrected in the second having been made from the first, so a second copy of "which
+head does this go under" is exactly the drift that leaves the two disagreeing. The
+split that matters is `sending` (`submit`, `quickApplySelector`) against `leaving`
+(`applySelector`, `markerSelector`): those are opposite answers to the same question
+and they sat under one head reading "This application", four marks that read as
+interchangeable things to point at. `MARK_GROUP_TEXT` (`labels.ts`,
+`Record<MarkGroupId, string>`) is where each head is worded, so a fifth kind cannot
+ship unnamed. **It groups and it does not sort** — `marksFor` has already ordered the
+list, so the groups come out in order of first appearance and the leg rule above keeps
+working with nothing in the grouping knowing about legs. A kind this pass has none of
+yields no group, which is how the after-sending menu would be a list of one, and why
+it has no menu at all.
+
+**Two of the four groups caption every item**; the other two do not. `BIND_HELP`
+(`help.ts`, `Record<ConfigBindKey, HelpEntry>`) maps each mark onto the catalog entry
+for the config slot it compiles into — `submit` is `CONFIG_HELP.submitSelector`, the
+six info marks share `CONFIG_HELP.extract` — so there is no second body to drift, the
+`refRow` rule applied to a whole map. The bar draws `.short` under the label on
+`sending` and `leaving` only: "Quick-apply marker" is a term of art and the menu is
+the last surface where the choice is still open, while a field's name *is* its
+explanation and twenty-two more captions turn a 60vh list into a wall. Drawn, never
+hidden behind hover — the priority target is a phone, which is the same reason the `?`
+is a disclosure everywhere else. The caption is the item's `aria-describedby`, never
+part of its name: folded in, a screen reader announces a whole sentence where every
+other surface, the compiler included, says "Send button".
 
 #### What it shows you while you record
 **The page is marked up by name, on both legs.** `highlight` (`fill.ts`) draws a
@@ -1114,6 +1179,31 @@ Seven things it gets right, each with a test:
   the Send button and, unlabelled, they are two identical green outlines on exactly
   the two marks that gate Apply.
 
+**Naming a field fills it, then and there.** A green outline on a box does not say
+whether it is the *right* box, and until this that was only answered on a later visit
+— after the recording had been compiled and saved. So `pickForBind` runs the picked
+element through `resolveControl` (the user points at the `<label>` as often as not,
+and that selector becomes the `fieldOverride`), calls `applyFill`, and colours the
+mark by the outcome. Four things make it hold:
+
+- **The documents have to be loaded for it.** `this.cvFile` was only ever assigned in
+  `run()`, and `run()` is precisely what stands down while a recording is live — so
+  the CV, the one field the whole surface exists to get right, had nothing to attach.
+  `loadDocs` is split out for that, and `loadForRecording` re-reads the profile beside
+  it, because the snapshot is as old as the page and a detail typed into Options a
+  minute ago is the one the user expects to land in the box.
+- **The outcome must survive the sweep.** `markBoundSteps` repaints every bound step
+  `high` a few hundred ms later, so `declaredFills` carries the fill's own answer into
+  it — otherwise "there is nothing in your profile for this" is told once and then
+  quietly contradicted by the page.
+- **An empty box says why** (`emptyProfileNotice`), and after the step rather than
+  before it: `onRecordedStep` clears the notice and paints, so a notice set ahead of
+  it is wiped and one set behind it needs the bar told a second time. A control
+  outlined and empty with nothing said about it is the failure this could introduce.
+- **The recording never sees it.** The arm is already down, so `recorder.ts`'s
+  `change` reader bails on `el !== liveEl`; and `input`/`change` are in neither of
+  `inertPage.ts`'s lists, so the page's own handlers see the value as if typed.
+
 Two consequences elsewhere. **`detectForConfig` (`fieldDetect.ts`) takes an optional
 config**, and that is not tidiness: the destination leg runs where
 `findMatchingConfig` returns nothing and `ensureConfigForUrl` deliberately does not
@@ -1125,62 +1215,115 @@ panel", not "finished with the marks" — nothing would re-draw them until the r
 ended.
 
 #### Where it is offered
-**The panel has four screens, and a never-configured site opens on the offer** —
-`SetupPanel.mode` is `offer` | `wizard` | `review` | `saved`, on the instance (same
-rule as `step`). Only the *opening* one is chosen once; the other three are commands
-(`showOffer`, `showReview`, `showSaved`), because they are places in a task.
+**Site setup opens on the two passes, on every site.** `SetupPanel.mode` is
+`home` | `wizard` | `review`, on the instance (same rule as `step`), and `render`
+always lands on `home`. Only the *step the wizard opens on* is still chosen once
+(`placed` → `firstStepWithWork`); the three screens are commands (`showHome`,
+`showReview`), because they are places in a task.
 
-The offer is a screen of its own and not a block on wizard step 1, and that
-distinction is the whole feature working or not. The panel does not *open* on step 1:
-`render` sends anyone with `helpSeen` to `firstStepWithWork`, and a brand-new config
-always has work on `fields` or `send` — so as a block the Record buttons opened four
-presses of Back away from every user who needed them, and Site setup looked exactly
-as it always had. `isUnconfigured` (pure, in `setupSteps.ts`) is what routes it, and
-it tests **saved** selectors only: every heuristic on the page reports itself as a
-match, so counting those would call a fresh site configured on the strength of
-guesses stored nowhere.
+It used to route to `home` only while `isUnconfigured` — so **one saved selector, which
+a single Pick from the review modal's report is enough to produce, sent every later
+visit straight into the six-step wizard.** Site setup then opened the manual surface
+automatically: the surface that put `submitSelector` and `successSelector` last in a
+queue of twenty-five, which is why they went unset on nearly every site and why
+recording exists at all. Recording is the front door; the wizard is reached by
+pressing for it.
 
-**The offer has no footer, and that is the screen.** It carried two buttons and
-neither was an outcome. "Set up by hand ›" pointed at the six-step wizard from the
-one screen built to avoid it — and the wizard is what put `submitSelector` and
-`successSelector` last in a queue of twenty-five, which is why they went unset on
-nearly every site and why recording exists at all. `Done` closed the panel having
-taught the extension nothing: the site is still unconfigured, so the next posting on
-it opens on this same screen. So the only way *on* is to record, and the header `×`
-stays what it always was — the way to get the card out of the way (it minimizes to
-the pill), not a way to finish with the site.
+`home` is also the merge of two screens that were the same screen asked at two
+moments — the offer to record, and the report a save landed on. Keeping them apart
+meant the two passes were named on exactly one of them, and that a returning user saw
+neither.
 
-The wizard is not lost, it is downstream: record → review → Save → `Review
-configuration` (`savedFooter`). Anyone who has taught this site anything never sees
-the offer at all, because `render` only routes here while `isUnconfigured` — and that
-tests *saved* selectors, so one Pick from the review modal's report flips it. The
-accepted cost: **a user who wants to configure a site by hand without applying to a
-job has no in-panel route.** Options → Sites is theirs, which is where the wizard's
-own "Advanced (JSON)" already deep-links. `showOffer()` takes no argument for the same
-reason — nothing turns the offer off any more.
+**Its structure is the two passes**, one `.cf-pass` block each, in
+`RECORD_PASS_ORDER`: a `.cf-dot` and the pass's name, a line saying what it is (or, once
+it is done, what it bought), and its own action — `Record the first pass` and
+`Mark the confirmation`. `passStates` (`setupSteps.ts`, pure) is the accounting, and it
+borrows the two exemptions the wizard's steps already settled rather than inventing a
+third: a Send button found by its *label* is healthy, and of sixteen field rows only
+the CV is ever work.
+
+- **Which block is coral is the screen.** `outstandingPass` names the earliest pass
+  still wanting something and that block takes the primary; with neither wanting
+  anything the footer's `Done` takes it. Exactly one, which is what
+  `setupPanel.test.ts` has always asserted.
+- **The second pass gets no control until the first has produced something** — not a
+  disabled one. The passes are sequential (there is nothing to confirm the landing of
+  until the site can fill and send), and the panel's standing rule is that an
+  unavailable control keeps its outline and its meaning; a control with neither is
+  noise.
+- **A settled pass keeps its control, worded as a redo** (`RECORD_PASS_TEXT[phase].again`
+  — `Record it again` / `Mark it again`, in the catalog for the reason `markConfirmation`
+  is). A pass can be wrong as well as missing — a confirmation captured off a cookie
+  banner, a Send button that turned out to be "Save job" — and with the wizard no longer
+  a way *into* a site these two blocks are where that is corrected. Never coral:
+  `outstandingPass` decides where the one primary goes, and a finished pass is not
+  outstanding. The rule is one line for both blocks — the verb is `again` once that pass
+  has produced something (`stage !== 'unconfigured'` for the first, a saved confirmation
+  for the second), and its `action` otherwise, because "Record the first pass" on a site
+  already recorded reads as though nothing was saved.
+- **The body heading is never "Set up this site"** — the card's own header already
+  says that. It is `Teach the extension this site` / `What this site knows`, or
+  `Site setup saved` once, after a save.
+- **What follows the blocks depends on which end of the job the site is at**:
+  `detected()` while unconfigured (the head start the page gives for free), otherwise
+  the wizard's outstanding work — **minus `fields` and `send`**, whose todos *are* the
+  two passes and were being reported twice. "Nothing else needs you" is said only when
+  the passes agree with it, or it contradicts the coral button beside it.
+
+**Recording is the only way to set a site up, and the footer says so by not being
+there.** `homeFooter` returns `null` while `isUnconfigured` — so a site nobody has
+taught anything is the one card in either sheet with **no footer at all**. Once the
+site is configured it is `Review configuration` (the wizard) plus `Done`.
+
+Both halves of that are the same decision. `Done` is withheld because closing the
+panel having taught the extension nothing is not an outcome, and the next posting on
+the site opens here again. The wizard is withheld because as an entry point it is the
+surface that puts `submitSelector` and `successSelector` last in a queue of
+twenty-five — the reason they went unset on nearly every site, and the reason
+recording exists. It carried `Set up by hand ›` on exactly the screen built to replace
+it, which made it a competing front door; it is now reached only from a site that has
+been recorded, where it is for **correcting** what the recording produced — a
+mis-identified field, a prep step's timeout, the `Advanced (JSON)` keys no recording
+can reach. The header `×` still minimizes on either screen.
+
+What that gives up is **configuring a site by hand without applying to a job**. That
+is deliberate: the two selectors that gate Apply cannot be picked cold — the
+confirmation does not exist until an application has gone in — so the by-hand route
+never finished a site anyway. Options → Sites and the raw JSON is still there for the
+keys that have no other home.
 
 Step 1 keeps a smaller version of the lead, worded for **re-recording** a site to
-correct or add to what is saved — and there both Record buttons are secondary, with
-Next keeping the footer's primary. Anyone in the wizard has already chosen that path.
+correct or add to what is saved — the button included (`RECORD_PASS_TEXT.beforeSend.again`;
+the step is only reachable on a site already recorded, and `Record the first pass` under
+a paragraph beginning "Record this site again" is the same sentence twice). There Record
+is secondary, with Next keeping the footer's primary.
 
-**Each Record button carries a caption, and the pick is declared safe to get wrong.**
-`RECORD_FLOW_TEXT` (`labels.ts`, `Record<RecordFlow, { label, detail }>`) is the one
-home for both — they were duplicated into `ACTION_LABELS`, which no longer names them.
-As bare labels the two buttons asked the one question a user is on this panel because
-they cannot yet answer, and "this site" versus "the employer's site" is exactly that
-question. `RECORD_FLOW_HINT` is the other half: the pick only orders the recorder
-bar's Declare menu, so a wrong one costs nothing — a fact that lived in
-`CONCEPT_HELP.recording.when`, which the offer screen does not render. It shows on the
-offer only; step 1 already ends on "Or correct it by hand below."
+**One Record button, and the flow is derived.** It was two — "Apply on this site" /
+"Apply on the employer's site" — which asked a third question competing with the two
+the screen is about, one a user looking at an unfamiliar posting usually cannot
+answer, and one `compileRecording` overrules anyway (rule 1: what happened outranks
+what was chosen). Its only remaining effect was the order of the recorder bar's
+Declare menu, and `Controller.startRecording` now takes that hint from
+`this.detection` — the classifier's verdict on this very page, refreshed by
+`refreshSetup` on every render of the panel the press came from. `RECORD_FLOW_TEXT`
+and `RECORD_FLOW_HINT` are gone with it; `RECORD_PASS_TEXT` (`labels.ts`,
+`Record<RecordPhase, { name, lead, action, aria }>`) replaces them and is the one home
+for the "Before sending" / "After sending" strings, which were written inline into
+three surfaces. The button carries a bare label: the paragraph above it already says
+what pressing it does, and a caption said it a second time inside the control.
 
-**The offer says what the extension can already read on the page.** `refreshSetup`
+**Home says what the extension can already read on the page.** `refreshSetup`
 runs the full detection sweep on every render, in every mode — so a complete
 `data.fields` had always been in hand here and this screen read none of it. "Teach the
 extension this site" gave no sense of how much teaching was left, and the rows that
-would have said were two taps down a rail the offer does not draw. `detected()` is a
+would have said were two taps down a rail this screen does not draw. `detected()` is a
 count line (`ui/summaryLine.ts`) and a `.chip` per field found, and three rules make
 it:
 
+- **After the pass blocks, not before.** The screen's job is the offer; a count
+  above it demotes the two things the screen exists for — the same reason the flow
+  banner's resting state rides in the modal's *footer* rather than over its title.
+  Read in order: this is what recording does · do it · here is what you already have.
 - **After the Record buttons, not before.** The screen's job is the offer; a count
   above it demotes the two things the screen exists for — the same reason the flow
   banner's resting state rides in the modal's *footer* rather than over its title.
@@ -1195,19 +1338,11 @@ it:
   cry-wolf failure `setupSteps.fields` counts only the CV to avoid. Only the rows that
   found something get a chip: a `none` row has no element and so nothing to name.
 
-Not on wizard step 1. Step 5 already lists every field with its selector *and* a Pick,
-and the rail carries that step's dot and its "N to do" chip on every step — so a
-second, unactionable copy under the re-record buttons is the clutter the
-`cf-record-hint` / `cf-record-or` split already refuses.
-
-Two things `choiceBtn` gets right that are easy to lose. The caption is *supporting*
-text, so the button keeps the bare label as its accessible **name** (`aria-label`) and
-carries the caption on `aria-describedby` — built from both, the name becomes "Apply
-on this site The application form is on this page…", which is worse to hear and worse
-to match on (five E2E lookups do). And `.cf-record-choice` is **paired at
-`button.cf-btn` specificity** in `setupPanel.css`, the same trap `.btn-danger` fell
-into: the bare class is (0,1,0) and loses to (0,1,1), so `white-space: normal` never
-landed and every caption ran off the right-hand edge as one `nowrap` line.
+Not on wizard step 1, and not once the site is configured. Step 5 already lists every
+field with its selector *and* a Pick, and the rail carries that step's dot and its "N
+to do" chip on every step — so a second, unactionable copy under the re-record button
+is clutter. On a configured home the same space carries the wizard's outstanding work
+instead, which is the useful reading there.
 
 #### Reviewing it
 Stopping compiles and opens the panel's **review**: the timeline, each row carrying
@@ -1222,36 +1357,37 @@ matter and a field was corrected from the bar while the cursor was still in it �
 the bar has no such control any more, and the one bind the extension still guesses for
 itself is exactly a field. This is now the only place a wrong guess can be refused, so
 it has to offer them; grouped, because flat they run straight past the marks above.
-The order comes from `fieldMarks()`, exported from `recorderBar.ts` rather than
-re-listed, which is the same rule the label catalog exists for.
+**And it offers exactly what the bar offered**, because it asks `marksFor` the same
+question — see rule 11. A review that could rebind a step to something its pass may
+not write is a way round that rule by the back door, and the compiler would only drop
+it again with a warning nobody asked for. The order and the sixteen field keys come
+from `marksFor`/`fieldMarks` in `shared/recording.ts` rather than being re-listed,
+which is the same rule the label catalog exists for. A bind neither list offers is
+still shown as the current value: a recording outlives the menu it was made from, and
+a select quietly reading "Keep as a step" over a stored `success` is worse than one
+that shows it.
 
 #### Finishing it
-**Save reports; it does not become the wizard.** It used to: `saveRecording` wrote
+**Save goes home; it does not become the wizard.** It used to: `saveRecording` wrote
 both patches and then fell through to `showReview(false)`, so finishing a recording
 landed the user four steps into the manual surface with nothing saying it had worked.
-`mode: 'saved'` is that report — which shape was written (the one fact the timeline
-behind it was arguing about), and the steps `stepStates` says still have work, since
-those are the entire reason to go into the wizard rather than close the panel.
-
-**Which of its two buttons is coral is the whole screen.** Work outstanding → `Review
-configuration` takes the primary; nothing outstanding → `Done` does. Both renderings
-have a harness state (`saved`, `saved-clean`), because a swap only one fixture can
-produce is a swap nobody looks at.
+`showHome({ saved: true })` is the report — the two pass blocks say what the site now
+knows and what is left, and the heading says once that a recording landed.
 
 **The Controller sets the mode *before* it refreshes**, and that ordering is the fix
 for a bug that predates the screen: `showReview(false)` derived its landing step from
 `this.data`, which is still the **pre-save** render — `refreshSetup` runs afterwards
 and `placed` is already true, so it never recomputes — and the panel opened on work
-the patch had just done. Everything this screen counts is counted from the render that
+the patch had just done. Everything home counts is counted from the render that
 follows the write.
 
-**Discard is the back door, and goes wherever the panel would have opened**: the offer
-when `isUnconfigured`, the wizard otherwise. Refusing a recording on a site with
-nothing saved should leave recording one press away, not four steps into the wizard
-the user has just declined to use. `clearRecording` is split out of `discardRecording`
-because Save and Discard both finish with the recording and then go to different
-screens — and it has to run before either renders, or `refreshSetup` hands the panel a
-`compiled` it would put the review back up from.
+**Discard is the back door, and goes where the panel opens**: home, on every site.
+Refusing a recording should leave recording one press away, not four steps into the
+wizard the user has just declined to use — and never as the report, which is about a
+save that did not happen. `clearRecording` is split out of `discardRecording` because
+Save and Discard both finish with the recording and then go to different screens — and
+it has to run before either renders, or `refreshSetup` hands the panel a `compiled` it
+would put the review back up from.
 
 `SetupPanel.mode` is **on the instance, never in `SetupData`** — same rule as `step`,
 and the same failure if broken: `refreshSetup` re-renders on every edit, so a mode
@@ -1259,7 +1395,9 @@ derived from the data would throw the user out of the review the first time they
 changed a row.
 
 ### The setup wizard
-"Set up this site" is a **linear wizard**: one step on screen at a time, a
+**Reached only from a configured site's home**, behind `Review configuration` — it
+corrects what a recording produced and is never a way to start a site (see "Where it
+is offered"). It is a **linear wizard**: one step on screen at a time, a
 progress rail, and Back / Next. It used to stack five `<details>` sections in one
 scroll and auto-open every one holding unresolved rows, so a fresh site opened
 onto ~25 rows reading `auto · #first_name` with no ordering and nothing saying
@@ -1714,6 +1852,23 @@ needs no `downloads` permission, and an MV3 service worker has no
   ever say here. Relatedly, `authed()` retries once on 401 with a forced
   refresh: expiry is judged on this machine's clock alone, so Drive is the only
   thing that knows a token has really died.
+- **A pass only writes what it owns, and the confirmation is the whole of the rule.**
+  `marksFor` (`shared/recording.ts`) is what the recorder bar's Declare menu and the
+  review's bind select both build from; `phaseAllowsBind` is what `compileRecording`
+  enforces, because a recording lives in `chrome.storage.session` and outlives the
+  menu it was made from. Never offer `success` in a `beforeSend` pass — it does not
+  exist on that page, and a `successSelector` captured off one that was never a
+  confirmation makes every later fill on the site report itself as applied. And never
+  filter the list by **leg**: that is ordering only, and filtering by it once left the
+  destination leg with no way to mark the Send button.
+- **The wizard is never a way to *start* a site.** `homeFooter` returns `null` while
+  `isUnconfigured`, so nothing routes to `mode = 'wizard'` on a site nobody has taught
+  anything — not a footer link, not a landing rule, not a save. It puts
+  `submitSelector` and `successSelector` last in a queue of twenty-five, which is
+  exactly why they went unset on nearly every site and why recording exists; offered
+  beside the two pass blocks it is that surface competing with the screen built to
+  replace it. It stays reachable from a *configured* home, where it corrects what a
+  recording produced.
 - **The first pass of a recording cannot send, and the hold is escapable.** The
   press is held by *not spending the arm* (`recorder.ts`), so the existing
   suppression cancels it; the control is marked `submit` instead. It only ever
@@ -1830,6 +1985,9 @@ needs no `downloads` permission, and an MV3 service worker has no
   walks it into blocks instead — and drops `form`/`nav`/`aside`/`footer`, because
   the broad `jobDescription` fallbacks (`main`, `article`, `[class*="content"]`)
   otherwise quote the application form and the decoy sidebar back at the user.
+  `clip` lives there too — one line, cut to *n* — because the setup panel's
+  container snippets, a recorded step's label and the picker's preview are the same
+  decision made about the same text, and the second copy of it had already drifted.
 - **Closing the review modal must never destroy it.** `onClose` minimizes to the
   pill (`FillerModal.minimize`); destroying it left "Reset & Re-run" as the only
   way back, which wipes every field just filled.
@@ -1853,6 +2011,20 @@ needs no `downloads` permission, and an MV3 service worker has no
   choice being made is which depth gives a handle that still resolves next month.
   **A wrapper drawing the same box as its child is dropped**, because that click
   moves nothing on screen and reads as the picker being broken.
+- **And it reads back the words, not only the structure.** `div.job-description`
+  says where a thing is and nothing about whether it is the right thing, and half
+  the marks a recording makes are made on text — the title, the description, the
+  requirements — so declaring one meant pointing at a box and waiting for the
+  review to find out. The `preview` row is `blocksToText(extractBlocks(el))`, the
+  real reading path rather than `textContent`, falling back to the element's own
+  words when that returns nothing: `extractBlocks` refuses a root that is chrome,
+  which is *every control worth marking*, so without the fallback the Send button
+  and the apply link preview as blank. It is **memoized on the element** — `paint`
+  runs off a capture-phase `scroll` listener and reading a posting is a full walk —
+  and clipped by `clip` plus a three-line clamp, because the bar is
+  `width: max-content` and an unclamped description stretches it to the viewport.
+  A third row, *below* the controls: the two rows above it must not move when a
+  selection appears.
 - **The picker's chrome is created once and repainted, never rebuilt.**
   `recorder.ts` stands down on `[data-cf-picker]` being in the DOM, and a pick is
   several gestures long now — a marker that came and went between them would have

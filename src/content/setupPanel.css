@@ -55,12 +55,11 @@
   line-height: 1.5;
 }
 
-/* A column, not a row: both labels are a short sentence naming where the
-   application happens, and side by side they wrap to three lines each at 390px. */
+/* One button, full width. It is the block's action, and a control sized to its own
+   label sits adrift in the middle of a column. */
 .cf-record-actions {
   display: flex;
   flex-direction: column;
-  gap: var(--space-2);
 }
 
 /*
@@ -81,84 +80,35 @@
 }
 
 /*
- * A record button that carries its own explanation. `--tap` stays the floor via
- * `min-height` in primitives.css, and the caption is what makes it taller — so the
- * height is `auto` here rather than a second number that would fight it.
- *
- * Left-aligned on both axes, because the two lines are a heading and a sentence
- * rather than a label: centred, the caption's ragged last line reads as a wrap
- * failure. The padding is the block's own, not the bare button's, since a two-line
- * label inside a control sized for one is what pushed the text against the border.
- *
- * **Paired at `button.cf-btn` specificity**, the same trap `.btn-danger` fell into.
- * The bare rule is (0,1,0) and loses to `button.cf-btn`'s (0,1,1) — so `white-space:
- * normal` never landed, the caption stayed on one `nowrap` line, and the sentence ran
- * straight out past the button's right-hand edge on every width.
- */
-.cf-record-choice,
-button.cf-btn.cf-record-choice {
-  flex-direction: column;
-  /* `stretch`, not `flex-start`: a flex item sized to its content is sized to the
-     caption *unwrapped*, so the sentence ran straight out past the button's edge.
-     Filling the width is what lets it wrap; `text-align` is what keeps it left. */
-  align-items: stretch;
-  justify-content: center;
-  gap: var(--space-1);
-  height: auto;
-  padding: var(--space-3);
-  text-align: left;
-  white-space: normal;
-}
-
-.cf-record-choice small {
-  font-size: var(--text-xs);
-  font-weight: 400;
-  line-height: 1.4;
-  color: var(--muted-2);
-}
-
-/* On the coral fill the muted grey above is unreadable, so the caption drops back to
-   the button's own on-primary colour and is quietened with opacity instead. Same
-   trick, different ground: the caption must always read as the quieter of two lines. */
-.cf-record-choice.primary small {
-  color: var(--accent-fg);
-  opacity: 0.85;
-}
-
-/*
- * The one sentence that turns the choice above back into a preference. It sits with
- * the buttons rather than under the whole block, so it is read while the question is
- * still being answered — `.cf-record-or` is the block's *exit*, and this is not one.
- */
-.cf-record-hint {
-  margin: var(--space-2) 0 0;
-  font-size: var(--text-xs);
-  line-height: 1.4;
-  color: var(--muted-2);
-}
-
-/*
- * The two halves of setting a site up, named before the buttons that start the first.
+ * The two halves of setting a site up — the home screen's whole structure.
  *
  * A list rather than a numbered rail: the rail is the *wizard's*, and six numbered
- * steps beside two passes would read as eight things to do. The tone is `--muted`
- * because this is a description of what is about to happen and not an instruction —
- * the instruction is the two buttons directly under it.
+ * steps beside two passes would read as eight things to do.
  *
- * An inset (`--surface`) on the panel's paper, like every other block on this card
- * that is a thing *within* the sheet rather than a thing standing on it.
+ * Each pass is its own inset (`--surface`) rather than two lines sharing one, and
+ * that is what the block gained when it gained a button. A control inside a shared
+ * box belongs to the box; inside its own it belongs to the pass whose status is
+ * printed directly above it — which is the whole claim this screen makes.
  */
 .cf-passes {
   display: flex;
   flex-direction: column;
-  gap: var(--space-2);
+  gap: var(--space-3);
   margin: 0 0 var(--space-3);
+}
+
+.cf-pass {
   padding: var(--space-3);
   background: var(--surface);
   border-radius: var(--radius-card);
 }
 
+/* The dot and the name on one line: status is never colour alone, and the word
+   beside the dot is the other half of it. */
 .cf-pass-name {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
   font-size: var(--text-sm);
   font-weight: 500;
 }
@@ -170,14 +120,24 @@ button.cf-btn.cf-record-choice {
   color: var(--muted);
 }
 
+/* Full width, under the line it acts on — a pass block is a column, so a button
+   sized to its label would sit adrift in the middle of one. */
+.cf-pass > .cf-btn,
+.cf-pass > .cf-record-actions {
+  margin-top: var(--space-3);
+}
+.cf-pass > .cf-btn {
+  width: 100%;
+}
+
 /*
  * What the extension can already read on the page behind the offer: a count line
  * and a chip per field it recognised.
  *
  * No border and no fill — it is a *reading* of the page, not an object standing on
- * the card, and boxing it would put a third bordered block on a screen whose two
- * Record buttons are the thing to look at. The top margin is what separates it from
- * them; the section head does the rest.
+ * the card, and boxing it would put a third block on a screen whose two pass cards
+ * are the thing to look at. The top margin is what separates it from them; the
+ * section head does the rest.
  */
 .cf-detected {
   margin-top: var(--space-5);

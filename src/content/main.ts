@@ -7,8 +7,8 @@
  */
 
 import type {
-  FieldKey, FieldMatch, JobUrlEntry, ModalLayout, PrepAction, PrepStep, Profile, Settings,
-  SiteConfig,
+  FieldKey, FieldMatch, JobUrlEntry, MatchConfidence, ModalLayout, PrepAction, PrepStep,
+  Profile, Settings, SiteConfig,
 } from '../shared/types';
 import { statusForUrl } from '../shared/jobUrls';
 import { findMatchingConfig } from '../shared/matcher';
@@ -26,7 +26,7 @@ import {
 } from '../shared/storage';
 import { captureDetails, type JobDetails } from '../shared/jobDetails';
 import {
-  compileRecording,
+  compileRecording, fieldOf, isFieldBind,
   type BindKey, type CompiledSetup, type RecordFlow, type RecordLeg,
   type Recording, type RecordPhase, type RecordedStep,
 } from '../shared/recording';
@@ -34,11 +34,12 @@ import { BUILD_ID } from '../shared/buildId';
 import { getDoc, cvFileToFile } from '../shared/cvStore';
 import { FIELD_LABELS, orderFields } from '../shared/fieldKeys';
 import { matchStatus, orderReport } from '../shared/fieldStatus';
-import { BIND_LABELS, heldSendNotice } from '../shared/labels';
+import { BIND_LABELS, emptyProfileNotice, heldSendNotice } from '../shared/labels';
 import {
   MSG, type FollowRedirectResponse, type Message, type RecordingResponse,
   type SessionState, type StatusResponse,
 } from '../shared/messages';
+import { clip } from '../shared/jobText';
 import { hostOf } from '../shared/url';
 import { isRendered } from '../shared/visible';
 import { findSubmitControl } from '../shared/submitDetect';
@@ -163,6 +164,16 @@ class Controller {
    * not simply recorded. Cleared by the next step, because it is about *that* press.
    */
   private recorderNotice?: string;
+  /**
+   * What happened when a declared field was filled, so the field sweep can redraw it.
+   *
+   * `markBoundSteps` runs a few hundred milliseconds after every recorded gesture and
+   * paints each bound step green; without this, "there is nothing in your profile for
+   * this" would be told to the user once and then quietly contradicted by the page.
+   * Per recording, because a new one carries no memory of the last one's fills — the
+   * same rule `confirmedFields` follows for the report.
+   */
+  private declaredFills = new Map<FieldKey, MatchConfidence>();
   /** The bounded page watch that re-sweeps after a gesture — see `scheduleFieldSweep`. */
   private sweepWatch?: () => void;
   private sweepWindow?: ReturnType<typeof setTimeout>;
@@ -340,9 +351,7 @@ class Controller {
     // page looks at the database.
     this.readAppliedRecord(state.jobUrls);
 
-    const [cv, cover] = await Promise.all([getDoc('resume'), getDoc('coverLetter')]);
-    this.cvFile = cv ? cvFileToFile(cv) : null;
-    this.coverFile = cover ? cvFileToFile(cover) : null;
+    await this.loadDocs();
     this.session = await this.fetchSession();
 
     if (config.waitFor) await waitForSelector(config.waitFor, config.waitTimeoutMs ?? 15000);
@@ -773,8 +782,23 @@ class Controller {
    * the user is about to need the whole page — and because a destroyed panel is a
    * lost place in the wizard they will come straight back to.
    */
-  private async startRecording(flow: RecordFlow): Promise<void> {
+  private async startRecording(): Promise<void> {
     if (this.recorder) return;
+    /*
+     * The flow is derived, not asked.
+     *
+     * The panel used to offer two buttons — "Apply on this site" / "Apply on the
+     * employer's site" — and the answer only ever ordered the recorder bar's Declare
+     * menu: `compileRecording` reads the flow back out of the legs the steps really
+     * arrived on (rule 1), in both directions. So it was a question a user looking at
+     * an unfamiliar posting usually cannot answer, whose answer was then overruled.
+     *
+     * `this.detection` is the classifier's verdict on this very page, set by `run()`
+     * and refreshed by `refreshSetup` on every render of the panel the press came
+     * from — the same verdict the `kind` step draws as a banner. It is a better guess
+     * than the user's and it costs them nothing.
+     */
+    const flow: RecordFlow = this.detection?.kind === 'redirect' ? 'external' : 'internal';
     this.config = await ensureConfigForUrl(location.href);
     await chrome.runtime.sendMessage({
       type: MSG.RECORD_START, flow, postingUrl: location.href, phase: 'beforeSend',
@@ -782,6 +806,7 @@ class Controller {
     this.recording = {
       flow, phase: 'beforeSend', startedAt: Date.now(), postingUrl: location.href, steps: [],
     };
+    await this.loadForRecording();
     this.setupPanel?.minimize();
     this.attachRecorder('posting');
   }
@@ -906,6 +931,31 @@ class Controller {
    * ATS, and under the default `newTabCloseSource` the tab they started in was
    * closed behind them. This content script is a fresh one on a different origin.
    */
+  /**
+   * The CV and the cover letter as real `File`s.
+   *
+   * Split out of `run()` because a recording needs them and `run()` is precisely
+   * what stands down while one is live — so `applyFill('resume', …)` had nothing to
+   * attach at the one moment the user is pointing at the upload control.
+   */
+  private async loadDocs(): Promise<void> {
+    const [cv, cover] = await Promise.all([getDoc('resume'), getDoc('coverLetter')]);
+    this.cvFile = cv ? cvFileToFile(cv) : null;
+    this.coverFile = cover ? cvFileToFile(cover) : null;
+  }
+
+  /**
+   * Everything a recording needs in order to fill what it is told to fill, read fresh.
+   *
+   * Fresh because the profile snapshot is as old as the page: a detail typed into
+   * Options a minute ago is the one the user expects to see land in the box.
+   */
+  private async loadForRecording(): Promise<void> {
+    this.declaredFills.clear();
+    this.profile = (await getState()).profile;
+    await this.loadDocs();
+  }
+
   private async resumeRecording(): Promise<void> {
     const answer = await this.ask<RecordingResponse>({ type: MSG.RECORD_GET });
     const recording = answer?.recording;
@@ -923,6 +973,8 @@ class Controller {
       this.attachAfterSendBar();
       return;
     }
+
+    await this.loadForRecording();
 
     // Which config this page's steps belong to. The posting is whatever the
     // recording started on; anything on another host is the employer's side.
@@ -1051,7 +1103,12 @@ class Controller {
     for (const step of this.recording?.steps ?? []) {
       if (!step.bind || step.leg !== this.recordingLeg) continue;
       const el = query(document, step.target?.selector);
-      if (el) highlight(el, 'high', bindLabel(step.bind));
+      if (!el) continue;
+      // A declared field carries the outcome of the fill that followed it, or this
+      // sweep would repaint "there is nothing in your profile for this" as done a few
+      // hundred milliseconds after the user was told otherwise.
+      const declared = isFieldBind(step.bind) ? this.declaredFills.get(fieldOf(step.bind)) : undefined;
+      highlight(el, declared ?? 'high', bindLabel(step.bind));
     }
   }
 
@@ -1187,21 +1244,58 @@ class Controller {
     this.cancelPicker = startPicker((element) => {
       const recording = this.recording;
       if (!recording) return;
+      /*
+       * A field is stored against the control, not against whatever was pointed at.
+       *
+       * The user routinely picks the `<label>` or the box around it, and this
+       * selector becomes a `fieldOverride` — an override that does not resolve to
+       * something fillable fills nothing on every later visit, which `refreshSetup`
+       * can only report after the fact. `resolveControl` is the same walk the review
+       * modal's Pick already does.
+       */
+      const field = isFieldBind(bind) ? fieldOf(bind) : undefined;
+      const target = field ? resolveControl(element, field === 'resume') : element;
+
       void this.onRecordedStep({
         id: `p${Date.now().toString(36)}`,
         at: Math.max(0, Date.now() - recording.startedAt),
         leg,
         url: location.href,
         action: 'click',
-        target: pickSelector(element),
+        target: pickSelector(target),
         label: clip(element.textContent ?? '', 60).trim(),
         bind,
         bindSource: 'user',
       });
+
+      /*
+       * Naming a field fills it, then and there.
+       *
+       * The mark alone is a green outline on a box, and whether it is the *right*
+       * box was only ever answered on a later visit — after the recording had been
+       * compiled and saved. Putting the real value in says it immediately, in the
+       * only terms that settle it. Nothing here is visible to the recording itself:
+       * the arm is already down, so the recorder's `change` reader bails, and
+       * `input`/`change` are in neither of `inertPage`'s suppression lists, so the
+       * page's own handlers see the value exactly as if it had been typed.
+       */
+      const filled = field ? this.applyFill(field, target as HTMLElement) : undefined;
+      if (field) {
+        this.declaredFills.set(field, filled ? 'high' : 'low');
+        // A box that stays empty has to say why, or the one thing that proves the
+        // pick worked reads as the pick having failed. After the step, not before:
+        // `onRecordedStep` clears the notice and paints, so a notice set ahead of it
+        // is wiped, and one set behind it needs the bar told a second time.
+        if (!filled) {
+          this.recorderNotice = emptyProfileNotice(bindLabel(bind));
+          this.paintBar();
+        }
+      }
+
       // The receipt for the naming that just happened. Declare the Confirmation and
       // then the Send button and, unlabelled, they are two identical green outlines
       // with nothing saying which is which — on exactly the two marks that gate Apply.
-      highlight(element as HTMLElement, 'high', bindLabel(bind));
+      highlight(target as HTMLElement, filled === false ? 'low' : 'high', bindLabel(bind));
       // The after-sending pass exists for exactly one mark, so making it is the end
       // of the pass — there is nothing further to press Done about.
       if ((recording.phase ?? 'beforeSend') === 'afterSend') void this.finishConfirmationPass();
@@ -1302,9 +1396,8 @@ class Controller {
     // painted on the way past, and the refresh that follows is what the saved
     // screen's outstanding-work list is counted from. Counting it from the render
     // still on screen would count work this patch has just done.
-    const { flow } = compiled;
     this.clearRecording();
-    this.setupPanel?.showSaved(flow);
+    this.setupPanel?.showHome({ saved: true });
     await this.refreshSetup();
   }
 
@@ -1353,7 +1446,7 @@ class Controller {
         onPickSuccess: () => this.pickSuccess(),
         onClearSuccess: () => void this.clearSuccess(),
         onRename: (name, pattern) => this.renameConfig(name, pattern),
-        onStartRecording: (flow) => void this.startRecording(flow),
+        onStartRecording: () => void this.startRecording(),
         // The panel's way into the second pass: no Send is pressed, because the user
         // is going to apply by hand. The bar is identical — it has only ever waited.
         onMarkConfirmation: () => void this.startConfirmationPass(),
@@ -1908,11 +2001,6 @@ class Controller {
 }
 
 /** Truncate to `n` chars with an ellipsis. */
-/** One-line snippet for a setup row's note — container text is multi-line now. */
-function clip(text: string, n: number): string {
-  const flat = text.replace(/\s+/g, ' ').trim();
-  return flat.length > n ? `${flat.slice(0, n)}…` : flat;
-}
 
 const TEXTLIKE_SELECTOR =
   'input:not([type=file]):not([type=hidden]):not([type=submit]):not([type=button])' +

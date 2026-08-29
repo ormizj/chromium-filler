@@ -258,10 +258,17 @@
   box-shadow: var(--shadow-2);
 }
 
+/*
+ * Wider than it was, because the four marks that decide how an application is sent
+ * now carry a line of explanation each. Capped as well as floored: `min-width` alone
+ * lets a caption stretch the popover to whatever one sentence happens to measure,
+ * and the whole thing is anchored to a bar that may be 390px wide.
+ */
 .cf-rec-menu {
   max-height: 60vh;
   overflow-y: auto;
-  min-width: 240px;
+  min-width: 260px;
+  max-width: min(320px, calc(100vw - 2 * var(--space-4)));
 }
 
 @media (pointer: coarse) {
@@ -307,10 +314,37 @@
   letter-spacing: 0.04em;
 }
 
+/*
+ * A menu item is one line or two: the mark's name, and — on the marks whose names are
+ * terms of art — what it means. So it is laid out rather than centred, and `--tap`
+ * becomes a floor it may grow past instead of the height it is.
+ */
 .cf-rec-menu button {
-  display: block;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 1px;
   width: 100%;
+  height: auto;
+  padding-block: var(--space-1);
   text-align: left;
+}
+
+.cf-rec-menu-label {
+  font-weight: 500;
+}
+
+/*
+ * Drawn, never hidden behind hover: mobile is the priority target and a hover
+ * tooltip does not exist there — the same reason the `?` disclosure exists at all.
+ * It wraps, which is the one thing every other control in this bar must not do.
+ */
+.cf-rec-menu-hint {
+  color: var(--muted-2);
+  font-size: var(--text-xs);
+  font-weight: 400;
+  line-height: 1.35;
+  white-space: normal;
 }
 
 .cf-rec-wrap {

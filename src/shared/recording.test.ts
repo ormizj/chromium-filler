@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import {
-  RECORDING_NOTES, RECORDING_WARNINGS, compileRecording,
+  RECORDING_NOTES, RECORDING_WARNINGS, compileRecording, markGroups, marksFor,
   type BindKey, type RecordFlow, type RecordLeg, type RecordPhase, type RecordedStep,
   type Recording,
 } from './recording';
@@ -266,8 +266,10 @@ describe('rule 5 — the handoff splits the posting from the employer', () => {
     click('#start', { leg: 'destination', url: 'https://ats.test/apply' }),
     input('#cv', 'field:resume', { leg: 'destination', url: 'https://ats.test/apply' }),
     bindOnly('#send', 'submit', { leg: 'destination', url: 'https://ats.test/apply' }),
-    bindOnly('.thanks', 'success', { leg: 'destination', url: 'https://ats.test/apply' }),
   ], 'external');
+  // No confirmation anywhere in it: rule 11 puts that mark in the second pass, on
+  // whichever leg the application went from, and this is a first pass by definition.
+
 
   it('puts the apply link and the steps before it on the posting', () => {
     const out = compileRecording(twoStep());
@@ -285,12 +287,11 @@ describe('rule 5 — the handoff splits the posting from the employer', () => {
     expect(out.posting.redirect?.beforeFollow?.every((s) => s.optional)).toBe(true);
   });
 
-  it('puts the form, the Send button and the confirmation on the employer', () => {
+  it('puts the form and the Send button on the employer', () => {
     const out = compileRecording(twoStep());
     expect(out.destination?.cvUpload).toBe('#cv');
     expect(out.destination?.prep.map((s) => s.selector)).toEqual(['#start']);
     expect(out.destination?.submitSelector).toBe('#send');
-    expect(out.destination?.successSelector).toBe('.thanks');
   });
 
   it('adopts the click that caused the handoff when nothing was bound as the apply link', () => {
@@ -431,9 +432,133 @@ describe('rules 8 and 9 — what the compiler refuses to be quiet about', () => 
       bindOnly('#desc', 'jobDescription'),
       input('#cv', 'field:resume'),
       bindOnly('#send', 'submit'),
-      bindOnly('.thanks', 'success'),
     ]));
     expect(out.warnings).toEqual([]);
+  });
+});
+
+/* ---------------- 11. A pass only writes what it owns ---------------- */
+
+/**
+ * The page has two halves and so does teaching the extension about it, and this is
+ * the rule that keeps them apart in the one place a mistake would be permanent.
+ *
+ * `marksFor` is what the recorder bar and the review's dropdown offer, so nothing a
+ * user does today can produce the recordings below. They exist because a recording
+ * outlives the menu it was made from: it is kept in `chrome.storage.session`, so one
+ * written by a build with the old menu can still be sitting in a tab when a new build
+ * wakes up beside it, and a rebind in the review is a raw `BindKey`.
+ *
+ * The confirmation is the whole of the rule and the reason it is worth a warning
+ * rather than a silent drop: a `successSelector` captured on a page that was never a
+ * confirmation makes every later fill on the site report itself as applied.
+ */
+describe('rule 11 — a pass only writes what it owns', () => {
+  it('offers the confirmation in the second pass and nowhere else', () => {
+    expect(marksFor('afterSend', 'internal', 'posting')).toEqual(['success']);
+    expect(marksFor('beforeSend', 'internal', 'posting')).not.toContain('success');
+    expect(marksFor('beforeSend', 'external', 'destination')).not.toContain('success');
+  });
+
+  /** The leg only ever re-orders — filtering by it left a whole page unmarkable. */
+  it('offers the Send button on both legs, leading with what each page is about', () => {
+    const posting = marksFor('beforeSend', 'external', 'posting');
+    const destination = marksFor('beforeSend', 'external', 'destination');
+    expect(posting).toContain('submit');
+    expect(destination).toContain('submit');
+    expect(posting[0]).toBe('applySelector');
+    expect(destination[0]).toBe('submit');
+  });
+
+  it('drops a confirmation marked during a before-sending pass, and says so', () => {
+    const out = compileRecording(recording([
+      bindOnly('#send', 'submit'),
+      bindOnly('.thanks', 'success'),
+    ]));
+    expect(out.posting.successSelector).toBeUndefined();
+    expect(out.warnings).toContain(RECORDING_WARNINGS.wrongPhase);
+  });
+
+  /**
+   * The mirror, and it matters as much: the after-sending pass runs on a page where
+   * the form is already gone, so a field or a Send button marked there points at
+   * nothing any later visit will find.
+   */
+  it('drops everything but the confirmation in an after-sending pass, and says so', () => {
+    const out = compileRecording(recording([
+      bindOnly('#send', 'submit'),
+      input('#cv', 'field:resume'),
+      bindOnly('.thanks', 'success'),
+    ], 'internal', 'afterSend'));
+    expect(out.posting.successSelector).toBe('.thanks');
+    expect(out.posting.submitSelector).toBeUndefined();
+    expect(out.posting.cvUpload).toBeUndefined();
+    expect(out.warnings).toContain(RECORDING_WARNINGS.wrongPhase);
+  });
+});
+
+/* ---------------- How the marks are grouped for reading ---------------- */
+
+/**
+ * `markGroups` is the one answer to "which head does this mark go under", read by
+ * the recorder bar's Declare menu and by the review's per-step select. One answer
+ * because two copies of it is how the menu a recording was made from stops agreeing
+ * with the list it is corrected in.
+ *
+ * It groups and it does not sort. `marksFor` has already put the marks in the order
+ * this page is about — that is the whole of the leg's job — so the groups come out
+ * in order of first appearance and the leg rule keeps working with nothing new
+ * knowing about legs.
+ */
+describe('the marks are grouped by what they are about', () => {
+  const ids = (phase: RecordPhase, flow: RecordFlow, leg: RecordLeg) =>
+    markGroups(marksFor(phase, flow, leg)).map((g) => g.id);
+
+  /**
+   * The split that matters: sending from this page and handing off to the employer
+   * are opposite answers to the same question, and they sat under one head reading
+   * "This application" with nothing between them.
+   */
+  it('keeps the Send button apart from the way out to the employer', () => {
+    const groups = markGroups(marksFor('beforeSend', 'internal', 'posting'));
+    const by = (id: string) => groups.find((g) => g.id === id)!.keys;
+    expect(by('sending')).toEqual(['submit', 'quickApplySelector']);
+    expect(by('leaving')).toEqual(['applySelector', 'markerSelector']);
+  });
+
+  it('puts the six extract slots and the sixteen fields in one group each', () => {
+    const groups = markGroups(marksFor('beforeSend', 'internal', 'posting'));
+    expect(groups.find((g) => g.id === 'info')!.keys).toHaveLength(6);
+    expect(groups.find((g) => g.id === 'fields')!.keys).toHaveLength(16);
+  });
+
+  /** Order of first appearance, so `marksFor`'s leg ordering survives the grouping. */
+  it('leads with leaving on the board of a two-step posting, and sending elsewhere', () => {
+    expect(ids('beforeSend', 'external', 'posting')[0]).toBe('leaving');
+    expect(ids('beforeSend', 'external', 'destination')[0]).toBe('sending');
+    expect(ids('beforeSend', 'internal', 'posting')[0]).toBe('sending');
+  });
+
+  /** Every mark lands somewhere: a key in no group is a key that draws nothing. */
+  it('places every mark the pass offers', () => {
+    for (const [phase, flow, leg] of [
+      ['beforeSend', 'internal', 'posting'],
+      ['beforeSend', 'external', 'posting'],
+      ['afterSend', 'internal', 'posting'],
+    ] as Array<[RecordPhase, RecordFlow, RecordLeg]>) {
+      const marks = marksFor(phase, flow, leg);
+      expect(markGroups(marks).flatMap((g) => g.keys).sort()).toEqual([...marks].sort());
+    }
+  });
+
+  /** The confirmation is the reply to sending from this page, so it groups with it. */
+  it('gives the after-sending pass one group holding the confirmation', () => {
+    expect(markGroups(marksFor('afterSend', 'internal', 'posting')))
+      .toEqual([{ id: 'sending', keys: ['success'] }]);
+  });
+
+  it('draws no group for a kind of mark this pass has none of', () => {
+    expect(ids('afterSend', 'internal', 'posting')).not.toContain('fields');
   });
 });
 
@@ -539,8 +664,15 @@ describe('the after-sending pass compiles binds and nothing else', () => {
     expect(out.posting.redirect).toBeUndefined();
   });
 
-  it('carries the Send button too, when the pass is where it was marked', () => {
+  /**
+   * Rule 11 from this end. The Send button belongs to the first pass — it is the one
+   * mark that can only be made *before* the press, and by the time this pass is
+   * running the form it lived on has been replaced by the site's reply.
+   */
+  it('refuses the Send button, which belongs to the pass before it', () => {
     const out = after([bindOnly('#send', 'submit'), bindOnly('.thanks', 'success')]);
-    expect(out.posting.submitSelector).toBe('#send');
+    expect(out.posting.submitSelector).toBeUndefined();
+    expect(out.posting.successSelector).toBe('.thanks');
+    expect(out.warnings).toContain(RECORDING_WARNINGS.wrongPhase);
   });
 });

@@ -16,6 +16,7 @@
 
 import type { PrepAction } from './types';
 import type { PostingKind } from './redirect';
+import { RECORD_PASS_ORDER, type RecordPhase } from './recording';
 
 /* ---------------- Rows (shared with the panel that renders them) ---------------- */
 
@@ -317,5 +318,55 @@ export type SetupStage = 'unconfigured' | 'beforeSend' | 'complete';
 
 export function setupStage(s: SetupSnapshot): SetupStage {
   if (isUnconfigured(s)) return 'unconfigured';
-  return s.success.hasSave ? 'complete' : 'beforeSend';
+  return passStates(s).afterSend.status === 'high' ? 'complete' : 'beforeSend';
+}
+
+export interface PassState {
+  status: RowStatus;
+  /** What this pass has produced, or what it still needs. Never colour alone. */
+  summary: string;
+}
+
+/**
+ * How far each of the two passes has got — the accounting the setup panel's home
+ * screen is built out of.
+ *
+ * It lives here, beside `stepStates`, because it is the same kind of decision and
+ * obeys the same rule: **a healthy site must report no work.** So it follows the two
+ * counting rules the wizard's own steps already settled rather than inventing a
+ * third. From `send()`: a Send button found by its *label* is healthy, and only "none
+ * found" counts — most sites need no override. From `fields()`: of sixteen field
+ * rows only the CV is ever work, because a page that does not ask for a phone number
+ * is not a page with a missing phone number, and an application sent without the
+ * document attached is the failure this whole surface exists to prevent.
+ *
+ * The second pass is a *saved*-only test with no heuristic behind it at all, which
+ * is exactly why it needs a pass of its own: nothing on a page can be guessed to
+ * mean "this application landed", so somebody has to point at it once.
+ */
+export function passStates(s: SetupSnapshot): Record<RecordPhase, PassState> {
+  const beforeSend: PassState = firstPass(s);
+  const afterSend: PassState = s.success.hasSave
+    ? { status: 'high', summary: 'Saved — it can tell when an application landed.' }
+    : { status: 'none', summary: 'Not captured yet.' };
+  return { beforeSend, afterSend };
+}
+
+/**
+ * Which pass still wants something, earliest first — `null` when the site is
+ * finished. It is what decides where the setup panel's one coral button goes, so it
+ * is a counting rule like the rest of this file rather than a renderer's guess.
+ */
+export function outstandingPass(passes: Record<RecordPhase, PassState>): RecordPhase | null {
+  return RECORD_PASS_ORDER.find((phase) => passes[phase].status !== 'high') ?? null;
+}
+
+function firstPass(s: SetupSnapshot): PassState {
+  if (isUnconfigured(s)) return { status: 'none', summary: 'Not set up yet.' };
+  const missing: string[] = [];
+  if (s.submit.status === 'none') missing.push('no Send button was found');
+  const cv = s.fields.find((r) => r.key === 'resume');
+  if (s.fields.length && (!cv || cv.status !== 'high')) missing.push('the CV upload needs checking');
+  if (missing.length) return { status: 'low', summary: `Saved, but ${missing.join(', and ')}.` };
+  return { status: 'high', summary: 'Saved — it can fill this site and knows what sends it.' };
 }

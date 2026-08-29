@@ -15,6 +15,7 @@ import type { JobUrlEntry } from '../src/shared/types';
 import type { JobDetailsMap } from '../src/shared/jobDetails';
 import type { ExportedJob } from '../src/shared/jobExport';
 import { MSG } from '../src/shared/messages';
+import { RECORD_PASS_TEXT } from '../src/shared/labels';
 import { ATS_URL, HOSTS, queueSeedUrls, urlFor } from '../test/fixtures/scenarios.mjs';
 import path from 'node:path';
 import fs from 'node:fs';
@@ -1535,7 +1536,7 @@ test('Setup: “Advanced (JSON)” lands on the Sites tab, at the config editor'
 
     await page.locator('.cf-more button').first().click();
     await page.getByRole('button', { name: 'Site setup', exact: true }).click();
-    await expect(page.locator('.cf-rail')).toBeVisible({ timeout: 10_000 });
+    await enterWizard(page);
     // Step 1 is where the raw config lives; the rail is how to get there without
     // pressing Next five times.
     await page.locator('.cf-rail-node').first().click();
@@ -1631,12 +1632,27 @@ test('Modal: fullscreen fills the window and stays on for the next posting', asy
  * addressed at that tab. There is no other entry point, and driving the real
  * popup would need a extension-page → tab hop for one message.
  */
-async function openSetupPanel(page: Page): Promise<void> {
+async function openSetupPanel(page: Page, opts: { home?: boolean } = {}): Promise<void> {
   const url = page.url();
   await onExtensionPage((ext) => ext.evaluate(async ([type, target]) => {
     const [tab] = await chrome.tabs.query({ url: target });
     await chrome.tabs.sendMessage(tab.id!, { type });
   }, [MSG.SETUP, url] as [string, string]));
+  if (opts.home) return;
+  // Site setup opens on the two passes now, on every site — so the six-step wizard
+  // is a deliberate press rather than where anyone lands. It used to route here for
+  // anything with a single saved selector, which one Pick from the review modal's
+  // report is enough to produce, and that made the manual surface the default on
+  // every site anyone had ever touched.
+  await enterWizard(page);
+}
+
+/** Home → the wizard, through the footer's one way into it. */
+async function enterWizard(page: Page): Promise<void> {
+  const setup = page.locator('.cf-card[data-sheet="setup"]');
+  await expect(setup).toBeVisible({ timeout: 20_000 });
+  await setup.locator('.cf-footer .cf-btn').first().click();
+  await expect(setup.locator('.cf-rail')).toBeVisible({ timeout: 10_000 });
 }
 
 test('Sheets: only one is expanded at a time, and both open in the same place', async () => {
@@ -2447,17 +2463,23 @@ test('Recording: one application on this site becomes the whole config', async (
   try {
     await page.setViewportSize({ width: 1280, height: 900 });
     await page.goto(urlFor('record-internal'));
-    await openSetupPanel(page);
+    await openSetupPanel(page, { home: true });
 
     const setup = page.locator('.cf-card[data-sheet="setup"]');
     await expect(setup).toBeVisible({ timeout: 20_000 });
 
-    // The offer has no footer, so recording is the only way on. It carried "Set up by
-    // hand ›" — which pointed at the six-step wizard from the one screen built to
-    // avoid it — and a "Done" that closed the panel having taught the extension
-    // nothing. The header × still minimizes, which is the way to get it out of the way.
-    await expect(setup.locator('.cf-footer')).toHaveCount(0);
+    // Site setup opens on the two passes, not on the wizard — and on a site nobody
+    // has taught anything the only way off this screen is to record. There is no
+    // footer at all: the six-step form is where a recording is *corrected*, so it is
+    // not on offer until one has produced something, and "Done" would close the panel
+    // having taught the extension nothing. The header × still minimizes, which is the
+    // way to get the card out of the way.
     await expect(setup.locator('.cf-rail')).toHaveCount(0);
+    await expect(setup.locator('.cf-pass')).toHaveCount(2);
+    await expect(setup.locator('.cf-footer')).toHaveCount(0);
+    // The second pass has no control at all yet: there is nothing to confirm the
+    // landing of until the site can fill and send.
+    await expect(setup.locator('.cf-pass').nth(1).locator('.cf-btn')).toHaveCount(0);
     // And it says what it can already read, so "teach me this site" is a concrete ask
     // rather than a blank one. `not on this page` and never "unmatched": detection
     // returns a row per *wanted* field, so most of the sixteen are grey on any form.
@@ -2466,7 +2488,9 @@ test('Recording: one application on this site becomes the whole config', async (
     await expect(setup.locator('.cf-detected-chips .chip').filter({ hasText: 'Email' }))
       .toBeVisible();
 
-    await setup.getByRole('button', { name: 'Apply on this site' }).click();
+    // One button, and it does not ask where the application happens: that is worked
+    // out from what really happens, and the classifier on the page supplies the hint.
+    await setup.getByRole('button', { name: RECORD_PASS_TEXT.beforeSend.action }).click();
     await expect(bar(page)).toBeVisible({ timeout: 10_000 });
 
     // The page is marked up by name for the whole recording. The panel is a pill by
@@ -2516,10 +2540,16 @@ test('Recording: one application on this site becomes the whole config', async (
     await expect(setup.getByText('Site setup saved')).toBeVisible({ timeout: 10_000 });
     await expect(setup.locator('.cf-rail')).toHaveCount(0);
     await expect(setup.getByRole('button', { name: 'Review configuration' })).toBeVisible();
-    // And it names the half that is left. This is the only screen that says the
-    // second pass exists, so a user who never reads it never finds it.
-    await expect(setup.getByText('Before sending — saved')).toBeVisible();
-    await expect(setup.getByRole('button', { name: 'Mark the confirmation' })).toBeVisible();
+    // And the two passes say where the site has got to: the first is in, the second
+    // is what is left — and the coral has moved onto it, which is the whole argument
+    // of the screen. Nothing else here says the second pass exists.
+    const passes = setup.locator('.cf-pass');
+    await expect(passes.first().locator('.cf-dot.ok')).toBeVisible();
+    await expect(passes.nth(1).locator('.cf-dot.none')).toBeVisible();
+    const markBtn = setup.getByRole('button', { name: 'Mark the confirmation' });
+    await expect(markBtn).toBeVisible();
+    await expect(markBtn).toHaveClass(/primary/);
+    await expect(setup.locator('.cf-btn.primary')).toHaveCount(1);
 
     const config = await configFor(urlFor('record-internal'));
     // The Send button, which the wizard buried at the end of a queue of twenty-five
@@ -2541,12 +2571,15 @@ test('Recording: one application on this site becomes the whole config', async (
     await setup.getByRole('button', { name: 'Done' }).click();
     await expect(page.locator('.cf-card[data-sheet="setup"]')).toHaveCount(0);
 
-    // Done destroys the panel, so Site setup has to be able to build a new one —
-    // the sequence the saved screen created and the one nothing else covers. It
-    // opens on the wizard now, because the recording configured the site.
-    await openSetupPanel(page);
+    // Done destroys the panel, so Site setup has to be able to build a new one — the
+    // sequence this screen created and the one nothing else covers. It opens on home
+    // again, configured or not: the wizard is behind the footer's one deliberate
+    // press, and never where anyone lands.
+    await openSetupPanel(page, { home: true });
     await expect(page.locator('.cf-card[data-sheet="setup"]')).toBeVisible({ timeout: 20_000 });
-    await expect(page.locator('.cf-rail')).toBeVisible();
+    await expect(page.locator('.cf-rail')).toHaveCount(0);
+    await expect(page.locator('.cf-pass')).toHaveCount(2);
+    await enterWizard(page);
   } finally {
     await page.close();
   }
@@ -2558,11 +2591,11 @@ test('Recording: a handoff is saved as two configs, one per site', async () => {
   try {
     await page.setViewportSize({ width: 1280, height: 900 });
     await page.goto(urlFor('record-external'));
-    await openSetupPanel(page);
+    await openSetupPanel(page, { home: true });
 
     const setup = page.locator('.cf-card[data-sheet="setup"]');
     await expect(setup).toBeVisible({ timeout: 20_000 });
-    await setup.getByRole('button', { name: 'Apply on the employer’s site' }).click();
+    await setup.getByRole('button', { name: RECORD_PASS_TEXT.beforeSend.action }).click();
     await expect(bar(page)).toBeVisible({ timeout: 10_000 });
 
     // The board's own courtesy first, then the handoff the user performs themselves —
@@ -2622,14 +2655,7 @@ test('Recording: a held press that was not the Send button can be pressed anyway
   await clearConfigs();
   const page = await context.newPage();
   try {
-    await page.setViewportSize({ width: 1280, height: 900 });
-    await page.goto(urlFor('record-apply-lever'));
-    await openSetupPanel(page);
-
-    const setup = page.locator('.cf-card[data-sheet="setup"]');
-    await expect(setup).toBeVisible({ timeout: 20_000 });
-    await setup.getByRole('button', { name: 'Apply on this site' }).click();
-    await expect(bar(page)).toBeVisible({ timeout: 10_000 });
+    await beginRecording(page, 'record-apply-lever');
 
     // "Apply for this role" opens the modal. It reads like a send, so it is held.
     await press(page, '#apply-btn');
@@ -2647,6 +2673,7 @@ test('Recording: a held press that was not the Send button can be pressed anyway
     await press(page, '#lever-submit');
     await expect(page.locator('#lever-success')).toBeHidden();
 
+    const setup = page.locator('.cf-card[data-sheet="setup"]');
     await bar(page).getByRole('button', { name: 'Done' }).click();
     await expect(setup.getByText('Check what was recorded')).toBeVisible({ timeout: 10_000 });
     await setup.getByRole('button', { name: 'Save setup' }).click();
@@ -2753,29 +2780,7 @@ test('Recording: the Declare menu holds its place while the clock ticks', async 
   await clearConfigs();
   const page = await context.newPage();
   try {
-    await page.setViewportSize({ width: 1280, height: 900 });
-    await page.goto(urlFor('record-internal'));
-    await openSetupPanel(page);
-
-    const setup = page.locator('.cf-card[data-sheet="setup"]');
-    await expect(setup).toBeVisible({ timeout: 20_000 });
-
-    // The offer has no footer, so recording is the only way on. It carried "Set up by
-    // hand ›" — which pointed at the six-step wizard from the one screen built to
-    // avoid it — and a "Done" that closed the panel having taught the extension
-    // nothing. The header × still minimizes, which is the way to get it out of the way.
-    await expect(setup.locator('.cf-footer')).toHaveCount(0);
-    await expect(setup.locator('.cf-rail')).toHaveCount(0);
-    // And it says what it can already read, so "teach me this site" is a concrete ask
-    // rather than a blank one. `not on this page` and never "unmatched": detection
-    // returns a row per *wanted* field, so most of the sixteen are grey on any form.
-    await expect(setup.locator('.cf-detected .cf-summary')).toContainText('not on this page');
-    await expect(setup.locator('.cf-detected .cf-summary')).not.toContainText('unmatched');
-    await expect(setup.locator('.cf-detected-chips .chip').filter({ hasText: 'Email' }))
-      .toBeVisible();
-
-    await setup.getByRole('button', { name: 'Apply on this site' }).click();
-    await expect(bar(page)).toBeVisible({ timeout: 10_000 });
+    await beginRecording(page, 'record-internal');
 
     // The page is marked up by name for the whole recording. The panel is a pill by
     // now, so this is the only thing on screen saying which control is which — and a
@@ -2825,29 +2830,7 @@ test('Recording: Reset throws the steps away and puts the page back', async () =
   await clearConfigs();
   const page = await context.newPage();
   try {
-    await page.setViewportSize({ width: 1280, height: 900 });
-    await page.goto(urlFor('record-internal'));
-    await openSetupPanel(page);
-
-    const setup = page.locator('.cf-card[data-sheet="setup"]');
-    await expect(setup).toBeVisible({ timeout: 20_000 });
-
-    // The offer has no footer, so recording is the only way on. It carried "Set up by
-    // hand ›" — which pointed at the six-step wizard from the one screen built to
-    // avoid it — and a "Done" that closed the panel having taught the extension
-    // nothing. The header × still minimizes, which is the way to get it out of the way.
-    await expect(setup.locator('.cf-footer')).toHaveCount(0);
-    await expect(setup.locator('.cf-rail')).toHaveCount(0);
-    // And it says what it can already read, so "teach me this site" is a concrete ask
-    // rather than a blank one. `not on this page` and never "unmatched": detection
-    // returns a row per *wanted* field, so most of the sixteen are grey on any form.
-    await expect(setup.locator('.cf-detected .cf-summary')).toContainText('not on this page');
-    await expect(setup.locator('.cf-detected .cf-summary')).not.toContainText('unmatched');
-    await expect(setup.locator('.cf-detected-chips .chip').filter({ hasText: 'Email' }))
-      .toBeVisible();
-
-    await setup.getByRole('button', { name: 'Apply on this site' }).click();
-    await expect(bar(page)).toBeVisible({ timeout: 10_000 });
+    await beginRecording(page, 'record-internal');
 
     // The page is marked up by name for the whole recording. The panel is a pill by
     // now, so this is the only thing on screen saying which control is which — and a
@@ -2895,11 +2878,11 @@ test('Recording: Reset from the employer’s site goes back to the posting', asy
   try {
     await page.setViewportSize({ width: 1280, height: 900 });
     await page.goto(urlFor('record-external'));
-    await openSetupPanel(page);
+    await openSetupPanel(page, { home: true });
 
     const setup = page.locator('.cf-card[data-sheet="setup"]');
     await expect(setup).toBeVisible({ timeout: 20_000 });
-    await setup.getByRole('button', { name: 'Apply on the employer’s site' }).click();
+    await setup.getByRole('button', { name: RECORD_PASS_TEXT.beforeSend.action }).click();
     await expect(bar(page)).toBeVisible({ timeout: 10_000 });
 
     await press(page, '#apply-external');
@@ -2923,15 +2906,15 @@ test('Recording: Reset from the employer’s site goes back to the posting', asy
  * Start a recording on a scenario the way the panel offers it. The three specs
  * below are about what happens *during* one, so the walk in is scaffolding.
  */
-async function beginRecording(page: Page, scenario: string, choice: string): Promise<void> {
+async function beginRecording(page: Page, scenario: string): Promise<void> {
   await clearConfigs();
   await page.setViewportSize({ width: 1280, height: 900 });
   await page.goto(urlFor(scenario));
-  await openSetupPanel(page);
+  await openSetupPanel(page, { home: true });
 
   const setup = page.locator('.cf-card[data-sheet="setup"]');
   await expect(setup).toBeVisible({ timeout: 20_000 });
-  await setup.getByRole('button', { name: choice }).click();
+  await setup.getByRole('button', { name: RECORD_PASS_TEXT.beforeSend.action }).click();
   await expect(bar(page)).toBeVisible({ timeout: 10_000 });
 }
 
@@ -2961,7 +2944,7 @@ test('Recording: a name follows its field when the page moves under it', async (
   // invisible to vitest; this is the half that has to be measured in a browser.
   const page = await context.newPage();
   try {
-    await beginRecording(page, 'record-internal', 'Apply on this site');
+    await beginRecording(page, 'record-internal');
     await expect(mark(page, 'Email')).toBeVisible();
     await expectMarkOn(page, 'Email', '#email');
     const was = (await page.locator('#email').boundingBox())!;
@@ -2998,7 +2981,7 @@ test('Recording: fields that appear mid-recording are named, and marks already m
   // quietly unname what the user has already declared.
   const page = await context.newPage();
   try {
-    await beginRecording(page, 'modal-lever', 'Apply on this site');
+    await beginRecording(page, 'modal-lever');
     await expect(mark(page, 'Full name')).toHaveCount(0);
 
     await declare(page, 'Description');
@@ -3028,13 +3011,68 @@ test('Recording: fields that appear mid-recording are named, and marks already m
   }
 });
 
+test('Recording: naming a field fills it, so a wrong box is obvious at once', async () => {
+  // The mark alone is a green outline on a box, and whether it is the *right* box was
+  // only ever answered on a later visit — after the recording had been compiled and
+  // saved. Putting the real value in settles it in the only terms that can.
+  const page = await context.newPage();
+  try {
+    await beginRecording(page, 'record-internal');
+    // Emptied first, or the assertion below passes on whatever was already there.
+    await page.locator('#first_name').evaluate((el) => { (el as HTMLInputElement).value = ''; });
+
+    await declare(page, 'First name');
+    // Pointed at the label, which is what a user does — and what the fill needs
+    // resolving past before it has a control to write into at all.
+    await pickOnPage(page, page.locator('#first_name'));
+
+    await expect(page.locator('#first_name')).toHaveValue('Ada');
+    await expect(mark(page, 'First name')).toBeVisible();
+
+    // The CV is the one field the whole surface exists to get right, and the one the
+    // page cannot show any other way — `run()` stands down while a recording is live,
+    // so the documents had to be loaded for this moment specifically.
+    await declare(page, 'Résumé / CV');
+    await pickOnPage(page, page.locator('#resume-file'));
+    await expect(async () => {
+      const files = await page.locator('#resume-file').evaluate(
+        (el) => [...((el as HTMLInputElement).files ?? [])].map((f) => f.name),
+      );
+      expect(files).toEqual(['cv.pdf']);
+    }).toPass({ timeout: 5_000 });
+  } finally {
+    await page.close();
+  }
+});
+
+test('Recording: a field with nothing in the profile to put there says so', async () => {
+  // The failure this feature could introduce: an outlined box that stays empty with
+  // nothing said about it reads as the pick having failed rather than as the profile
+  // being short a detail. The mark is saved either way, which is the part worth saying.
+  const page = await context.newPage();
+  try {
+    await beginRecording(page, 'record-internal');
+
+    // Nothing in `PROFILE` for LinkedIn, so there is nothing to write.
+    await declare(page, 'LinkedIn');
+    await pickOnPage(page, page.locator('#phone'));
+
+    await expect(bar(page).locator('.cf-rec-notice')).toContainText('LinkedIn');
+    await expect(bar(page).locator('.cf-rec-notice')).toContainText('profile');
+    // Saved regardless: the mark is a fact about the page, not about the profile.
+    await expect(mark(page, 'LinkedIn')).toBeVisible();
+  } finally {
+    await page.close();
+  }
+});
+
 test('Recording: choosing a mark closes the Declare menu before the picker opens', async () => {
   // The menu closed its flag and left its markup: nothing on the way to the picker
   // repainted the bar, so a 240px-wide, 60vh-tall list stayed hanging over the very
   // page the picker was asking the user to point at.
   const page = await context.newPage();
   try {
-    await beginRecording(page, 'record-internal', 'Apply on this site');
+    await beginRecording(page, 'record-internal');
 
     await bar(page).getByRole('button', { name: 'Declare…', exact: true }).click();
     await expect(bar(page).locator('.cf-rec-menu')).toBeVisible();

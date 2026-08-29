@@ -35,6 +35,7 @@ const btn = (role: string) =>
   document.querySelector<HTMLButtonElement>(`[${PICKER_ATTR}="${role}"]`)!;
 const readout = () =>
   document.querySelector(`[${PICKER_ATTR}="readout"]`)!.textContent!;
+const preview = () => document.querySelector<HTMLElement>(`[${PICKER_ATTR}="preview"]`)!;
 
 function clickPage(el: Element, at = POINT): void {
   el.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, ...at }));
@@ -227,5 +228,70 @@ describe('picker — getting out', () => {
     expect(document.querySelector(`[${PICKER_ATTR}]`)).not.toBeNull();
     clickPage(span);
     expect(document.querySelector(`[${PICKER_ATTR}]`)).not.toBeNull();
+  });
+});
+
+/**
+ * What the toolbar says about the element under the pointer.
+ *
+ * It read back `div.job-description` and a strength word — structure, and never a
+ * syllable of what is actually inside. Half the marks a recording makes are made on
+ * text (the title, the description, the requirements), so declaring one meant
+ * pointing at a box and hoping until the review opened.
+ */
+describe('the picker shows the words it is about to save', () => {
+  it('reads the posting inside the element the user is pointing at', () => {
+    stop = startPicker(vi.fn(), 'Description');
+    stub(document.querySelector('.job-title span')!);
+    clickPage(document.querySelector('.job-title span')!);
+
+    expect(preview().textContent).toContain('Senior Engineer');
+    expect(preview().style.display).not.toBe('none');
+  });
+
+  /**
+   * `extractBlocks` reads a *posting*, so it returns nothing for a root that is
+   * chrome — which is every control worth marking. Without the fallback the Send
+   * button and the apply link, the two marks that gate Apply, preview as nothing.
+   */
+  it('falls back to the control\u2019s own words, which a posting reader skips', () => {
+    stop = startPicker(vi.fn(), 'Send button');
+    stub(document.getElementById('send')!);
+    clickPage(document.getElementById('send')!);
+    // The chain is outermost-first, so the button is one step in from the posting.
+    btn('deeper').click();
+
+    expect(readout()).toContain('button');
+    expect(preview().textContent).toContain('Send');
+  });
+
+  /** An empty line is a gap where something should be — the `meta` row's rule. */
+  it('hides itself on an element with nothing to show', () => {
+    document.body.insertAdjacentHTML('beforeend', '<div id="blank"></div>');
+    stop = startPicker(vi.fn(), 'Description');
+    stub(document.getElementById('blank')!);
+    clickPage(document.getElementById('blank')!);
+
+    expect(preview().style.display).toBe('none');
+  });
+
+  /**
+   * `reposition` runs off a capture-phase `scroll` listener, and reading a posting
+   * is a full walk of the element — so the answer is kept per element rather than
+   * recomputed per frame.
+   */
+  it('reads the element once, not once per scroll', () => {
+    stop = startPicker(vi.fn(), 'Description');
+    const title = document.querySelector('.job-title')!;
+    stub(title);
+    clickPage(title);
+    const before = preview().textContent;
+
+    const walked = vi.spyOn(title, 'querySelectorAll');
+    document.dispatchEvent(new Event('scroll'));
+    window.dispatchEvent(new Event('resize'));
+
+    expect(preview().textContent).toBe(before);
+    expect(walked).not.toHaveBeenCalled();
   });
 });

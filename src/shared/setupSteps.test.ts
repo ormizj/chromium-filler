@@ -8,7 +8,8 @@
  */
 import { describe, it, expect } from 'vitest';
 import {
-  SETUP_STEP_ORDER, firstStepWithWork, isUnconfigured, setupStage, stepStates,
+  SETUP_STEP_ORDER, firstStepWithWork, isUnconfigured, outstandingPass, passStates,
+  setupStage, stepStates,
   type SetupRow, type SetupSnapshot,
 } from './setupSteps';
 
@@ -416,7 +417,7 @@ describe('setupStage — before sending, after sending, or done', () => {
     ...over,
   });
 
-  it('opens the offer while nothing at all is saved', () => {
+  it('is unconfigured while nothing at all is saved', () => {
     expect(setupStage(bare())).toBe('unconfigured');
   });
 
@@ -441,5 +442,95 @@ describe('setupStage — before sending, after sending, or done', () => {
   it('does not count a heuristic match as taught', () => {
     expect(setupStage(bare({ submit: row({ key: 'submitSelector', status: 'high', hasSave: false }) })))
       .toBe('unconfigured');
+  });
+});
+
+/**
+ * The two passes, counted — which is what the setup panel's home screen is drawn
+ * from, and what decides where its one coral button goes.
+ *
+ * It obeys the same rule as every step above it: **a healthy site must report no
+ * work.** So it borrows the two exemptions the wizard already settled rather than
+ * inventing a third — a Send button found by its label is fine, and of sixteen field
+ * rows only the CV is ever work — because a home screen that says a perfectly
+ * configured site is unfinished teaches the user to ignore it, and then the site that
+ * really is unfinished goes unread with the rest.
+ */
+describe('passStates — how far each of the two passes has got', () => {
+  const bare = (over: Partial<SetupSnapshot> = {}) => snapshot({
+    prep: [],
+    containers: [],
+    fields: [row({ key: 'resume', status: 'high', hasSave: true })],
+    redirect: [],
+    submit: row({ key: 'submitSelector', status: 'high', hasSave: true }),
+    success: row({ key: 'successSelector', status: 'none', note: 'not set', hasSave: false }),
+    ...over,
+  });
+
+  it('reports neither pass on a site nobody has taught anything', () => {
+    const passes = passStates(snapshot({
+      prep: [],
+      containers: [],
+      fields: [row({ key: 'resume', hasSave: false })],
+      redirect: [],
+      submit: row({ key: 'submitSelector', hasSave: false }),
+      success: row({ key: 'successSelector', status: 'none', hasSave: false }),
+    }));
+    expect(passes.beforeSend.status).toBe('none');
+    expect(passes.afterSend.status).toBe('none');
+  });
+
+  it('calls the first pass done once the site can fill and knows what sends it', () => {
+    expect(passStates(bare()).beforeSend.status).toBe('high');
+  });
+
+  /**
+   * A Send button found by its *label* is the ordinary healthy case — most sites
+   * need no override — so only "none found" is work. That is `send()`'s rule, reused
+   * rather than restated.
+   */
+  it('accepts a Send button found by its label, without a saved selector', () => {
+    expect(passStates(bare({
+      submit: row({ key: 'submitSelector', status: 'high', hasSave: false }),
+    })).beforeSend.status).toBe('high');
+  });
+
+  it('holds the first pass open while the Send button or the CV is missing', () => {
+    expect(passStates(bare({
+      submit: row({ key: 'submitSelector', status: 'none', hasSave: false }),
+    })).beforeSend.status).toBe('low');
+    expect(passStates(bare({
+      fields: [row({ key: 'resume', status: 'none', hasSave: false })],
+    })).beforeSend.status).toBe('low');
+  });
+
+  /**
+   * The second pass is a saved-only test with no heuristic behind it at all, which
+   * is exactly why it needs a pass of its own: nothing on a page can be guessed to
+   * mean "this application landed", so somebody has to point at it once.
+   */
+  it('closes the second pass only on a saved confirmation', () => {
+    expect(passStates(bare()).afterSend.status).toBe('none');
+    expect(passStates(bare({
+      success: row({ key: 'successSelector', status: 'high', hasSave: true }),
+    })).afterSend.status).toBe('high');
+  });
+
+  /** Never colour alone: each pass says in words what its dot says in colour. */
+  it('gives every pass a summary as well as a status', () => {
+    const passes = passStates(bare());
+    expect(passes.beforeSend.summary.length).toBeGreaterThan(0);
+    expect(passes.afterSend.summary.length).toBeGreaterThan(0);
+  });
+
+  /** Earliest first, and `null` when there is nothing left — where the coral goes. */
+  it('names the earliest pass still wanting something', () => {
+    expect(outstandingPass(passStates(bare({
+      submit: row({ key: 'submitSelector', status: 'none', hasSave: false }),
+    })))).toBe('beforeSend');
+    expect(outstandingPass(passStates(bare()))).toBe('afterSend');
+    expect(outstandingPass(passStates(bare({
+      success: row({ key: 'successSelector', status: 'high', hasSave: true }),
+    })))).toBeNull();
   });
 });

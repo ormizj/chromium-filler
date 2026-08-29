@@ -9,7 +9,7 @@
  * jobs" sidebar) not surviving it.
  */
 import { describe, it, expect } from 'vitest';
-import { extractBlocks, blocksToText, type JobBlock } from './jobText';
+import { extractBlocks, blocksToText, clip, type JobBlock } from './jobText';
 
 function root(html: string): HTMLElement {
   const el = document.createElement('div');
@@ -190,5 +190,26 @@ describe('extractBlocks — the root is chrome too', () => {
   it('still reads an ordinary container', () => {
     expect(extractBlocks(el('<div><p>The posting.</p></div>')))
       .toEqual([{ kind: 'para', text: 'The posting.' }]);
+  });
+});
+
+/**
+ * The counterpart to `blocksToText` for the surfaces with room for a phrase rather
+ * than a posting — a setup row's note, a recorded step's label, and the picker's
+ * readout of the words it is about to save. Shared because all three are the same
+ * decision about the same text.
+ */
+describe('a phrase, for the surfaces that have room for one', () => {
+  it('collapses the source\u2019s own newlines and indentation', () => {
+    expect(clip('  Own the\n   pipeline  ', 40)).toBe('Own the pipeline');
+  });
+
+  it('marks a cut with an ellipsis, and leaves a short line alone', () => {
+    expect(clip('abcdefghij', 4)).toBe('abcd…');
+    expect(clip('abcd', 4)).toBe('abcd');
+  });
+
+  it('has something to say about nothing', () => {
+    expect(clip('   \n  ', 10)).toBe('');
   });
 });

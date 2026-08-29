@@ -1,8 +1,8 @@
 import { describe, it, expect } from 'vitest';
 import type { SiteConfig } from './types';
 import {
-  CONCEPT_HELP, CONFIG_HELP, DOT_LEGEND, PREP_HELP, REDIRECT_HELP, SETTINGS_HELP,
-  SETUP_STEP_HELP, describeConfig, type HelpEntry,
+  BIND_HELP, CONCEPT_HELP, CONFIG_HELP, DOT_LEGEND, PREP_HELP, REDIRECT_HELP,
+  SETTINGS_HELP, SETUP_STEP_HELP, describeConfig, type HelpEntry,
 } from './help';
 
 /** Every catalog, flattened, so the shape rules are asserted once for all of them. */
@@ -30,6 +30,19 @@ describe('help catalog', () => {
       expect(entry.body.trim().toLowerCase(), key).not.toBe(entry.title.trim().toLowerCase());
       expect(entry.body.trim().length, key).toBeGreaterThan(entry.title.trim().length);
     }
+  });
+
+  /**
+   * The Declare menu draws the `short` under the mark it belongs to, so an entry
+   * without one is a mark that explains itself nowhere — and the menu is the last
+   * surface where the choice is still open.
+   */
+  it('gives every mark a one-line form, quoted from the catalog it belongs to', () => {
+    for (const [key, entry] of Object.entries(BIND_HELP)) {
+      expect(entry.short?.trim(), key).toBeTruthy();
+    }
+    expect(BIND_HELP.submit).toBe(CONFIG_HELP.submitSelector);
+    expect(BIND_HELP.quickApplySelector).toBe(REDIRECT_HELP.quickApplySelector);
   });
 
   it('documents every row of every setup step', () => {

@@ -456,7 +456,7 @@ function bootSetup(): void {
     onPickSuccess: () => console.log('[harness] pick confirmation'),
     onClearSuccess: () => console.log('[harness] clear confirmation'),
     onRename: (n, p) => console.log('[harness] rename', n, p),
-    onStartRecording: (f) => console.log('[harness] start recording', f),
+    onStartRecording: () => console.log('[harness] start recording'),
     onMarkConfirmation: () => console.log('[harness] mark the confirmation'),
     onRebindStep: (id, b) => console.log('[harness] rebind step', id, b),
     onRepickStep: (id) => console.log('[harness] re-pick step', id),
@@ -533,8 +533,9 @@ function bootSetup(): void {
    */
   /**
    * A site nobody has ever taught the extension anything about: nothing saved, no
-   * page actions. That is exactly what `isUnconfigured` tests, and so what routes the
-   * panel to the offer. Named once because two states are that site — one where the
+   * page actions. That is exactly what `isUnconfigured` tests, and so what decides
+   * which shape the home screen's first pass block takes and whether the second gets
+   * a control at all. Named once because two states are that site — one where the
    * heuristics found something and one where they found nothing.
    */
   const unconfigured: Partial<SetupData> = {
@@ -607,18 +608,26 @@ function bootSetup(): void {
      * confirmation marked, which is the warning that matters most.
      */
     /**
-     * What Site setup opens on for a site nobody has configured — which is the state
-     * every new site is in, and so the most-seen screen in the whole panel.
+     * The home screen, which is where Site setup opens on **every** site — so these
+     * four states are the most-seen screen in the whole panel, and the one place the
+     * two passes are drawn as the two passes.
+     *
+     * `home-fresh` is a site nobody has configured: pass 1 has the coral, pass 2 has
+     * no control at all (there is nothing to confirm the landing of yet), and there is
+     * **no footer**. Recording is the only way to set a site up, so there is no way
+     * into the six-step form until one has produced something — and Done is withheld
+     * too, because closing a panel that taught the extension nothing is not an
+     * outcome. The one card in the panel with no footer at all, and so worth a look.
      */
-    offer: unconfigured,
+    'home-fresh': unconfigured,
     /**
-     * The offer on a page detection can see nothing on. Its own rendering because it
-     * is the shape the count line exists for — all three statuses stay on the line
+     * The same site on a page detection can see nothing on. Its own rendering because
+     * it is the shape the count line exists for — all three statuses stay on the line
      * even at zero, since the line is a key as well as a tally, and the chip row goes
      * rather than draw a heading over nothing. `BASE_SETUP`'s fixture finds five of
      * six, so it can never show either.
      */
-    'offer-empty': {
+    'home-empty': {
       ...unconfigured,
       fields: BASE_SETUP.fields.map((f) => ({
         ...f, status: 'none' as const, note: 'not found', hasSave: false,
@@ -635,15 +644,18 @@ function bootSetup(): void {
      */
     'review-external': recordedState('external'),
     /**
-     * The two ends of Save, which used to be a drop into the wizard and so had no
-     * rendering of its own at all. They are one screen with the coral on different
-     * buttons, and that swap is the whole point of it — so both need a state, or
-     * only whichever one the fixture happens to produce ever gets looked at.
+     * The other two renderings of home, and between them the whole argument of the
+     * screen: **the coral moves to whichever pass still wants something.**
      *
-     * `saved` is the ordinary outcome of a recording: the confirmation was never
-     * declared, so `send` still has work and "Review configuration" is the primary.
+     * `home-before-send` is the ordinary outcome of a first pass — the site can fill
+     * and send, and the confirmation has never been captured, so pass 2 takes the
+     * primary and "Mark the confirmation" is the next thing to do. `home-complete` is
+     * both passes in, where neither block is coral and Done is. A swap only one
+     * fixture can produce is a swap nobody looks at, so both are named.
+     *
+     * Append `&saved=1` to either to see it as the report a recording lands on.
      */
-    saved: {
+    'home-before-send': {
       success: {
         key: 'successSelector',
         label: 'Confirmation element',
@@ -652,8 +664,7 @@ function bootSetup(): void {
         hasSave: false,
       },
     },
-    /** The recording that got everything: nothing outstanding, and Done is the primary. */
-    'saved-clean': {},
+    'home-complete': {},
     external: {
       name: 'ExternalBoard',
       urlPattern: '*://*/sites/external-board.html*',
@@ -677,10 +688,10 @@ function bootSetup(): void {
   // The two review states are a mode, not data — the panel decides whether it is
   // showing them, for the same reason it owns which step is open.
   if (state.startsWith('review')) panel.showReview(true);
-  if (state.startsWith('offer')) panel.showOffer();
-  // The flow is a mode too, and cleared by the time this screen shows on a real
-  // page — so the harness names it rather than deriving it from a recording.
-  if (state.startsWith('saved')) panel.showSaved('internal');
+  // Home is where the panel opens anyway, so this is only ever re-stating it — except
+  // for `&saved=1`, the one thing on the screen that is about the press that got here
+  // rather than about the site, and so unreachable without having just recorded one.
+  if (state.startsWith('home')) panel.showHome({ saved: params.get('saved') === '1' });
 
   /**
    * What the page looks like *during* a recording: the panel folded to its pill and
@@ -704,6 +715,7 @@ function bootSetup(): void {
    */
   const BAR_STATES = [
     'recording', 'recording-armed', 'recording-reset', 'recording-held',
+    'recording-declare', 'recording-declare-external',
     'after-send', 'after-send-saved',
   ];
   if (BAR_STATES.includes(state)) {
@@ -720,9 +732,12 @@ function bootSetup(): void {
     });
     const { steps } = recordedState('internal').recording!;
     const after = state.startsWith('after-send');
+    // The one thing the leg changes is which group of marks the menu leads with, and
+    // it leads with a different one on the board of a two-step posting.
+    const flow = state.endsWith('-external') ? 'external' : 'internal';
     bar.render({
       phase: after ? 'afterSend' : 'beforeSend',
-      flow: 'internal',
+      flow,
       leg: 'posting',
       stepCount: steps.length,
       mode: state === 'recording-armed' ? 'armed' : 'idle',
@@ -735,13 +750,18 @@ function bootSetup(): void {
             + 'from now on.'
           : undefined,
     });
-    // Pressed rather than posed: the confirm is opened by the same click a user makes,
-    // so the harness cannot show a state the bar itself cannot reach.
-    if (state === 'recording-reset') {
+    // Pressed rather than posed: both popovers are opened by the same click a user
+    // makes, so the harness cannot show a state the bar itself cannot reach.
+    const press = (within: string, label: string) => {
       const host = document.getElementById(RECORDER_HOST_ID) as HTMLElement | null;
-      host?.shadowRoot?.querySelectorAll<HTMLButtonElement>('.cf-rec-exits .cf-btn')
-        .forEach((b) => { if (b.textContent === ACTION_LABELS.resetRecording) b.click(); });
-    }
+      host?.shadowRoot?.querySelectorAll<HTMLButtonElement>(`${within} .cf-btn`)
+        .forEach((b) => { if (b.textContent === label) b.click(); });
+    };
+    if (state === 'recording-reset') press('.cf-rec-exits', ACTION_LABELS.resetRecording);
+    // The menu is the surface the marks are chosen from, and it is ~26 items under
+    // four heads with a caption on four of them — none of which is on screen until
+    // something opens it, and it is the one thing here that can overflow a phone.
+    if (state.startsWith('recording-declare')) press('.cf-rec-options', ACTION_LABELS.declare);
   }
 
   // `&step=…` opens one of the six wizard steps. Each is a distinct rendering
@@ -799,6 +819,22 @@ function bootSetup(): void {
 function bootPicker(): void {
   document.body.style.cssText =
     'margin:0;padding:20px 20px 140px;font:15px/1.6 system-ui,sans-serif;background:#fff;color:#111827';
+  /*
+   * `?state=long` is a real description rather than two sentences, and it is the one
+   * that proves anything about the preview: the bar is `width: max-content`, so a
+   * posting that is not clamped stretches it to the whole viewport — which is exactly
+   * what the toolbar must not do on the phone it is being pointed at with.
+   */
+  const body = state === 'long'
+    ? `<p>Own the deployment pipeline end to end, across infrastructure, developer
+       tooling and release engineering. You will set the direction for how forty
+       engineers ship, and be accountable for the reliability of everything between a
+       merged pull request and a running service.</p>
+       <ul><li><span>Five years of production Kubernetes</span></li>
+       <li><span>Experience owning an on-call rotation</span></li></ul>`
+    : `<p>Own the deployment pipeline end to end, across infrastructure,
+       developer tooling and release engineering.</p>
+       <ul><li><span>Five years of production Kubernetes</span></li></ul>`;
   document.body.innerHTML = `
     <article id="posting">
       <section class="job-header">
@@ -808,11 +844,7 @@ function bootPicker(): void {
         </div>
       </section>
       <section class="job-description" style="margin:16px 0">
-        <div class="prose">
-          <p>Own the deployment pipeline end to end, across infrastructure,
-          developer tooling and release engineering.</p>
-          <ul><li><span>Five years of production Kubernetes</span></li></ul>
-        </div>
+        <div class="prose">${body}</div>
       </section>
       <div class="actions" style="margin-top:16px">
         <button id="send" style="padding:10px 16px;border-radius:8px;border:1px solid #d1d5db;background:#f9fafb">

@@ -144,22 +144,25 @@
              reachable on a real page only by applying to a job — so without a link
              here nobody looks at them. -->
         <div class="states">
-          <a href="./frame.html?page=setup&amp;state=offer">the offer (a new site)</a>
-          <a href="./frame.html?page=setup&amp;state=offer-empty">the offer, nothing found on the page</a>
-          <a href="./frame.html?page=setup&amp;state=offer&amp;marks=1">the offer, with the page marked up</a>
+          <a href="./frame.html?page=setup&amp;state=home-fresh">home: a new site (pass 1 is coral)</a>
+          <a href="./frame.html?page=setup&amp;state=home-empty">home: nothing found on the page</a>
+          <a href="./frame.html?page=setup&amp;state=home-fresh&amp;marks=1">home, with the page marked up</a>
           <a href="./frame.html?page=setup&amp;state=recording">recording (bar + pill)</a>
           <a href="./frame.html?page=setup&amp;state=recording-armed">recording, armed (the page is live)</a>
           <a href="./frame.html?page=setup&amp;state=recording-reset">recording, resetting (the warning behind Reset)</a>
           <a href="./frame.html?page=setup&amp;state=recording-held">recording, a send held (marked, not pressed)</a>
+          <a href="./frame.html?page=setup&amp;state=recording-declare">recording, the Declare menu open</a>
+          <a href="./frame.html?page=setup&amp;state=recording-declare-external">recording, Declare on a two-step board</a>
           <a href="./frame.html?page=setup&amp;state=after-send">after sending: point at the confirmation</a>
           <a href="./frame.html?page=setup&amp;state=after-send-saved">after sending: saved</a>
           <a href="./frame.html?page=setup&amp;state=review">review a recording</a>
           <a href="./frame.html?page=setup&amp;state=review-external">review a two-step recording</a>
-          <a href="./frame.html?page=setup&amp;state=saved">saved, with work left (Review is primary)</a>
-          <a href="./frame.html?page=setup&amp;state=saved-clean">saved, nothing left (Done is primary)</a>
+          <a href="./frame.html?page=setup&amp;state=home-before-send">home: pass 1 in, pass 2 outstanding (coral moves)</a>
+          <a href="./frame.html?page=setup&amp;state=home-complete">home: both passes in (Done is coral)</a>
+          <a href="./frame.html?page=setup&amp;state=home-before-send&amp;saved=1">home, as a recording lands on it</a>
         </div>
         <div class="states">
-          <a href="./frame.html?page=setup">quick apply (opens on the work left)</a>
+          <a href="./frame.html?page=setup&amp;step=site">the wizard, reached from a configured home</a>
           <a href="./frame.html?page=setup&amp;state=help">first run (legend)</a>
           <a href="./frame.html?page=setup&amp;state=external&amp;step=kind">external posting</a>
           <a href="./frame.html?page=setup&amp;state=cv-steps&amp;step=prep">CV needs confirming</a>
@@ -187,6 +190,7 @@
         <div class="states">
           <a href="./frame.html?page=picker">pick the description</a>
           <a href="./frame.html?page=picker&amp;label=Send%20button">pick the Send button</a>
+          <a href="./frame.html?page=picker&amp;state=long">pick a full-length description</a>
         </div>
         <iframe src="./frame.html?page=picker" title="Element picker harness, phone width"></iframe>
       </div>

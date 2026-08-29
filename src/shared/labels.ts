@@ -16,7 +16,7 @@
 
 import type { JobUrlStatus, MatchConfidence } from './types';
 import type { ExportField } from './jobExport';
-import type { ConfigBindKey, RecordFlow, RecordLeg } from './recording';
+import type { ConfigBindKey, MarkGroupId, RecordLeg, RecordPhase } from './recording';
 import type { SelectorStrength } from './selector';
 import type { RowStatus } from './setupSteps';
 
@@ -132,12 +132,13 @@ export const FLOW_TEXT: Record<FlowKey, FlowText> = {
   },
   // `applyState` tests the confirmation *before* the button, so a site missing
   // both only ever reaches this one — and the old wording sent the user off to
-  // set the confirmation, only for Apply to stay grey with a new complaint. Both
-  // rows live on the same step, so naming the step rather than the row costs a
-  // word and ends the second trip.
+  // set the confirmation, only for Apply to stay grey with a new complaint. So it
+  // names the surface that fixes both halves rather than one row: it used to send
+  // the user to the wizard's Sending step, which is not a place an unrecorded site
+  // can be reached from at all.
   noConfirmation: {
     title: 'Apply is unavailable here',
-    detail: 'This site has no confirmation element set, so a result cannot be read back. Set it under Site setup → Sending, along with the Send button if that is unset too.',
+    detail: 'This site has no confirmation element set, so a result cannot be read back. Open Site setup and record this site — the first pass marks the Send button, and “Mark the confirmation” captures the message the site shows back.',
   },
   /**
    * The one state here that is not a report but an offer.
@@ -199,7 +200,6 @@ export type ActionKey =
   | 'interactArmed'
   | 'declare'
   | 'applyFinishSetup'
-  | 'markConfirmation'
   | 'notTheSendButton'
   | 'notYet'
   | 'keepAsClick'
@@ -266,9 +266,6 @@ export const ACTION_LABELS: Record<ActionKey, string> = {
   // not decoration: this is the one Apply that starts a second job after sending,
   // and the vocabulary rule ("our action is Apply") is kept by leading with the verb.
   applyFinishSetup: 'Apply · finish setup',
-  // The whole of the after-sending bar. Not "Declare…": there is exactly one thing
-  // to name here, so a menu would be a list of one.
-  markConfirmation: 'Mark the confirmation',
   // The way out of a held press. `looksLikeSend` matches "apply" and "finish", and on
   // most boards the button that *opens* the form says "Apply now" — so the guess has
   // to be refusable in one press, or the first pass cannot be run on those sites at
@@ -298,42 +295,69 @@ export const ACTION_LABELS: Record<ActionKey, string> = {
 /* ---------------- The two ways to set a site up by doing it once ---------------- */
 
 /**
- * The two shapes an application comes in, as the user is asked to name them.
+ * The two passes, named once, for every surface that draws one.
  *
- * They name **where the application gets made**, not what the extension will do,
- * because that is the question someone looking at a posting can actually answer.
- * The `detail` is the whole reason this is a `Record<>` of objects rather than two
- * strings in `ACTION_LABELS`: as bare labels the two buttons asked a question the
- * screen never explained, and "this site" and "the employer's site" are the same
- * words a board uses for two different things.
+ * Setting a site up follows the application, and an application has two halves. That
+ * split is now the shape of the setup panel's home screen, of the recorder bar's two
+ * shapes, and of the rule deciding what may be declared where (`marksFor`) — so the
+ * words for it have to be in one place or the three will disagree. They were in
+ * none: "Before sending" and its paragraph were written inline into
+ * `setupPanel.passes()`, a second time into its saved screen, and the bar's own
+ * `aria-label` said something different again.
  *
- * `Record<RecordFlow, …>`, so a third flow fails `npm run typecheck` until it is
- * both named and explained — the same guard `help.ts` gets from keying off
- * `SiteConfig`. This is the one home for these strings: they were duplicated into
- * `ACTION_LABELS` as well, which is the drift this file exists to prevent.
+ * `Record<RecordPhase, …>`, so a third pass cannot ship unnamed — the same guard
+ * `SETUP_STEP_TITLES` gives the wizard's steps.
+ *
+ * This replaces `RECORD_FLOW_TEXT`, which asked the user a third question — "does
+ * this posting apply here or on the employer's site?" — that they usually cannot
+ * answer and that `compileRecording` then overruled anyway (rule 1). The classifier
+ * on the page already knows, so the recording takes its hint from there and the
+ * screen asks about the passes instead.
  */
-export const RECORD_FLOW_TEXT: Record<RecordFlow, { label: string; detail: string }> = {
-  internal: {
-    label: 'Apply on this site',
-    detail: 'The application form is on this page — I fill it in and send it from here.',
+export const RECORD_PASS_TEXT: Record<RecordPhase, {
+  /** The pass's name, on the home screen and in the review. */
+  name: string;
+  /** What it is and what it costs — the button's caption as much as the block's. */
+  lead: string;
+  /** The control that starts it. */
+  action: string;
+  /**
+   * The same control once this pass has already produced something.
+   *
+   * A pass can be wrong as well as missing — a confirmation captured off the wrong
+   * banner, a recording that identified the Send button as the "Save job" beside it —
+   * so both blocks keep a way back in once they are settled. It is a separate word
+   * rather than the same one because "Record the first pass" on a site that has
+   * already been recorded reads as though nothing was saved.
+   *
+   * Here and not in `ACTION_LABELS` for the reason `markConfirmation` is: it is one
+   * pass's own verb, and the same label in two catalogs is the drift this file exists
+   * to stop.
+   */
+  again: string;
+  /** The recorder bar's toolbar name while this pass runs. Spoken, never shown. */
+  aria: string;
+}> = {
+  beforeSend: {
+    name: 'Before sending',
+    // "Nothing is submitted" is the fact people were right to hesitate over, and it
+    // has to be in the caption rather than behind a `?`: the honest reading of "apply
+    // to one job while it watches" is that an application is about to go out.
+    lead: 'Apply as you normally would and say what you are doing. It ends by marking '
+      + 'the button that sends it — pointed at, not pressed. Nothing is submitted.',
+    action: 'Record the first pass',
+    again: 'Record it again',
+    aria: 'Recording this site',
   },
-  external: {
-    label: 'Apply on the employer’s site',
-    detail: 'Applying here opens the employer’s own site, and I fill the form there.',
+  afterSend: {
+    name: 'After sending',
+    lead: 'The message this site shows once an application has really gone in. It '
+      + 'does not exist until then, so it is captured the first time you press Apply.',
+    action: 'Mark the confirmation',
+    again: 'Mark it again',
+    aria: 'Finishing this site’s setup',
   },
 };
-
-/**
- * Why the choice above is safe to get wrong, said on the screen that asks it.
- *
- * `compileRecording` derives the flow from the legs the steps actually arrived on,
- * so the pick only ever orders the recorder bar's Declare menu. That fact lived in
- * `CONCEPT_HELP.recording.when` — which the offer screen does not render — so the
- * one sentence that turns a fork in the road back into a preference was invisible
- * exactly where the fork is. Not per-flow, so it is a sibling rather than a third key.
- */
-export const RECORD_FLOW_HINT = 'Not sure? Pick either — the setup is saved from '
-  + 'what actually happens, not from what you pick here.';
 
 /**
  * What Reset is about to do, in words, before it does it.
@@ -402,6 +426,38 @@ export const BIND_LABELS: Record<ConfigBindKey, string> = {
   quickApplySelector: 'Quick-apply marker',
   markerSelector: 'External marker',
 };
+
+/**
+ * The heads the marks are read under. `Record<MarkGroupId, …>`, so a fifth kind of
+ * mark cannot ship unnamed — the same rule as `BIND_LABELS` above it.
+ *
+ * The first two are why there is more than one head. Sending the application from
+ * this page and handing it off to the employer are opposite answers to the same
+ * question, and under one head the four marks read as a list of interchangeable
+ * things to point at. The words echo the distinction the wizard's `kind` step
+ * already draws in `REDIRECT_GROUPS`; they are shorter here because a menu item is
+ * read on the way past, not as a conclusion.
+ */
+export const MARK_GROUP_TEXT: Record<MarkGroupId, string> = {
+  sending: 'Applying on this page',
+  leaving: 'Applying on the employer\u2019s site',
+  info: 'What the posting says',
+  fields: 'Form fields',
+};
+
+/**
+ * Why a field that was just declared is still empty.
+ *
+ * Declaring a field fills it, which is the whole point — a wrong box is obvious the
+ * moment the wrong value lands in it. So a box that stays empty has to say why, or
+ * the one feature that proves the pick worked reads as the pick having failed.
+ * Built rather than looked up, for `heldSendNotice`'s reason: it is about *that*
+ * field, and naming it back is most of what makes it actionable.
+ */
+export function emptyProfileNotice(label: string): string {
+  return `Marked as “${label}”, but there is nothing in your profile to put there yet. `
+    + 'Options → Profile is where that is filled in; the mark is saved either way.';
+}
 
 /**
  * How much a selector is worth, in words. A strength is drawn as a status dot, and

@@ -28,13 +28,15 @@
  * user is working in.
  */
 
-import { ACTION_LABELS, BIND_LABELS, resetRecordingPrompt } from '../shared/labels';
-import { FIELD_LABELS, orderFields } from '../shared/fieldKeys';
-import { TEXT_FIELDS } from '../shared/fieldKeys';
+import {
+  ACTION_LABELS, BIND_LABELS, MARK_GROUP_TEXT, RECORD_PASS_TEXT, resetRecordingPrompt,
+} from '../shared/labels';
+import { BIND_HELP } from '../shared/help';
+import { FIELD_LABELS } from '../shared/fieldKeys';
 import type { FieldKey } from '../shared/types';
 import {
-  isFieldBind, type BindKey, type ConfigBindKey, type RecordFlow, type RecordLeg,
-  type RecordPhase, type RecordedStep,
+  isFieldBind, markGroups, marksFor, type BindKey, type ConfigBindKey,
+  type MarkGroupId, type RecordFlow, type RecordLeg, type RecordPhase, type RecordedStep,
 } from '../shared/recording';
 import type { RecorderMode } from './recorder';
 import { BASE_CSS } from '../ui/shadowCss';
@@ -84,33 +86,13 @@ export interface RecorderBarState {
   notice?: string;
 }
 
-const INFO_MARKS: ConfigBindKey[] = [
-  'jobTitle', 'jobDescription', 'jobRequirements', 'company', 'location', 'employmentType',
-];
-
 /**
- * How the application leaves this page, most likely first — **re-ordered, never
- * filtered**.
- *
- * Ordering by flow is worth doing: on the board half of a two-step posting the apply
- * link is what there is to mark, and on a quick-apply posting it is the one thing
- * there is not. Filtering by it was a bug, and a bad one. The board and the
- * employer's site are two legs of the *same* recording, so keying the list off the
- * flow alone left the destination leg — the page where the application is actually
- * sent — with no way to mark the Send button or the confirmation at all. An E2E
- * caught it; a user would have found a recording that could not be finished.
- *
- * So the leg decides the order and nothing decides the contents. A mark that is
- * unlikely here costs a line in a menu; a mark that is missing costs the recording.
+ * Which groups draw a caption under each mark. The two that decide how an
+ * application is sent, and no others: a field's name is its own explanation, and
+ * `What the posting says` is explained by the head the six sit under — twenty-two
+ * more captions turn a 60vh list into a wall of prose.
  */
-function flowMarks(flow: RecordFlow, leg: RecordLeg): ConfigBindKey[] {
-  const sending: ConfigBindKey[] = ['submit', 'success'];
-  const leaving: ConfigBindKey[] = ['applySelector', 'markerSelector', 'quickApplySelector'];
-  // Only one page is ever about leaving: the posting of a recording that hands off.
-  return flow === 'external' && leg === 'posting'
-    ? [...leaving, ...sending]
-    : [...sending, ...leaving];
-}
+const HINTED = new Set<MarkGroupId>(['sending', 'leaving']);
 
 export class RecorderBar {
   private host: HTMLElement;
@@ -180,9 +162,7 @@ export class RecorderBar {
 
     const bar = el('div', 'cf-bar');
     bar.setAttribute('role', 'toolbar');
-    bar.setAttribute('aria-label', data.phase === 'afterSend'
-      ? 'Finishing this site’s setup'
-      : 'Recording this site');
+    bar.setAttribute('aria-label', RECORD_PASS_TEXT[data.phase].aria);
     if (data.phase === 'afterSend') bar.classList.add('cf-bar-after');
     // The held send's explanation is a paragraph, and a paragraph cannot share a row
     // with four controls — see the wrap rule in `recorderBar.css`. Only on the first
@@ -298,22 +278,46 @@ export class RecorderBar {
       this.cb.onDeclare(bind);
     };
 
-    // What the flow still needs leads, because those are the marks that cannot be
-    // made later: the confirmation only exists for as long as it is on screen.
-    const groups: Array<[string, BindKey[]]> = [
-      ['This application', flowMarks(data.flow, data.leg)],
-      ['What the posting says', INFO_MARKS],
-      ['Form fields', fieldMarks()],
-    ];
+    /*
+     * Every mark this pass is allowed to make, in one list, grouped for reading.
+     *
+     * `marksFor` is the whole of the decision and it lives in `shared/recording.ts`,
+     * because the compiler enforces the same rule from the other end and two copies
+     * of "what belongs to which pass" is how the menu and the config drift apart. It
+     * is what takes the Confirmation out of the first pass: that element does not
+     * exist until an application has really gone in, so offering it here asked the
+     * user to point at something that is not on the page.
+     *
+     * What the application still needs leads, because those are the marks that are
+     * hardest to come back for.
+     */
+    const groups = markGroups(marksFor(data.phase, data.flow, data.leg));
 
-    for (const [head, keys] of groups) {
+    for (const { id, keys } of groups) {
       const pending = keys.filter((k) => !data.bound.includes(k));
       const shown = pending.length ? pending : keys;
-      menu.append(text('div', head, 'cf-rec-menu-head'));
+      menu.append(text('div', MARK_GROUP_TEXT[id], 'cf-rec-menu-head'));
       for (const key of shown) {
-        const b = btn(bindLabel(key), () => choose(key), 'btn-ghost');
+        const b = btn('', () => choose(key), 'btn-ghost');
         b.setAttribute('role', 'menuitem');
+        b.append(text('span', bindLabel(key), 'cf-rec-menu-label'));
         if (data.bound.includes(key)) b.append(text('span', ' ✓'));
+        // Only the marks that decide how an application is sent. Their names are
+        // terms of art — "Quick-apply marker" says nothing on its own, and this is
+        // the last surface where the choice is still open. Drawn rather than hidden
+        // behind hover, because the priority target is a phone and has none.
+        const hint = !isFieldBind(key) && HINTED.has(id) ? BIND_HELP[key].short : undefined;
+        if (hint) {
+          // Described by, not labelled by. The item's name is the mark's name — that
+          // is what the compiler stores and what every other surface calls it — and a
+          // caption folded into the name would have a screen reader announce the whole
+          // sentence where the list says "Send button".
+          const note = text('span', hint, 'cf-rec-menu-hint');
+          note.id = `cf-hint-${key}`;
+          b.setAttribute('aria-label', bindLabel(key));
+          b.setAttribute('aria-describedby', note.id);
+          b.append(note);
+        }
         menu.append(b);
       }
     }
@@ -389,7 +393,7 @@ export class RecorderBar {
     }
     wrap.append(
       inWrap(btn(ACTION_LABELS.notYet, () => this.cb.onDone())),
-      inWrap(btn(ACTION_LABELS.markConfirmation, () => this.cb.onMarkConfirmation(), 'primary')),
+      inWrap(btn(RECORD_PASS_TEXT.afterSend.action, () => this.cb.onMarkConfirmation(), 'primary')),
     );
     return wrap;
   }
@@ -524,17 +528,6 @@ export function bindLabel(key: BindKey): string {
     return FIELD_LABELS[field] ?? field;
   }
   return BIND_LABELS[key as ConfigBindKey] ?? key;
-}
-
-/**
- * The CV first, then the rest in reading order — `FIELD_ORDER`'s job, reused.
- *
- * Exported because the review's per-step dropdown offers the same sixteen fields,
- * and two lists of them in two files is the drift the label catalog exists to stop.
- */
-export function fieldMarks(): BindKey[] {
-  const fields: FieldKey[] = ['resume', ...TEXT_FIELDS];
-  return orderFields(fields, (f) => f, () => false).map((f) => `field:${f}` as BindKey);
 }
 
 function clock(totalSeconds: number): string {

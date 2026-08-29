@@ -14,7 +14,8 @@ import {
   RecorderBar, bindLabel, type RecorderBarCallbacks, type RecorderBarState,
 } from './recorderBar';
 import type { BindKey } from '../shared/recording';
-import { ACTION_LABELS, heldSendNotice } from '../shared/labels';
+import { ACTION_LABELS, MARK_GROUP_TEXT, RECORD_PASS_TEXT, heldSendNotice } from '../shared/labels';
+import { BIND_HELP } from '../shared/help';
 import { RECORDER_HOST_ID } from './extensionUi';
 
 const noop = () => {};
@@ -51,6 +52,9 @@ function button(s: ShadowRoot, label: string): HTMLButtonElement {
   return [...s.querySelectorAll<HTMLButtonElement>('.cf-btn')]
     .find((b) => b.textContent === label)!;
 }
+
+/** What a menu item is called, which is now one line of two. */
+const itemLabel = (item: Element) => item.querySelector('.cf-rec-menu-label')?.textContent;
 
 /** Open the Declare menu the way a user does. */
 function openMenu(s: ShadowRoot): void {
@@ -264,11 +268,107 @@ describe('picking something out of the Declare menu', () => {
     const shadow = render(state(), callbacks({ onDeclare: (b) => chosen.push(b) }));
     openMenu(shadow);
     const first = [...shadow.querySelectorAll<HTMLButtonElement>('[role="menuitem"]')][0];
-    const label = first.textContent;
+    const label = itemLabel(first);
     first.click();
 
     expect(chosen).toHaveLength(1);
     expect(label).toBe(bindLabel(chosen[0]));
+  });
+
+  /**
+   * Rule 11, where the user meets it. The confirmation does not exist until an
+   * application has really gone in, and the first pass deliberately stops short of
+   * sending one — so offering it here asked the user to point at something that is
+   * not on the page, and a mark made anyway would be a `successSelector` captured
+   * off a page that was never a confirmation.
+   *
+   * `marksFor` is the one answer and the compiler enforces the same one, so this
+   * asserts the menu really is built from it rather than from a list of its own.
+   */
+  it('never offers the confirmation during the first pass, on either leg', () => {
+    for (const leg of ['posting', 'destination'] as const) {
+      const shadow = render(state({ flow: 'external', leg }));
+      openMenu(shadow);
+      const items = [...shadow.querySelectorAll('[role="menuitem"]')].map(itemLabel);
+      expect(items).not.toContain(bindLabel('success'));
+      // …and the Send button is on both, because the leg only ever re-orders. It
+      // was filtered once, which left the page the application is really sent from
+      // with no way to mark the one control that sends it.
+      expect(items).toContain(bindLabel('submit'));
+      bar?.destroy();
+      bar = undefined;
+    }
+  });
+
+  /**
+   * The four marks that decide how an application is sent read as one undifferentiated
+   * list under a head saying "This application" — and two of them are about sending
+   * from this page while the other two are about handing off to the employer, which
+   * are opposite answers to the same question.
+   */
+  it('separates sending from this page from handing off to the employer', () => {
+    const shadow = render();
+    openMenu(shadow);
+    const heads = [...shadow.querySelectorAll('.cf-rec-menu-head')].map((h) => h.textContent);
+    expect(heads).toEqual([
+      MARK_GROUP_TEXT.sending, MARK_GROUP_TEXT.leaving,
+      MARK_GROUP_TEXT.info, MARK_GROUP_TEXT.fields,
+    ]);
+  });
+
+  /** The bar renders the grouping; it does not own one. */
+  it('leads with the way out on the board of a two-step posting', () => {
+    const shadow = render(state({ flow: 'external', leg: 'posting' }));
+    openMenu(shadow);
+    expect(shadow.querySelector('.cf-rec-menu-head')!.textContent).toBe(MARK_GROUP_TEXT.leaving);
+  });
+
+  /**
+   * A label alone does not say what a "Quick-apply marker" is, and the menu is the
+   * last place the choice is still open. The caption is drawn rather than hidden
+   * behind hover: the priority target is a phone, where there is no hover.
+   */
+  it('explains each of the four marks that decide how an application is sent', () => {
+    const shadow = render();
+    openMenu(shadow);
+    const hintFor = (key: 'submit' | 'quickApplySelector' | 'applySelector' | 'markerSelector') =>
+      [...shadow.querySelectorAll('[role="menuitem"]')]
+        .find((b) => itemLabel(b) === bindLabel(key))
+        ?.querySelector('.cf-rec-menu-hint')?.textContent;
+    for (const key of ['submit', 'quickApplySelector', 'applySelector', 'markerSelector'] as const) {
+      expect(hintFor(key), key).toBe(BIND_HELP[key].short);
+    }
+  });
+
+  /**
+   * And nowhere else. Twenty-two more captions turn a 60vh list into a wall, and
+   * these two groups are already explained by the head they sit under — a field's
+   * name *is* its explanation.
+   */
+  it('leaves the posting facts and the profile fields to speak for themselves', () => {
+    const shadow = render();
+    openMenu(shadow);
+    const hinted = [...shadow.querySelectorAll('[role="menuitem"]')]
+      .filter((b) => b.querySelector('.cf-rec-menu-hint'))
+      .map(itemLabel);
+    expect(hinted).not.toContain(bindLabel('field:email'));
+    expect(hinted).not.toContain(bindLabel('jobDescription'));
+    expect(hinted).toHaveLength(4);
+  });
+
+  /**
+   * The caption is the item's *description*, never part of its name. Folded into the
+   * name a screen reader would announce a whole sentence where the list says "Send
+   * button" — and every other surface, the compiler included, calls it that.
+   */
+  it('keeps a captioned mark named after the mark', () => {
+    const shadow = render();
+    openMenu(shadow);
+    const item = [...shadow.querySelectorAll('[role="menuitem"]')]
+      .find((b) => itemLabel(b) === bindLabel('submit'))!;
+    expect(item.getAttribute('aria-label')).toBe(bindLabel('submit'));
+    expect(shadow.getElementById(item.getAttribute('aria-describedby')!)?.textContent)
+      .toBe(BIND_HELP.submit.short);
   });
 
   it('leaves the toggle saying the menu is shut, so pressing it opens one', () => {
@@ -331,7 +431,7 @@ describe('the after-sending bar', () => {
 
   it('asks for the one mark, and nothing else', () => {
     const s = after();
-    expect(button(s, ACTION_LABELS.markConfirmation)).toBeTruthy();
+    expect(button(s, RECORD_PASS_TEXT.afterSend.action)).toBeTruthy();
     expect(button(s, ACTION_LABELS.notYet)).toBeTruthy();
     // No page to hand back, and nothing recorded to take back.
     for (const gone of [
@@ -344,7 +444,7 @@ describe('the after-sending bar', () => {
     const s = after();
     const primaries = [...s.querySelectorAll('.cf-btn.primary')];
     expect(primaries).toHaveLength(1);
-    expect(primaries[0].textContent).toBe(ACTION_LABELS.markConfirmation);
+    expect(primaries[0].textContent).toBe(RECORD_PASS_TEXT.afterSend.action);
   });
 
   /**
@@ -361,7 +461,7 @@ describe('the after-sending bar', () => {
   it('reaches the picker through its one button', () => {
     let marked = 0;
     const s = render(state({ phase: 'afterSend' }), callbacks({ onMarkConfirmation: () => { marked += 1; } }));
-    button(s, ACTION_LABELS.markConfirmation).click();
+    button(s, RECORD_PASS_TEXT.afterSend.action).click();
     expect(marked).toBe(1);
   });
 
@@ -373,7 +473,7 @@ describe('the after-sending bar', () => {
   it('turns into its own report once the mark lands', () => {
     const s = after({ notice: 'Saved. This site can read its own confirmations now.' });
     expect(s.querySelector('.cf-rec-what')?.textContent).toContain('Saved.');
-    expect(button(s, ACTION_LABELS.markConfirmation)).toBeUndefined();
+    expect(button(s, RECORD_PASS_TEXT.afterSend.action)).toBeUndefined();
     expect(button(s, ACTION_LABELS.done)).toBeTruthy();
   });
 

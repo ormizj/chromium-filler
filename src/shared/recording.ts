@@ -26,6 +26,14 @@
  * adopted as `submitSelector` rather than replayed. This is *"Never submit
  * unprompted"* expressed where a recording could otherwise break it.
  *
+ * **Rule 11 is the other safety rule, and it is about the two passes.** The page has
+ * two halves and so does teaching the extension about it, so each pass may only speak
+ * about its own: everything up to the Send button belongs to `beforeSend`, and the
+ * site's confirmation — which does not exist until an application has really gone in
+ * — belongs to `afterSend` and to nothing else. `marksFor` is what the surfaces
+ * offer; `phaseAllowsBind` is what the compiler enforces, because a recording
+ * outlives the menu it was made from.
+ *
  * **A recording carries where things went, never what was typed.** The user is
  * filling in their real name, address and salary expectation while this runs.
  * `RecordedStep` has no value field, and a test asserts nothing typed survives into
@@ -34,6 +42,7 @@
 
 import type { FieldKey, PrepStep, RedirectConfig, SiteConfig } from './types';
 import type { SelectorPick } from './selector';
+import { TEXT_FIELDS, orderFields } from './fieldKeys';
 import { looksLikeSend } from './submitDetect';
 
 /* ---------------- The model ---------------- */
@@ -64,6 +73,14 @@ export type RecordFlow = 'internal' | 'external';
  */
 export type RecordPhase = 'beforeSend' | 'afterSend';
 
+/**
+ * The two passes in the order they can happen, which is also the order anything
+ * that lists them must draw them in. The second cannot be run until the first has
+ * produced a site that can fill and send, so a screen that led with it would be
+ * offering the end of the job first.
+ */
+export const RECORD_PASS_ORDER: readonly RecordPhase[] = ['beforeSend', 'afterSend'] as const;
+
 /** Which of an external flow's two pages — and so which config — a step belongs to. */
 export type RecordLeg = 'posting' | 'destination';
 
@@ -90,6 +107,124 @@ const EXTRACT_BINDS = new Set<ConfigBindKey>([
 const REDIRECT_BINDS = new Set<ConfigBindKey>([
   'applySelector', 'quickApplySelector', 'markerSelector',
 ]);
+
+/* ---------------- What each pass may speak about ---------------- */
+
+/** What the posting says about itself — the same six slots as `EXTRACT_BINDS`. */
+const INFO_MARKS: ConfigBindKey[] = [
+  'jobTitle', 'jobDescription', 'jobRequirements',
+  'company', 'location', 'employmentType',
+];
+
+/**
+ * The CV first, then the rest in reading order — `FIELD_ORDER`'s job, reused.
+ *
+ * Pure and here rather than in the bar that draws it, because three surfaces read
+ * the same list: the Declare menu, the review's per-step dropdown, and the phase
+ * rule below. Three copies of the same sixteen keys is the drift `labels.ts` exists
+ * to stop everywhere else.
+ */
+export function fieldMarks(): BindKey[] {
+  const fields: FieldKey[] = ['resume', ...TEXT_FIELDS];
+  return orderFields(fields, (f) => f, () => false).map((f) => `field:${f}` as BindKey);
+}
+
+/**
+ * Everything the **after-sending** pass is allowed to say, and it is one thing.
+ *
+ * The pass runs over a page the user has really applied on: the form is gone, the
+ * fields are gone, and the only element that exists now and did not exist a moment
+ * ago is the site's reply. Anything else marked here would be marked against a page
+ * no later visit ever sees.
+ */
+const AFTER_SEND_MARKS: BindKey[] = ['success'];
+
+/**
+ * What may be declared in this pass, on this page, most likely first.
+ *
+ * **The phase filters; the leg only orders.** Those are two different rules and
+ * conflating them has already caused one bug each way round.
+ *
+ * The phase really is a filter, and the confirmation is the whole of it: it does
+ * not exist until an application has gone in, and the first pass deliberately stops
+ * short of sending one. Offering it there asked the user to point at something that
+ * is not on the page — and, worse, a mark made against the wrong page compiles into
+ * `successSelector`, which is the one selector that decides whether an application
+ * is ever recorded as applied.
+ *
+ * The leg must **never** filter, and did once. The board and the employer's site are
+ * two legs of the *same* recording, so keying the list off the flow alone left the
+ * destination leg — the page where the application is actually sent — with no way to
+ * mark the Send button at all. Ordering by it is worth doing: on the board half of a
+ * two-step posting the apply link is what there is to mark, and on a quick-apply
+ * posting it is the one thing there is not. A mark that is unlikely here costs a
+ * line in a menu; a mark that is missing costs the recording.
+ */
+export function marksFor(phase: RecordPhase, flow: RecordFlow, leg: RecordLeg): BindKey[] {
+  if (phase === 'afterSend') return [...AFTER_SEND_MARKS];
+  const sending: ConfigBindKey[] = ['submit'];
+  const leaving: ConfigBindKey[] = ['applySelector', 'markerSelector', 'quickApplySelector'];
+  // Only one page is ever about leaving: the posting of a recording that hands off.
+  const flowMarks = flow === 'external' && leg === 'posting'
+    ? [...leaving, ...sending]
+    : [...sending, ...leaving];
+  return [...flowMarks, ...INFO_MARKS, ...fieldMarks()];
+}
+
+/**
+ * Which head a mark is drawn under. Four kinds, and the first two are the point of
+ * there being more than one: sending the application from this page and handing it
+ * off to the employer are opposite answers to the same question, and they sat under
+ * one head reading "This application" with nothing separating them.
+ */
+export type MarkGroupId = 'sending' | 'leaving' | 'info' | 'fields';
+
+/**
+ * The confirmation groups with `sending` because that is what it is — the site's
+ * reply to an application sent from this page. It only ever surfaces in the review's
+ * select; the after-sending bar offers one mark and so draws no menu at all.
+ */
+export function markGroupOf(key: BindKey): MarkGroupId {
+  if (isFieldBind(key)) return 'fields';
+  if (EXTRACT_BINDS.has(key)) return 'info';
+  if (key === 'applySelector' || key === 'markerSelector') return 'leaving';
+  return 'sending';
+}
+
+/**
+ * The marks of one pass, bucketed for reading. Pure, and here rather than in the bar
+ * that draws it, because two surfaces render these groups — the Declare menu and the
+ * review's per-step select — and a recording is corrected in the second having been
+ * made from the first.
+ *
+ * **It groups; it does not sort.** `marksFor` has already put the marks in the order
+ * this page is about, so the groups come out in order of first appearance and the
+ * leg rule keeps working with nothing here knowing about legs: on the board of a
+ * two-step posting the leaving marks lead, and so does their group. A kind this pass
+ * has none of yields no group, so a head is never drawn over nothing.
+ */
+export function markGroups(marks: BindKey[]): Array<{ id: MarkGroupId; keys: BindKey[] }> {
+  const out: Array<{ id: MarkGroupId; keys: BindKey[] }> = [];
+  for (const key of marks) {
+    const id = markGroupOf(key);
+    const group = out.find((g) => g.id === id);
+    if (group) group.keys.push(key);
+    else out.push({ id, keys: [key] });
+  }
+  return out;
+}
+
+/**
+ * The same answer as a predicate, for the compiler.
+ *
+ * It asks about the phase alone — `marksFor`'s leg argument only ever reorders — so
+ * a bind is judged by which pass it arrived in and never by which page of a handoff.
+ * Rule 10 is what decides the leg, and it is a separate check for a separate reason.
+ */
+export function phaseAllowsBind(phase: RecordPhase, key: BindKey): boolean {
+  if (phase === 'afterSend') return AFTER_SEND_MARKS.includes(key);
+  return !AFTER_SEND_MARKS.includes(key);
+}
 
 export interface RecordedStep {
   id: string;
@@ -185,8 +320,11 @@ export const RECORDING_WARNINGS = {
     + 'while it is there.',
   adoptedSubmit: 'A button that looks like it sends the application was treated as the '
     + 'Send button rather than replayed as a step. Check it is the right one.',
-  sendOnWrongLeg: 'The Send button or confirmation was marked on the posting, but this '
-    + 'application is made on the employer’s site. Those marks were dropped.',
+  sendOnWrongLeg: 'The Send button was marked on the posting, but this application is '
+    + 'made on the employer’s site. That mark was dropped.',
+  wrongPhase: 'Something was marked that does not belong to this pass — the '
+    + 'confirmation is captured after an application has really gone in, not before. '
+    + 'Those marks were dropped.',
   fragileTargets: 'Some steps could only be identified by their position on the page, '
     + 'which breaks when the site changes. Re-pick them if you can.',
 } as const;
@@ -236,6 +374,8 @@ const selectorOf = (s: RecordedStep): string | undefined => s.target?.selector;
 
 interface LegOptions {
   url: string;
+  /** Which pass this is. It decides what a bind is *allowed* to be — see rule 11. */
+  phase: RecordPhase;
   /** Whether the application is sent on this leg — see rule 10. */
   sends: boolean;
   /** The posting leg carries the redirect block; the destination never does. */
@@ -264,6 +404,20 @@ function buildPatch(steps: RecordedStep[], opts: LegOptions): ConfigPatch {
   const fieldSelectors = new Set<string>();
 
   for (const [key, sel] of binds) {
+    /*
+     * Rule 11: a pass only writes what it owns.
+     *
+     * The menu the mark was chosen from is already filtered by `marksFor`, so
+     * nothing a user does today can reach this — but a recording is kept in
+     * `chrome.storage.session` and survives an extension update, and a rebind in the
+     * review is a raw `BindKey`. The consequence of getting it wrong is the worst one
+     * here: a `successSelector` captured on a page that was never a confirmation
+     * makes every later fill on the site report itself as applied.
+     */
+    if (!phaseAllowsBind(opts.phase, key)) {
+      opts.warn(RECORDING_WARNINGS.wrongPhase);
+      continue;
+    }
     if (isFieldBind(key)) {
       fieldSelectors.add(sel);
       const field = fieldOf(key);
@@ -378,6 +532,7 @@ export function compileRecording(rec: Recording): CompiledSetup {
     const warnings: string[] = [];
     const patch = buildPatch(steps, {
       url: rec.postingUrl,
+      phase,
       sends: true,
       isPosting: false,
       external: false,
@@ -400,12 +555,13 @@ export function compileRecording(rec: Recording): CompiledSetup {
   const destSteps = steps.filter((s) => s.leg === 'destination');
 
   const posting = buildPatch(postingSteps, {
-    url: rec.postingUrl, sends: !external, isPosting: true, external, warn,
+    url: rec.postingUrl, phase, sends: !external, isPosting: true, external, warn,
   });
 
   const destination = external
     ? buildPatch(destSteps, {
       url: rec.destinationUrl ?? destSteps[0]?.url ?? '',
+      phase,
       sends: true,
       isPosting: false,
       external,

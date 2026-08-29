@@ -464,21 +464,23 @@ function initHelp(): void {
   const trouble: HelpEntry[] = [
     {
       title: 'Nothing was filled at all',
-      // The two halves are fixed in two different places, and saying so matters:
-      // the wizard has no `waitFor` row — it is one of the keys only the JSON
-      // editor reaches, which `SETUP_STEP_HELP.site.rows` already says — so
-      // sending both errands to the panel left the second one unfindable.
+      // Both halves land on the JSON now. The panel's six-step form is only
+      // reachable once a site has been recorded — which is exactly what a page with
+      // no matching config has not been — so sending the URL-pattern errand there
+      // would name a screen that is not on offer. `waitFor` never had a row at all,
+      // which `SETUP_STEP_HELP.site.rows` already says.
       body: 'Either no site config matches this URL — the popup says “no config” — or '
-        + 'the form had not loaded yet. For the first, open the posting, press “Set up '
-        + 'this site” and widen the URL pattern on step 1. For the second, give the site '
-        + 'a `waitFor` selector: it has no row in the wizard, so use “Advanced (JSON)” '
-        + 'there, or edit the config under Sites here.',
+        + 'the form had not loaded yet. For the first, open the posting and press “Set '
+        + 'up this site” to record it; if the site is already set up and only a sister '
+        + 'page is unrecognised, widen its URL pattern under Sites here. For the second, '
+        + 'give the site a `waitFor` selector, which is a JSON-only key — edit the '
+        + 'config under Sites.',
     },
     {
       title: 'One field stayed grey',
-      body: 'The guessing found nothing for it. In the setup panel press Pick on that '
-        + 'row and tap the real input on the page; the selector is saved for this site '
-        + 'and it will be right every time after that.',
+      body: 'The guessing found nothing for it. In the review card\u2019s Fields tab press '
+        + 'Pick on that row and tap the real input on the page; the selector is saved '
+        + 'for this site and it will be right every time after that.',
     },
     {
       title: 'It navigated away from a posting I wanted to fill',

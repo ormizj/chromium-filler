@@ -17,6 +17,7 @@
  */
 
 import { elementChain, describeElement, stepChain } from '../shared/elementChain';
+import { blocksToText, clip, extractBlocks } from '../shared/jobText';
 import { ACTION_LABELS, SELECTOR_STRENGTH_TEXT } from '../shared/labels';
 import { pickSelector } from '../shared/selector';
 import { currentPalette, withAlpha } from '../ui/palette';
@@ -27,6 +28,9 @@ export type PickHandler = (el: Element) => void;
 
 /** How far a second click may land from the first and still mean "the same spot". */
 const SAME_SPOT_PX = 8;
+
+/** Three clamped lines' worth. Enough to recognise a description, not to read one. */
+const PREVIEW_CHARS = 220;
 
 export function startPicker(onPick: PickHandler, fieldLabel: string, onCancel?: () => void): () => void {
   const coarse = window.matchMedia?.('(pointer: coarse)').matches ?? false;
@@ -117,8 +121,50 @@ export function startPicker(onPick: PickHandler, fieldLabel: string, onCancel?: 
   decide.append(confirmBtn, cancelBtn);
   rowControls.append(travel, decide);
 
-  bar.append(rowText, rowControls);
+  /*
+   * What is actually inside the element, which is the question the readout above
+   * cannot answer: `div.job-description` says where a thing is and nothing about
+   * whether it is the right thing. Half the marks a recording makes are made on text
+   * — the title, the description, the requirements — so without this, declaring one
+   * means pointing at a box and waiting for the review to find out.
+   *
+   * A third row, *below* the controls, because the two rows above must not move when
+   * a selection appears; and clamped, because the bar is `width: max-content` and a
+   * description would otherwise stretch it to the whole viewport.
+   */
+  const preview = document.createElement('div');
+  preview.setAttribute(OWN_ATTR, 'preview');
+  Object.assign(preview.style, {
+    display: 'none', font: '12px/1.45 system-ui, sans-serif',
+    color: withAlpha(p.onInk, 0.85), whiteSpace: 'pre-line',
+    maxWidth: 'min(60vw, 520px)', overflow: 'hidden',
+    borderTop: `1px solid ${withAlpha(p.onInk, 0.16)}`, paddingTop: '6px',
+  } as CSSStyleDeclaration);
+  preview.style.setProperty('-webkit-line-clamp', '3');
+  preview.style.setProperty('-webkit-box-orient', 'vertical');
+
+  bar.append(rowText, rowControls, preview);
   document.body.append(box, bar);
+
+  /*
+   * The last element read, and what it said. `paint` runs on hover, on every step
+   * through the chain *and* on scroll — and reading a posting is a full walk of the
+   * element, so the answer is kept rather than recomputed per frame.
+   */
+  let previewOf: Element | undefined;
+
+  const showPreview = (el: Element): void => {
+    if (el !== previewOf) {
+      previewOf = el;
+      // `extractBlocks` reads a *posting*, so it returns nothing for a root that is
+      // chrome — which is every control worth marking. The fallback is what makes the
+      // Send button and the apply link, the two marks that gate Apply, preview at all.
+      const blocks = el instanceof HTMLElement ? blocksToText(extractBlocks(el)) : '';
+      preview.textContent = clip(blocks.trim() || (el.textContent ?? ''), PREVIEW_CHARS);
+    }
+    // An empty line is a gap where something should be — `meta`'s rule, one row down.
+    preview.style.display = preview.textContent ? '-webkit-box' : 'none';
+  };
 
   /** The elements at the point that was clicked, outermost first. */
   let chain: Element[] = [];
@@ -146,6 +192,7 @@ export function startPicker(onPick: PickHandler, fieldLabel: string, onCancel?: 
     const el = chain[index];
     if (!el) {
       box.style.display = 'none';
+      preview.style.display = 'none';
       setEnabled(false);
       return;
     }
@@ -160,6 +207,7 @@ export function startPicker(onPick: PickHandler, fieldLabel: string, onCancel?: 
     } as CSSStyleDeclaration);
 
     readout.textContent = describeElement(el);
+    showPreview(el);
     const s = pickSelector(el).strength;
     strengthDot.style.background = s === 'strong' ? p.ok : s === 'ok' ? p.warn : p.err;
     strengthWord.textContent = SELECTOR_STRENGTH_TEXT[s].word;

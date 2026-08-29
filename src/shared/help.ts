@@ -17,6 +17,7 @@
  */
 
 import type { SetupStepKey } from './setupSteps';
+import type { ConfigBindKey } from './recording';
 import type { PrepAction, RedirectConfig, Settings, SiteConfig } from './types';
 
 export interface HelpEntry {
@@ -117,6 +118,7 @@ export const CONFIG_HELP: Record<keyof SiteConfig, HelpEntry> = {
       + 'JobPosting data automatically, so set one only where that is missing or '
       + 'wrong. None of these ever affect filling.',
     when: 'Optional. Without them the modal simply shows less.',
+    short: 'What the posting says about itself, read into the review.',
     example: '{ "jobTitle": "h1.posting-title", "jobDescription": ".posting-body" }',
   },
   fieldOverrides: {
@@ -156,6 +158,7 @@ export const CONFIG_HELP: Record<keyof SiteConfig, HelpEntry> = {
     title: 'submitSelector',
     body: 'The site\'s own Send button — the control Apply presses for you. Leave it '
       + 'unset and the button is found by its label; save one to settle it for good.',
+    short: 'The site\u2019s own button that sends the application.',
     when: 'Apply is greyed out because nothing was found, or the page has several '
       + 'buttons and you want to be certain which one is pressed.',
     example: 'button[data-qa="submit-application"]',
@@ -191,6 +194,7 @@ export const CONFIG_HELP: Record<keyof SiteConfig, HelpEntry> = {
       + 'It counts only once that element is on '
       + 'screen, never merely present in the page\'s HTML, because sites routinely '
       + 'ship a hidden success node and reveal it when the server answers.',
+    short: 'The site\u2019s reply, which is how an application is known to have gone in.',
     // Two ways in, not one. `applyStatusChain` walks `sourceUrl`, so a board
     // whose postings apply on an employer's site has them recorded when *that*
     // site confirms — no confirmation element of its own, and nobody editing a
@@ -210,6 +214,7 @@ export const REDIRECT_HELP: Record<keyof RedirectConfig, HelpEntry> = {
     title: 'applySelector',
     body: 'The control that leaves for the external application — usually the "Apply '
       + 'on company website" link, but a button with no href works too.',
+    short: 'The link out to the employer\u2019s own application.',
     example: 'a.external-apply',
   },
   quickApplySelector: {
@@ -220,6 +225,7 @@ export const REDIRECT_HELP: Record<keyof RedirectConfig, HelpEntry> = {
       + 'the postings that apply here have, like the form itself, and not a header '
       + 'every posting carries: a marker that matches everywhere quietly stops this '
       + 'board\'s external postings from ever handing off.',
+    short: 'Proof the form is on this page, so the posting fills here.',
     when: 'A quick-apply posting is being mistaken for an external one.',
     example: 'form.quick-apply',
   },
@@ -227,6 +233,7 @@ export const REDIRECT_HELP: Record<keyof RedirectConfig, HelpEntry> = {
     title: 'markerSelector',
     body: 'A badge or label that means "this one is external", for boards whose apply '
       + 'link looks internal until you click it.',
+    short: 'A badge meaning this posting applies somewhere else.',
     example: '.badge--external',
   },
   beforeFollow: {
@@ -242,6 +249,39 @@ export const REDIRECT_HELP: Record<keyof RedirectConfig, HelpEntry> = {
       + 'rely only on the selectors above.',
     example: 'true',
   },
+};
+
+/* ---------------- What a recording can point at ---------------- */
+
+/**
+ * What each mark in the recorder's Declare menu means, so the choice is explained
+ * where it is made rather than four steps away in the wizard.
+ *
+ * Every entry is one of the catalogs above, reached by the name the recording uses
+ * for it — the `refRow` rule applied to a whole map. A mark and the config slot it
+ * compiles into are the same thing under two names, so a second body written here
+ * would be a second place for either to drift, which is the one thing this file
+ * exists to prevent. The six `extract` slots share one, because `extract` is one
+ * explanation covering all six and per-slot prose would say "the job title is the
+ * job title" six times.
+ *
+ * `Record<ConfigBindKey, …>` so a new slot in the model fails `npm run typecheck`
+ * until it has an explanation, like every other catalog here. The profile fields are
+ * not keyed: their name *is* the explanation, and sixteen captions under sixteen
+ * self-evident labels is a wall rather than help.
+ */
+export const BIND_HELP: Record<ConfigBindKey, HelpEntry> = {
+  submit: CONFIG_HELP.submitSelector,
+  success: CONFIG_HELP.successSelector,
+  applySelector: REDIRECT_HELP.applySelector,
+  quickApplySelector: REDIRECT_HELP.quickApplySelector,
+  markerSelector: REDIRECT_HELP.markerSelector,
+  jobTitle: CONFIG_HELP.extract,
+  jobDescription: CONFIG_HELP.extract,
+  jobRequirements: CONFIG_HELP.extract,
+  company: CONFIG_HELP.extract,
+  location: CONFIG_HELP.extract,
+  employmentType: CONFIG_HELP.extract,
 };
 
 export const PREP_HELP: Record<PrepAction, HelpEntry> = {
@@ -315,9 +355,10 @@ export const SETTINGS_HELP: Record<keyof Settings, HelpEntry> = {
       + 'message is saved, and from then on the extension reads it for itself. It is the '
       + 'only moment the element can be captured, because it does not exist until an '
       + 'application has gone in.',
-    when: 'Turn it off to keep Apply blocked on those sites instead, and set the '
-      + 'confirmation by hand under Site setup \u2192 Sending. Nothing is ever sent '
-      + 'without you pressing Apply either way.',
+    when: 'Turn it off to keep Apply blocked on those sites instead, and capture the '
+      + 'confirmation from Site setup instead \u2014 "Mark the confirmation" waits for '
+      + 'you to apply by hand and point at the reply. Nothing is ever sent without you '
+      + 'pressing Apply either way.',
   },
   closeTabDelayMs: {
     title: 'Close delay',
@@ -442,18 +483,20 @@ export const SETUP_STEP_TITLES: Record<SetupStepKey, string> = {
 export const SETUP_STEP_HELP: Record<SetupStepKey, GroupHelp> = {
   site: {
     title: 'Which pages this applies to',
-    body: 'The quickest way to set this site up is to apply to one job while the '
-      + 'extension watches — everything below, and the five steps after it, is for '
-      + 'correcting what that produced or for building a config by hand. A config is '
-      + 'matched to a page by its URL pattern; the name is only a label for you.',
+    body: 'A site is set up by applying to one job while the extension watches — '
+      + 'everything below, and the five steps after it, is for correcting what that '
+      + 'produced, which is why this form is only reachable once a site has been '
+      + 'recorded. A config is matched to a page by its URL pattern; the name is only '
+      + 'a label for you.',
     when: 'Widen the pattern if a sister page on the same board is not recognised.',
     example: '*://boards.acme.com/jobs/*',
     rows: [
       {
-        label: 'Apply on this site / on the employer’s site',
-        body: 'Records one application and writes the config from it. The two differ '
-          + 'only in what the bar asks you to mark; what actually happens wins either '
-          + 'way, so a wrong guess here costs nothing.',
+        label: 'Record the first pass',
+        body: 'Records one application up to the Send button and writes the config '
+          + 'from it — nothing is submitted. It asks nothing about where the '
+          + 'application happens: applying here and handing off to the employer’s own '
+          + 'site are told apart from what actually happens.',
       },
       { label: 'Name', body: 'What this site is called in the popup and the review modal.' },
       {
@@ -670,9 +713,12 @@ export const CONCEPT_HELP: Record<ConceptKey, HelpEntry> = {
       + 'summary at the end and pressed Save. If it goes wrong, "Undo" takes back the '
       + 'last step and "Reset" throws the whole pass away and starts it again from the '
       + 'posting, with the page reloaded back to how it was found.',
-    when: 'Any site you have not set up. The two buttons ask where the application '
-      + 'actually happens — on this site, or on the employer\u2019s own after a handoff '
-      + '— and getting it wrong costs nothing, because what really happened wins.',
+    when: 'Any site you have not set up — and Site setup opens on these two passes '
+      + 'whether the site has been set up or not. Recording asks nothing about where '
+      + 'the application happens: on this site, or on the employer\u2019s own after a '
+      + 'handoff, is worked out from what really did happen. It is the only way to set '
+      + 'a site up: the six-step form behind "Review configuration" appears once a site '
+      + 'has been recorded, and is for correcting what the recording produced.',
   },
   marking: {
     title: 'Declaring things while you record',
@@ -842,7 +888,7 @@ export const CONCEPT_HELP: Record<ConceptKey, HelpEntry> = {
       + 'nothing is lost.',
     when: 'The first time you apply on a site whose first setup pass is done. Turn '
       + '"Finish setup when you apply" off in Settings to keep Apply blocked instead, '
-      + 'and set the element by hand under Site setup \u2192 Sending.',
+      + 'and press "Mark the confirmation" in Site setup when you apply by hand.',
   },
   applyUnverified: {
     title: 'Apply needs a confirmation element',

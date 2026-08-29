@@ -216,3 +216,16 @@ export function blocksToText(blocks: JobBlock[]): string {
   }
   return lines.join('\n');
 }
+
+/**
+ * One line, cut to `n`. The counterpart to `blocksToText` for the surfaces that have
+ * room for a phrase rather than a posting — the Setup panel's container snippets, a
+ * recorded step's label, and the picker's readout of what it is about to save.
+ *
+ * Shared rather than copied because all three are the same decision made about the
+ * same text, and the second copy of it had already drifted on the ellipsis.
+ */
+export function clip(text: string, n: number): string {
+  const flat = text.replace(/\s+/g, ' ').trim();
+  return flat.length > n ? `${flat.slice(0, n)}…` : flat;
+}
