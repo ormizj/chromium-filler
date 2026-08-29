@@ -10,7 +10,10 @@
  * place in the menu.
  */
 import { describe, it, expect, afterEach, beforeEach, vi } from 'vitest';
-import { RecorderBar, type RecorderBarCallbacks, type RecorderBarState } from './recorderBar';
+import {
+  RecorderBar, bindLabel, type RecorderBarCallbacks, type RecorderBarState,
+} from './recorderBar';
+import type { BindKey } from '../shared/recording';
 import { ACTION_LABELS } from '../shared/labels';
 import { RECORDER_HOST_ID } from './extensionUi';
 
@@ -222,5 +225,55 @@ describe('starting over', () => {
     vi.advanceTimersByTime(2000);
 
     expect(confirm(shadow)).toBeTruthy();
+  });
+});
+
+/**
+ * Choosing a mark.
+ *
+ * The menu closed its *flag* and left its markup on screen: nothing repainted the
+ * bar on the way to the picker, so a 240px-wide, 60vh-tall list stayed hanging over
+ * the very page the picker was asking the user to point at — and on the picker's
+ * cancel path nothing ever came along to take it down.
+ */
+describe('picking something out of the Declare menu', () => {
+  it('closes the menu on the spot, before the picker starts', () => {
+    let openWhenAsked: boolean | undefined;
+    const shadow = render(state(), callbacks({
+      // Read from inside the callback, because "before the picker starts" is the
+      // whole of the fix: the pick happens on the page under this menu.
+      onDeclare: () => { openWhenAsked = !!menu(shadow); },
+    }));
+    openMenu(shadow);
+    expect(menu(shadow)).toBeTruthy();
+
+    [...shadow.querySelectorAll<HTMLButtonElement>('[role="menuitem"]')][0].click();
+
+    expect(openWhenAsked).toBe(false);
+    expect(menu(shadow)).toBeNull();
+  });
+
+  it('still says what was chosen', () => {
+    const chosen: BindKey[] = [];
+    const shadow = render(state(), callbacks({ onDeclare: (b) => chosen.push(b) }));
+    openMenu(shadow);
+    const first = [...shadow.querySelectorAll<HTMLButtonElement>('[role="menuitem"]')][0];
+    const label = first.textContent;
+    first.click();
+
+    expect(chosen).toHaveLength(1);
+    expect(label).toBe(bindLabel(chosen[0]));
+  });
+
+  it('leaves the toggle saying the menu is shut, so pressing it opens one', () => {
+    const shadow = render();
+    openMenu(shadow);
+    [...shadow.querySelectorAll<HTMLButtonElement>('[role="menuitem"]')][0].click();
+
+    const toggle = [...shadow.querySelectorAll<HTMLButtonElement>('.cf-rec-options .cf-btn')]
+      .find((b) => b.textContent === ACTION_LABELS.declare)!;
+    expect(toggle.getAttribute('aria-expanded')).toBe('false');
+    toggle.click();
+    expect(menu(shadow)).toBeTruthy();
   });
 });

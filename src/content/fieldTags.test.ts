@@ -107,3 +107,84 @@ describe('naming a mark on the page', () => {
     expect(SETUP_STATUS_TEXT.high.chip).toBe('');
   });
 });
+
+/**
+ * Following the page.
+ *
+ * Real geometry still belongs to the E2E — jsdom raises no layout, so every
+ * rectangle here is one this test wrote. What that is enough to prove is the part
+ * the bug was in: *when* a chip is re-placed. It used to be on `scroll` and
+ * `resize` and nothing else, so a page that moved under a chip — a description
+ * opening, content injected above a field — left the name behind until the user
+ * happened to scroll.
+ */
+function rectOf(el: HTMLElement, top: number): void {
+  el.getBoundingClientRect = () => ({
+    top, bottom: top + 30, left: 10, right: 210, width: 200, height: 30,
+    x: 10, y: top, toJSON: () => ({}),
+  }) as DOMRect;
+}
+
+/** One animation frame, and the microtask a MutationObserver delivers on. */
+async function frame(): Promise<void> {
+  await Promise.resolve();
+  await new Promise((r) => requestAnimationFrame(() => r(null)));
+  await Promise.resolve();
+}
+
+/** Frames enough to outlast the follow loop's tail. */
+async function settled(): Promise<void> {
+  await new Promise((r) => setTimeout(r, 420));
+}
+
+describe('a chip following the field it names', () => {
+  it('moves when the page moves under it, with nothing scrolling', async () => {
+    const el = input();
+    rectOf(el, 100);
+    tagElement(el, 'Email', 'high');
+    const [tag] = tags() as HTMLElement[];
+    expect(tag.style.top).toBe('98px');
+
+    // Exactly the reported gesture: something above the field opens. No scroll
+    // event, no resize — the two things this used to wait for.
+    rectOf(el, 300);
+    document.body.prepend(document.createElement('section'));
+    await frame();
+
+    expect(tag.style.top).toBe('298px');
+  });
+
+  it('keeps looking for a beat, so it can ride an animation out', async () => {
+    const el = input();
+    rectOf(el, 100);
+    tagElement(el, 'Email', 'high');
+    const [tag] = tags() as HTMLElement[];
+    await frame();
+
+    // A transition reports the class flip and then moves for 300ms in silence. The
+    // chip has to follow that, not land where the first frame of it happened to be.
+    document.body.prepend(document.createElement('section'));
+    await frame();
+    rectOf(el, 260);
+    await frame();
+
+    expect(tag.style.top).toBe('258px');
+  });
+
+  it('stops once the page holds still', async () => {
+    const el = input();
+    rectOf(el, 100);
+    let reads = 0;
+    const measured = el.getBoundingClientRect.bind(el);
+    el.getBoundingClientRect = () => { reads += 1; return measured(); };
+    tagElement(el, 'Email', 'high');
+
+    await settled();
+    const resting = reads;
+    await settled();
+
+    // A loop that never ended would be reading this rectangle sixty times a second
+    // for the length of a recording.
+    expect(reads).toBe(resting);
+  });
+});

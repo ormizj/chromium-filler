@@ -710,6 +710,17 @@ every rule about what a recording *means*; **`src/content/recorder.ts`** owns th
 while one runs; **`src/content/inertPage.ts`** is the suppression it and `picker.ts`
 share; **`src/content/recorderBar.ts`** is the HUD that carries the one decision.
 
+**`src/content/pageChange.ts` is "the page moved", asked once** — a `MutationObserver`
+and a `ResizeObserver` on `document.documentElement` plus captured `scroll` and
+`resize`, coalesced into a frame or debounced on a settle time. Same argument as
+`inertPage.ts`: the chips needed it to stay welded to their fields and the sweep
+needed it to notice a form that did not exist a moment ago, and two copies of one list
+is exactly how two lists drift. **What the extension draws cannot wake it**
+(`isExtensionUi`, added nodes included) — the pass a chip's watcher schedules ends in
+writing that chip's `style.top`, which is an attribute change on an element in the
+page's own light DOM, so without the filter it would schedule itself every frame for
+ever.
+
 A recording is a flat, ordered `RecordedStep[]`. Each step is either something the
 user *did* (`click` / `input` / `navigate`) or carries a **bind** — "this is the
 description", "that is the Send button", "that banner is the confirmation". Binds are
@@ -843,6 +854,14 @@ nothing at all — so the question "is this a step, or is it a thing" is answere
 end. `Declare…`'s menu is the same `BindKey` list it always was; `Interact` is a
 toggle, because the button holding the page live has to be the way back out of it.
 
+**Choosing a mark closes the menu and repaints, in that order, before `onDeclare`** —
+the same rule the modal's overflow menu follows, and for a sharper reason. It used to
+close the *flag* only: nothing on the way to the picker repaints (`pickForBind`
+disarms, and a disarm from idle raises no mode change), so a 240px-wide, `60vh` list
+stayed hanging over the very page the picker was asking the user to point at — and on
+the picker's cancel path nothing ever came along to take it down. Hence also
+`pickForBind`'s `onCancel`, which every other picker call site already passed.
+
 **The armed state is a mode, and drawn as one.** It does *not* take the primary fill
 — `Done` is the one thing this bar is for, and a second coral beside it makes neither
 mean anything — and it does *not* pulse its own opacity: the live dot can, being a
@@ -927,10 +946,9 @@ things were found and never which one is Email — and while a recording runs th
 the *only* field feedback there is, the panel being folded to its pill.
 `content/fieldTags.ts` puts a name on each mark: the host page's own light DOM,
 inline-styled from `ui/palette.ts`, `pointer-events: none`, positioned from
-`getBoundingClientRect()` and re-placed on every scroll (captured, so inner scrollers
-count) and resize, batched into one rAF pass for the whole set.
+`getBoundingClientRect()`, batched into one rAF pass for the whole set.
 
-Six things it gets right, each with a test:
+Seven things it gets right, each with a test:
 
 - **`highlight(el, confidence, label?)` is the only entry and `clearHighlights` the
   only exit.** The chips are part of the mark, so four call sites each remembering to
@@ -949,15 +967,44 @@ Six things it gets right, each with a test:
 - **A zero-area or off-screen element is hidden, never cleared.** The `display: none`
   file input behind a custom "Upload CV" button is the commonest shape of `resume` on
   an ATS; and an element scrolls back, so its mark has to come with it.
+- **The chip is the only extrinsic half of a mark, so it follows the page rather than
+  the viewport.** `highlight` draws the outline as an inline style on the element
+  itself and it moves with the page whatever happens; a `position: fixed` chip is
+  right only for as long as the number it was given is. Re-placing on `scroll` and
+  `resize` alone covered the viewport moving and nothing at all of the page moving
+  under it — a description opening, content injected above a field — so the mark came
+  apart into an outline in the right place and a name in the wrong one, until the
+  user happened to scroll. `pageChange.ts` (below) is the trigger now, and the rAF
+  pass **keeps going for `FOLLOW_MS` past the last thing it saw move**: a
+  `MutationObserver` reports the class flip that *starts* a transition and nothing
+  about the 300ms of movement after it, so a single pass lands every chip where the
+  first frame happened to be. Measured from movement rather than from the trigger, so
+  a `transition-delay` is covered too, and it stops on its own — a chip on an idle
+  page costs nothing.
 - **`TAG_ATTR` is in `extensionUi`'s `OWN_SELECTOR`**, so the picker's `elementChain`
   and the recorder's three `isExtensionUi` guards all skip them. `pointer-events: none`
   already keeps them out of hit-testing; a mark must also **never contain a form
   control**, or `detectFields` could claim one. They are `aria-hidden`: they sit in the
   *page's* DOM and would otherwise be read in the form's own order, a second and worse
   copy of every label it already has.
-- **`markDetectedFields` runs when the recorder attaches, after the bar.** The bar is
-  the only thing saying the page is inert, and marks ahead of it are unexplained. It
-  clears first, which is what makes the two legs the same page: the posting leg used
+- **`markDetectedFields` runs when the recorder attaches, after the bar — and again
+  each time the page settles from a recorded gesture.** The bar is the only thing
+  saying the page is inert, and marks ahead of it are unexplained. Once was not
+  enough: half the sites this exists for have no form until something is pressed
+  (ModalLever's whole point, page two of any wizard form), so a single sweep named
+  the posting and then went quiet exactly as the fields appeared. `scheduleFieldSweep`
+  is what re-runs it — through `watchPageChange`'s settle, because the click is what
+  *starts* a modal being injected, so a sweep taken as the step is recorded reads the
+  page the user has just left; and **bounded**, re-armed by each step and dropped a
+  few seconds after the last, since a standing subscription would re-sweep the whole
+  document behind every carousel and lazy image for the length of the recording. Its
+  second half is `markBoundSteps`: the sweep opens with `clearHighlights`, so without
+  it the second sweep silently unnames the Send button and the confirmation — the two
+  marks that gate Apply, and the two detection could never redraw, detection being
+  what failed to find them. It runs last, so what the user declared outranks what the
+  heuristics guessed, and only for this leg — a selector recorded on the board would
+  either not resolve on the employer's ATS or resolve to something else wearing the
+  same id. It clears first, which is what makes the two legs the same page: the posting leg used
   to inherit whatever `refreshSetup` had drawn a moment earlier and the destination
   leg — a fresh content script on the employer's site — had nothing at all. **Fields
   only**: `refreshSetup` also names the Send button, but that is the panel's *guess*,

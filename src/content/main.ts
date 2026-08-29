@@ -50,6 +50,7 @@ import { detectRedirect, type RedirectDetection } from './redirectDetect';
 import { fillTextField, fillFileInput, highlight, clearHighlights } from './fill';
 import { startPicker } from './picker';
 import { startRecording, type RecorderHandle } from './recorder';
+import { watchPageChange } from './pageChange';
 import { RecorderBar, bindLabel } from './recorderBar';
 import { FillerModal, type ApplyState } from './modal/modal';
 import {
@@ -75,6 +76,15 @@ const REDIRECT_ROWS: Array<{ key: RedirectSelectorKey; label: string }> = [
 ];
 
 const LOG = '[chromium-filler]';
+
+/**
+ * How long the page has to hold still after a recorded gesture before the field
+ * sweep runs again, and how long after the last gesture the watch stays up at all.
+ * The first is "the burst has ended"; the second is "nobody has done anything for a
+ * while, so anything still moving is the page's own doing, not an answer to a press".
+ */
+const SWEEP_SETTLE_MS = 300;
+const SWEEP_WINDOW_MS = 3_000;
 
 class Controller {
   private config?: SiteConfig;
@@ -148,6 +158,9 @@ class Controller {
   private recorderBar?: RecorderBar;
   /** Which page of the recording this one is — the bar orders its menu by it. */
   private recordingLeg: RecordLeg = 'posting';
+  /** The bounded page watch that re-sweeps after a gesture — see `scheduleFieldSweep`. */
+  private sweepWatch?: () => void;
+  private sweepWindow?: ReturnType<typeof setTimeout>;
 
   async init(): Promise<void> {
     console.info(`${LOG} content script ready — v${chrome.runtime.getManifest().version} · build ${BUILD_ID}`);
@@ -845,6 +858,12 @@ class Controller {
    *
    * The config is optional all the way down (`detectForConfig`), because on the
    * destination leg there routinely is none.
+   *
+   * **It runs again every time the page settles from a gesture**, not only when the
+   * recorder attaches. Half the sites this exists for have no form until something
+   * is pressed — ModalLever's whole point, and page two of any wizard form — so a
+   * single sweep at attach named the posting and then went quiet for the rest of
+   * the recording, exactly as the fields it was drawn for appeared.
    */
   private markDetectedFields(): void {
     try {
@@ -855,6 +874,7 @@ class Controller {
       for (const d of detected) {
         if (d.element) highlight(d.element, d.confidence, FIELD_LABELS[d.field]);
       }
+      this.markBoundSteps();
     } catch (e) {
       // A sweep is a nicety; a recording that would not attach is not. Never let the
       // second fail for the first.
@@ -862,9 +882,62 @@ class Controller {
     }
   }
 
+  /**
+   * Draw again what the user has already said, over what the extension guessed.
+   *
+   * Two things make this part of the sweep rather than a nicety on top of it. The
+   * `clearHighlights` above takes *every* mark, so without this the second sweep of
+   * a recording silently unnames the Send button and the confirmation banner — the
+   * two marks that gate Apply, and the two that cannot be redrawn from detection
+   * because detection is exactly what could not find them. And it runs last on
+   * purpose: `tagElement` replaces the chip on an element it is given twice, so a
+   * field the user declared keeps the name they chose rather than the heuristic's.
+   *
+   * Only this leg's steps. A selector recorded on the board would either not resolve
+   * on the employer's ATS or — worse — resolve to something else wearing the same
+   * id, and `leg` is already the answer to which page a step was made on.
+   */
+  private markBoundSteps(): void {
+    for (const step of this.recording?.steps ?? []) {
+      if (!step.bind || step.leg !== this.recordingLeg) continue;
+      const el = query(document, step.target?.selector);
+      if (el) highlight(el, 'high', bindLabel(step.bind));
+    }
+  }
+
+  /**
+   * A gesture landed, so look again once the page has finished reacting to it.
+   *
+   * Not synchronously: the click is what *starts* a modal being injected, an SPA
+   * re-rendering, a fetch landing, so a sweep taken as the step is recorded reads
+   * the page the user has just left. `watchPageChange`'s settle is what waits for
+   * the burst to end.
+   *
+   * And bounded — re-armed by each step, dropped a few seconds after the last one.
+   * A standing subscription would re-run a whole-document detection sweep behind
+   * every carousel, live clock and lazy image on the posting, for the length of a
+   * recording that lasts minutes. A page only changes under this because someone
+   * pressed something, so a press is the right thing to hang the window on.
+   */
+  private scheduleFieldSweep(): void {
+    if (!this.recorder) return;
+    this.sweepWatch ??= watchPageChange(() => this.markDetectedFields(), SWEEP_SETTLE_MS);
+    if (this.sweepWindow) clearTimeout(this.sweepWindow);
+    this.sweepWindow = setTimeout(() => this.stopFieldSweep(), SWEEP_WINDOW_MS);
+  }
+
+  private stopFieldSweep(): void {
+    if (this.sweepWindow) clearTimeout(this.sweepWindow);
+    this.sweepWindow = undefined;
+    this.sweepWatch?.();
+    this.sweepWatch = undefined;
+  }
+
   private async onRecordedStep(step: RecordedStep): Promise<void> {
     this.recording?.steps.push(step);
     this.paintBar();
+    // What the page looks like may be about to change — see `scheduleFieldSweep`.
+    this.scheduleFieldSweep();
     await chrome.runtime.sendMessage({ type: MSG.RECORD_PUSH, step } satisfies Message);
   }
 
@@ -956,7 +1029,9 @@ class Controller {
       // then the Send button and, unlabelled, they are two identical green outlines
       // with nothing saying which is which — on exactly the two marks that gate Apply.
       highlight(element as HTMLElement, 'high', bindLabel(bind));
-    }, bindLabel(bind));
+      // No sweep is scheduled here: the step above went through `onRecordedStep`,
+      // which arms one, and `markBoundSteps` redraws this mark from that very step.
+    }, bindLabel(bind), () => this.paintBar());
   }
 
   private paintBar(): void {
@@ -979,6 +1054,7 @@ class Controller {
    */
   private async stopRecording(): Promise<void> {
     this.cancelPicker?.();
+    this.stopFieldSweep();
     this.recorder?.stop();
     this.recorder = undefined;
     this.recorderBar?.destroy();

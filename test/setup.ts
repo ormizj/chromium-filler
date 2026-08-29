@@ -125,3 +125,17 @@ export async function resetChromeMock(): Promise<void> {
 
 // @ts-expect-error assigning a partial mock onto the global for tests
 globalThis.chrome = chromeMock;
+
+/**
+ * jsdom implements `MutationObserver` and not `ResizeObserver`, so anything that
+ * watches an element for a size change — `pageChange.ts`, and through it every
+ * mark drawn on a host page — cannot even be imported here without this. A no-op
+ * is the honest stub: jsdom evaluates no layout, so a real one could never fire.
+ */
+if (!('ResizeObserver' in globalThis)) {
+  globalThis.ResizeObserver = class {
+    observe(): void {}
+    unobserve(): void {}
+    disconnect(): void {}
+  };
+}

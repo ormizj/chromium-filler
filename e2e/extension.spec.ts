@@ -2708,3 +2708,137 @@ test('Recording: Reset from the employer’s site goes back to the posting', asy
     await page.close();
   }
 });
+
+/**
+ * Start a recording on a scenario the way the panel offers it. The three specs
+ * below are about what happens *during* one, so the walk in is scaffolding.
+ */
+async function beginRecording(page: Page, scenario: string, choice: string): Promise<void> {
+  await clearConfigs();
+  await page.setViewportSize({ width: 1280, height: 900 });
+  await page.goto(urlFor(scenario));
+  await openSetupPanel(page);
+
+  const setup = page.locator('.cf-card[data-sheet="setup"]');
+  await expect(setup).toBeVisible({ timeout: 20_000 });
+  await setup.getByRole('button', { name: choice }).click();
+  await expect(bar(page)).toBeVisible({ timeout: 10_000 });
+}
+
+/**
+ * Immediately above the control and aligned to its right-hand edge — the placement
+ * rule, asserted as a *gap* rather than as "somewhere above". A chip left behind by
+ * a page that moved under it is still above the field it names, several hundred
+ * pixels above, which is exactly the bug: only the distance can tell them apart.
+ */
+async function expectMarkOn(page: Page, name: string, selector: string): Promise<void> {
+  await expect(async () => {
+    const chip = (await mark(page, name).boundingBox())!;
+    const field = (await page.locator(selector).boundingBox())!;
+    const gap = field.y - (chip.y + chip.height);
+    expect(gap).toBeGreaterThanOrEqual(-1);
+    expect(gap).toBeLessThan(8);
+    expect(Math.abs((chip.x + chip.width) - (field.x + field.width))).toBeLessThan(4);
+  }).toPass({ timeout: 5_000 });
+}
+
+test('Recording: a name follows its field when the page moves under it', async () => {
+  // The chip is the only extrinsic half of a mark — the outline is an inline style
+  // on the element and moves with it whatever happens, while a `position: fixed`
+  // chip is right only for as long as the number it was given is. It was re-placed
+  // on `scroll` and `resize` and on nothing else, so opening a description left
+  // every name on the page behind and the mark visibly came apart. Layout is
+  // invisible to vitest; this is the half that has to be measured in a browser.
+  const page = await context.newPage();
+  try {
+    await beginRecording(page, 'record-internal', 'Apply on this site');
+    await expect(mark(page, 'Email')).toBeVisible();
+    await expectMarkOn(page, 'Email', '#email');
+    const was = (await page.locator('#email').boundingBox())!;
+
+    // Long enough for the follow loop drawing the marks to have given up: without
+    // this the shift below lands inside the tail that every fresh chip opens, and
+    // the chip follows for a reason that has nothing to do with the fix.
+    await page.waitForTimeout(1500);
+    // Something above the form opens. Not a gesture — the page is inert and a click
+    // would have to be armed, which is a step, which repaints — so this is the pure
+    // case: the page moved and nothing told the extension.
+    await page.evaluate(() => {
+      const spacer = document.createElement('div');
+      spacer.style.height = '260px';
+      document.body.prepend(spacer);
+    });
+
+    const now = (await page.locator('#email').boundingBox())!;
+    expect(now.y).toBeGreaterThan(was.y + 200);
+    // And no scroll anywhere, which is what used to be the only way to fix this.
+    expect(await page.evaluate(() => window.scrollY)).toBe(0);
+    await expectMarkOn(page, 'Email', '#email');
+  } finally {
+    await page.close();
+  }
+});
+
+test('Recording: fields that appear mid-recording are named, and marks already made survive', async () => {
+  // ModalLever has no form at all until Apply is pressed. The sweep ran once, when
+  // the recorder attached, so on exactly the sites this exists for — a form behind a
+  // modal, page two of a wizard — the fields appeared unnamed and stayed that way
+  // for the rest of the recording. The other half is the cost of fixing it:
+  // `markDetectedFields` opens with `clearHighlights`, so a second sweep must not
+  // quietly unname what the user has already declared.
+  const page = await context.newPage();
+  try {
+    await beginRecording(page, 'modal-lever', 'Apply on this site');
+    await expect(mark(page, 'Full name')).toHaveCount(0);
+
+    await declare(page, 'Description');
+    await pickOnPage(page, page.locator('#posting-body'));
+    await expect(mark(page, 'Description')).toBeVisible();
+
+    // Wait the pick's own sweep window out. A mark being made opens one too, and
+    // inside it the modal below would be swept up by that rather than by the press —
+    // which is the thing being tested.
+    await page.waitForTimeout(4_000);
+
+    // The click that reveals the form. The modal is injected in the click handler,
+    // so the sweep has to wait for the page to settle rather than read it as the
+    // step is recorded.
+    await press(page, '#apply-btn');
+
+    await expect(mark(page, 'Full name')).toBeVisible({ timeout: 10_000 });
+    await expectMarkOn(page, 'Full name', 'input[aria-label="Full name"]');
+    // Named on the page, not merely outlined: a form of nine coloured boxes says
+    // nine things were found and never which one is Email.
+    await expect(mark(page, 'Email')).toBeVisible();
+    // And what was declared before the sweep is still declared after it.
+    await expect(mark(page, 'Description')).toBeVisible();
+  } finally {
+    await page.close();
+  }
+});
+
+test('Recording: choosing a mark closes the Declare menu before the picker opens', async () => {
+  // The menu closed its flag and left its markup: nothing on the way to the picker
+  // repainted the bar, so a 240px-wide, 60vh-tall list stayed hanging over the very
+  // page the picker was asking the user to point at.
+  const page = await context.newPage();
+  try {
+    await beginRecording(page, 'record-internal', 'Apply on this site');
+
+    await bar(page).getByRole('button', { name: 'Declare…', exact: true }).click();
+    await expect(bar(page).locator('.cf-rec-menu')).toBeVisible();
+
+    await bar(page).getByRole('menuitem', { name: 'Send button', exact: true }).click();
+
+    // Gone by the time the picker is up, which is when it would be in the way.
+    await expect(page.locator('[data-cf-picker="bar"]')).toBeVisible({ timeout: 10_000 });
+    await expect(bar(page).locator('.cf-rec-menu')).toHaveCount(0);
+
+    // Including down the path where nothing else was ever going to repaint the bar.
+    await page.keyboard.press('Escape');
+    await expect(page.locator('[data-cf-picker="bar"]')).toHaveCount(0);
+    await expect(bar(page).locator('.cf-rec-menu')).toHaveCount(0);
+  } finally {
+    await page.close();
+  }
+});

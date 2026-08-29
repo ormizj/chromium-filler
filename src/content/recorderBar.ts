@@ -243,8 +243,15 @@ export class RecorderBar {
   private buildMenu(data: RecorderBarState): HTMLElement {
     const menu = el('div', 'cf-rec-menu');
     menu.setAttribute('role', 'menu');
+    // Closed *and* painted, in that order, before the picker is asked for.
+    // Setting the flag alone left the flag and the DOM disagreeing: nothing on the
+    // way to `startPicker` repaints — `pickForBind` disarms, and a disarm from idle
+    // is a no-op that raises no mode change — so a 60vh list stayed hanging over the
+    // very page the picker was asking the user to point at, and on the cancel path
+    // nothing ever came along to take it down.
     const choose = (bind: BindKey) => {
-      this.menu = false;
+      this.closePopovers();
+      this.paint();
       this.cb.onDeclare(bind);
     };
 
