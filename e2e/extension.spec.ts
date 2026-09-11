@@ -2580,6 +2580,14 @@ test('Recording: one application on this site becomes the whole config', async (
     await expect(page.locator('.cf-rail')).toHaveCount(0);
     await expect(page.locator('.cf-pass')).toHaveCount(2);
     await enterWizard(page);
+
+    // And the wizard is left the way it was entered. The footer's Back walks steps
+    // and is dead on the first of them; Done only replaces Next on the last — so
+    // without the header's own way back, `Review configuration` was a one-way door
+    // and getting out meant five taps of Next or minimizing to a pill.
+    await setup.getByRole('button', { name: 'Back to Site setup' }).click();
+    await expect(setup.locator('.cf-rail')).toHaveCount(0);
+    await expect(setup.locator('.cf-pass')).toHaveCount(2);
   } finally {
     await page.close();
   }

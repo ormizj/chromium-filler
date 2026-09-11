@@ -316,6 +316,34 @@ describe('picking something out of the Declare menu', () => {
     ]);
   });
 
+  /**
+   * The head is a `--text-xs` line the colour of the captions under it, so with the
+   * groups run together it read as a third line of the caption above rather than as
+   * the start of anything. The hairline between groups and the head that holds its
+   * place while the list scrolls are both drawn from this wrapper — CSS is invisible
+   * to jsdom, so the structure they are keyed on is the half that can be asserted.
+   */
+  it('gives each group an element of its own, led by its head', () => {
+    const shadow = render();
+    openMenu(shadow);
+    const groups = [...shadow.querySelectorAll('.cf-rec-menu-group')];
+    expect(groups.map((g) => g.firstElementChild?.textContent)).toEqual([
+      MARK_GROUP_TEXT.sending, MARK_GROUP_TEXT.leaving,
+      MARK_GROUP_TEXT.info, MARK_GROUP_TEXT.fields,
+    ]);
+    for (const g of groups) {
+      expect(g.firstElementChild!.className).toBe('cf-rec-menu-head');
+      // A bare wrapper would take the items out of the menu's ownership: a
+      // `role="menu"` owns its `menuitem`s, and only a `group` may come between.
+      expect(g.getAttribute('role')).toBe('group');
+      expect(g.getAttribute('aria-labelledby')).toBe(g.firstElementChild!.id);
+      expect(g.querySelectorAll('[role="menuitem"]').length).toBeGreaterThan(0);
+    }
+    // Every item is in one, so nothing renders outside a group and above its head.
+    expect(shadow.querySelectorAll('.cf-rec-menu-group [role="menuitem"]'))
+      .toHaveLength(shadow.querySelectorAll('[role="menuitem"]').length);
+  });
+
   /** The bar renders the grouping; it does not own one. */
   it('leads with the way out on the board of a two-step posting', () => {
     const shadow = render(state({ flow: 'external', leg: 'posting' }));

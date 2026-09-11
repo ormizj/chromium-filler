@@ -114,6 +114,12 @@
      looked like a control. */
   --icon-chevron: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2.4' stroke-linecap='round' stroke-linejoin='round'><path d='M6 9.5l6 6 6-6'/></svg>");
 
+  /* The setup panel's way back out of the wizard, in the header. The same chevron
+     turned a quarter, and drawn rather than typeset for the same reason as that
+     one: `‹` is a quotation mark, sized by the font rather than by the box, and
+     beside two 16px masked marks it came out a speck. */
+  --icon-back: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2.4' stroke-linecap='round' stroke-linejoin='round'><path d='M14.5 6l-6 6 6 6'/></svg>");
+
   /* Geometry. `--tap` is the minimum comfortable touch target; primitives.css
      applies it to every control under `@media (pointer: coarse)`. */
   --tap: 44px;

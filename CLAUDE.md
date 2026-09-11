@@ -1104,6 +1104,28 @@ is a disclosure everywhere else. The caption is the item's `aria-describedby`, n
 part of its name: folded in, a screen reader announces a whole sentence where every
 other surface, the compiler included, says "Send button".
 
+**A caption is an example, never a definition**, and `help.test.ts` enforces it: each
+`short` must bring at least two content words its own `BIND_LABELS` name and its group
+head do not already have. The caption is read *under* both of those, so a definition is
+one thing said three times — "External apply link · the link out to the employer's own
+application", under "Applying on the employer's site" — and after all three the menu
+still has not said which link is meant. What is missing at that moment is which thing
+on this page, so the shorts name what the user is looking at: "Apply on company
+website", the last button on the form, the badge. Those four `short`s reach no other
+surface (the Sites and Help key reference renders `body`/`when`/`example`), so this
+rule costs nothing anywhere else.
+
+**And each group is one element, led by its head.** Flat, the head was `--muted-2` at
+`--text-xs`, the caption's exact colour and size, sitting directly under a caption that
+wraps — so it read as a third line of that caption rather than as the start of
+anything, and once the list scrolled nothing said which group you were in.
+`.cf-rec-menu-group` is what the hairline between groups is drawn from
+(`group + group`, a rule rather than a gap, because space above a head is space the
+paragraph above it may have taken anyway) and what lets the head be `sticky` within it;
+the head takes `--muted` so it out-ranks the captions beneath it. The wrapper carries
+`role="group"` and is named by its head: `role="menu"` owns its `menuitem`s, and only a
+`group` may come between them.
+
 #### What it shows you while you record
 **The page is marked up by name, on both legs.** `highlight` (`fill.ts`) draws a
 coloured outline and nothing else, so a form with nine outlined inputs says nine
@@ -1275,6 +1297,10 @@ there.** `homeFooter` returns `null` while `isUnconfigured` — so a site nobody
 taught anything is the one card in either sheet with **no footer at all**. Once the
 site is configured it is `Review configuration` (the wizard) plus `Done`.
 
+**And `Review configuration` is a round trip**, which is half of why it is safe to
+offer here. See "The setup wizard" below: the card header carries the way back, so
+the press that opens the six-step form has one that closes it.
+
 Both halves of that are the same decision. `Done` is withheld because closing the
 panel having taught the extension nothing is not an outcome, and the next posting on
 the site opens here again. The wizard is withheld because as an entry point it is the
@@ -1402,6 +1428,35 @@ progress rail, and Back / Next. It used to stack five `<details>` sections in on
 scroll and auto-open every one holding unresolved rows, so a fresh site opened
 onto ~25 rows reading `auto · #first_name` with no ordering and nothing saying
 which of them mattered. On a 390px phone that was unreadable.
+
+**It is left the way it was entered**, and the card header is what carries that
+(`backButton`, drawn only while `mode === 'wizard'`). The footer's `‹ Back` walks
+*steps* and is disabled on the first of them, and `Done` — which destroys the panel
+rather than going anywhere — only replaces `Next ›` on the last, so `Review
+configuration` was a one-way door: leaving meant five taps of Next, or minimizing to
+a pill and hunting for the review modal's. Three rules:
+
+- **It goes to `home`, not to the modal.** Home is where it was entered from, the
+  panel stays alive with every mark and pick intact, and home's own `Done` is what
+  hands the slot back to the card underneath. It calls `showHome()` with no `saved`,
+  because this press is not a save.
+- **It does not touch `this.step`.** `placed` decides the landing step once, so
+  pressing `Review configuration` again returns to the step the user left rather than
+  to the top of a form they have walked half of.
+- **In the header, and only in the wizard.** The footer is two buttons with exactly
+  one primary on every step — the 390px rule the review modal's footer follows — so a
+  third way out had to go elsewhere; and it is a different kind of movement anyway,
+  Back walking one step of a task and this leaving the task. The review screen's whole
+  content is Discard-or-Save, and a third exit there is a way to walk away from a
+  recording without saying what became of it. Home has nothing behind it.
+
+`.cf-back` joins `.cf-close, .cf-fullscreen` in `primitives.css` — one selector list,
+so the header's three controls cannot end up different sizes — and draws its mark as a
+masked `--icon-back` like the fullscreen toggle rather than as a `‹` glyph, which is a
+quotation mark sized by the font. It is also in `sheet.ts`'s `NOT_A_DRAG`: the header
+*is* the drag handle, so a control in it that is not excused there turns its own press
+into a drag of the card, and under the handle's `touch-action: none` that press may
+never resolve as a click at all on a phone.
 
 `src/shared/setupSteps.ts` (pure) owns the model: `SETUP_STEP_ORDER` is the six
 steps in the order the extension itself does things — `site` · `prep` · `kind` ·
@@ -1573,10 +1628,12 @@ Two rules the controller enforces, both in `Controller.arbitrateSheets`:
   "stay out of sight". The rail crosses two shadow roots, so CSS cannot do it —
   hence the controller-supplied `--pill-slot`.
 
-The setup panel's two exits now mean different things, matching the modal: header
+The setup panel's exits each mean a different thing, matching the modal: header
 `×` **minimizes**, footer **Done** destroys (`closeSetup`) — and Done is now the
 *last step's* Next, because finishing the wizard and finishing with the site are
-the same act. `nudgeLayout` moved from
+the same act. In the wizard there is a third, the header's `‹`, and it is the only
+one that goes anywhere rather than doing something to the card: back a *screen*, to
+home (see "The setup wizard"). `nudgeLayout` moved from
 `options.ts` into `shared/modalLayout.ts` so the sheets and the simulator — a scale
 drawing of the same rectangle — cannot disagree about which way a handle goes.
 

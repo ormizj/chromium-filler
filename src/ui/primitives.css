@@ -700,10 +700,12 @@ button.cf-btn.primary[aria-disabled='true'] {
   }
 }
 
-/* The sheet's two header controls. One selector list, so the fullscreen toggle
-   and the close button cannot end up different sizes or weights beside each
-   other — which they did while each owned its own rule. */
+/* The sheet's header controls. One selector list, so the fullscreen toggle, the
+   close button and the setup panel's way back cannot end up different sizes or
+   weights beside each other — which the first two did while each owned its own
+   rule. */
 .cf-close,
+.cf-back,
 .cf-fullscreen {
   border: none;
   background: transparent;
@@ -738,6 +740,29 @@ button.cf-btn.primary[aria-disabled='true'] {
   display: block;
   width: 16px;
   height: 16px;
+  background: var(--muted);
+  -webkit-mask: var(--i) center / contain no-repeat;
+  mask: var(--i) center / contain no-repeat;
+}
+
+/* The setup panel's way out of the wizard, back to the screen it was entered
+   from. Same masked box as the toggle above — it is the header's other icon
+   control, and the two being drawn by different mechanisms is how they end up
+   different sizes. It leads the header, before the title: a back mark at the
+   trailing edge reads as belonging to whatever it sits beside, which here is the
+   pair of controls that close the card rather than the screen it is leaving. */
+.cf-back {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex: none;
+  --i: var(--icon-back);
+}
+.cf-back::before {
+  content: '';
+  display: block;
+  width: 18px;
+  height: 18px;
   background: var(--muted);
   -webkit-mask: var(--i) center / contain no-repeat;
   mask: var(--i) center / contain no-repeat;

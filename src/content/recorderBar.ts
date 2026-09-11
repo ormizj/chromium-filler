@@ -296,7 +296,24 @@ export class RecorderBar {
     for (const { id, keys } of groups) {
       const pending = keys.filter((k) => !data.bound.includes(k));
       const shown = pending.length ? pending : keys;
-      menu.append(text('div', MARK_GROUP_TEXT[id], 'cf-rec-menu-head'));
+      /*
+       * One element per group, and the head is its first child. Flat, the head was a
+       * `--muted-2` line of `--text-xs` directly under a caption of exactly that
+       * colour and size, so it read as a third line of the caption above it rather
+       * than as the start of anything. The wrapper is what the hairline between
+       * groups is drawn from, and what lets the head hold its place while a 60vh
+       * list scrolls — a group is the unit both of those rules are about.
+       *
+       * `role="group"` because a wrapper alone would take the items out of the
+       * menu's ownership: `role="menu"` owns its `menuitem`s, and only a `group` may
+       * come between them. It is named by the head it already draws.
+       */
+      const group = el('div', 'cf-rec-menu-group');
+      group.setAttribute('role', 'group');
+      const head = text('div', MARK_GROUP_TEXT[id], 'cf-rec-menu-head');
+      head.id = `cf-mark-group-${id}`;
+      group.setAttribute('aria-labelledby', head.id);
+      group.append(head);
       for (const key of shown) {
         const b = btn('', () => choose(key), 'btn-ghost');
         b.setAttribute('role', 'menuitem');
@@ -306,6 +323,11 @@ export class RecorderBar {
         // terms of art — "Quick-apply marker" says nothing on its own, and this is
         // the last surface where the choice is still open. Drawn rather than hidden
         // behind hover, because the priority target is a phone and has none.
+        //
+        // What it says is an example rather than a definition, and `BIND_HELP` is
+        // where that rule is written down: the label above it and the head above
+        // that have both already given the definition, so a third go at it is the
+        // one thing a caption here must not be.
         const hint = !isFieldBind(key) && HINTED.has(id) ? BIND_HELP[key].short : undefined;
         if (hint) {
           // Described by, not labelled by. The item's name is the mark's name — that
@@ -318,8 +340,9 @@ export class RecorderBar {
           b.setAttribute('aria-describedby', note.id);
           b.append(note);
         }
-        menu.append(b);
+        group.append(b);
       }
+      menu.append(group);
     }
     return menu;
   }

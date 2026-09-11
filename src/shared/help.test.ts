@@ -1,5 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import type { SiteConfig } from './types';
+import { BIND_LABELS, MARK_GROUP_TEXT } from './labels';
+import { markGroupOf, type ConfigBindKey } from './recording';
 import {
   BIND_HELP, CONCEPT_HELP, CONFIG_HELP, DOT_LEGEND, PREP_HELP, REDIRECT_HELP,
   SETTINGS_HELP, SETUP_STEP_HELP, describeConfig, type HelpEntry,
@@ -43,6 +45,36 @@ describe('help catalog', () => {
     }
     expect(BIND_HELP.submit).toBe(CONFIG_HELP.submitSelector);
     expect(BIND_HELP.quickApplySelector).toBe(REDIRECT_HELP.quickApplySelector);
+  });
+
+  /**
+   * And it has to be an example rather than a definition. The caption sits under the
+   * mark's own name and under the head of its group, both of which have already
+   * given the definition — so "External apply link · the link out to the employer's
+   * own application", read under "Applying on the employer's site", is one thing said
+   * three times, and the menu still has not said *which* link.
+   *
+   * So the test is not "does it repeat a word" — a caption is allowed to use the
+   * words around it — but "does it bring any of its own": at least two content words
+   * the label and the head between them do not already have. That is what a caption
+   * costs a line of a 60vh list for. Words are matched on their first four letters,
+   * because "applies" under "Applying" is the same word doing the same nothing.
+   */
+  it('captions a mark with something its name and its head do not already say', () => {
+    const stem = (w: string) => w.slice(0, 4);
+    const words = (s: string) => (s.toLowerCase().match(/[a-z]+/g) ?? []);
+
+    for (const [key, entry] of Object.entries(BIND_HELP)) {
+      const bind = key as ConfigBindKey;
+      const known = new Set([
+        ...words(BIND_LABELS[bind]),
+        ...words(MARK_GROUP_TEXT[markGroupOf(bind)]),
+      ].map(stem));
+      // Five letters and up: the rule is about what a caption contributes, and the
+      // short words it needs to make a sentence out of it contribute nothing.
+      const own = words(entry.short!).filter((w) => w.length >= 5 && !known.has(stem(w)));
+      expect(own.length, `${key}: ${entry.short}`).toBeGreaterThanOrEqual(2);
+    }
   });
 
   it('documents every row of every setup step', () => {

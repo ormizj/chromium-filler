@@ -193,6 +193,7 @@ export type ActionKey =
   | 'siteSetup'
   | 'fullscreen'
   | 'exitFullscreen'
+  | 'backToHome'
   | 'stopRecording'
   | 'resetRecording'
   | 'resetRecordingConfirm'
@@ -247,6 +248,13 @@ export const ACTION_LABELS: Record<ActionKey, string> = {
   // which is exactly why they belong here and not inline as a string literal.
   fullscreen: 'Fullscreen',
   exitFullscreen: 'Exit fullscreen',
+  // The setup panel's way back out of the six-step wizard, and icon-only for the
+  // same reason those two are: it sits in the header, where there is room for a
+  // mark and none for a word. Named for where it *goes* rather than "Back" — the
+  // footer already carries a Back, and that one walks one step; this one walks the
+  // whole screen. Two controls a card apart both reading "Back" is the drift this
+  // catalog exists to stop.
+  backToHome: 'Back to Site setup',
   // "Done", not "Stop": the user has finished applying, which is a thing they did,
   // not a recording they are operating.
   stopRecording: 'Done',

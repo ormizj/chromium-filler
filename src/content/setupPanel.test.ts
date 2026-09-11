@@ -211,6 +211,86 @@ describe('setup wizard steps', () => {
 });
 
 /**
+ * The wizard is entered by one press and, until this, left by none.
+ *
+ * The footer's `‹ Back` walks *steps* and is disabled on the first of them, and
+ * `Done` — which destroys the panel rather than going anywhere — only replaces
+ * `Next ›` on the last. So `Review configuration` was a one-way door: leaving meant
+ * five taps of Next, or minimizing to a pill and hunting for the review modal's.
+ */
+describe('leaving the wizard', () => {
+  const back = (s: ShadowRoot) => s.querySelector<HTMLButtonElement>('.cf-header .cf-back');
+
+  it('goes back to home, the screen it was entered from', () => {
+    const s = render(data());
+    expect(s.querySelector('.cf-rail')).not.toBeNull();
+
+    back(s)!.click();
+    expect(s.querySelector('.cf-rail')).toBeNull();
+    expect(s.querySelectorAll('.cf-pass')).toHaveLength(2);
+  });
+
+  /**
+   * And comes back to the step it left. `placed` decides the landing step once, so
+   * re-entering must not restart a form the user has already walked half of — the
+   * same rule that keeps a Pick from throwing them back to step 1.
+   */
+  it('returns to the step the user left', () => {
+    const s = render(data());
+    nextBtn(s).click();
+    nextBtn(s).click();
+    expect(shown(s)).toBe(SETUP_STEP_TITLES.kind);
+
+    back(s)!.click();
+    manualBtn(s).click();
+    expect(shown(s)).toBe(SETUP_STEP_TITLES.kind);
+  });
+
+  /**
+   * It is not a save, so the screen it lands on must not claim one. `justSaved` is
+   * about the press that got there, and this press is the other one.
+   */
+  it('does not read as a recording having landed', () => {
+    const s = render(data());
+    panel!.showHome({ saved: true });
+    manualBtn(s).click();
+    back(s)!.click();
+    expect(shown(s)).not.toBe('Site setup saved');
+  });
+
+  // Home has nothing behind it, and the review's whole content is Discard-or-Save —
+  // a third exit there is a way to walk away from a recording without saying what
+  // became of it.
+  it('is offered on no other screen', () => {
+    expect(back(mount(data()))).toBeNull();
+
+    const { recording, compiled } = recorded();
+    const s = render(data({ recording, compiled }));
+    panel!.showReview(true);
+    expect(back(s)).toBeNull();
+  });
+
+  /**
+   * A header control, not a footer one. The footer is two buttons with exactly one
+   * primary on every step — the 390px rule the review modal follows too — so a third
+   * way out had to go somewhere else, and it must not take the coral with it.
+   */
+  it('leaves the footer’s two buttons and its one primary alone', () => {
+    const s = render(data());
+    expect(s.querySelectorAll('.cf-footer .cf-btn')).toHaveLength(2);
+    expect(s.querySelectorAll('.cf-card .cf-btn.primary')).toHaveLength(1);
+    expect(back(s)!.classList.contains('cf-btn')).toBe(false);
+  });
+
+  // Icon-only, so the accessible name is the whole of what it is called.
+  it('is named, having no text of its own', () => {
+    const s = render(data());
+    expect(back(s)!.textContent).toBe('');
+    expect(back(s)!.getAttribute('aria-label')).toBe(ACTION_LABELS.backToHome);
+  });
+});
+
+/**
  * The other half of "an edit does not start fresh". The step surviving a
  * re-render is no use if the re-render still scrolls you to the top, drops your
  * focus and wipes what you were typing — `paint` replaces the whole `.cf-card`,

@@ -327,6 +327,44 @@ export class SetupPanel extends Sheet<SetupData> {
     return pill;
   }
 
+  /**
+   * The way out of the wizard, and the only one it had.
+   *
+   * `Review configuration` is a one-way door without it: the footer's `‹ Back` walks
+   * *steps* and is disabled on the first of them, and `Done` — which destroys the
+   * panel rather than going anywhere — only replaces `Next ›` on the last. So the
+   * press that opened the six-step form had no matching press that closed it, and
+   * leaving meant five taps of Next, or minimizing to a pill and hunting for the
+   * review modal's.
+   *
+   * It goes **home**, not to the modal: home is where it was entered from, the panel
+   * stays alive with every mark and pick intact, and home's own `Done` is what hands
+   * the slot back to the card underneath. Two presses, both of them named.
+   *
+   * In the header rather than the footer, for two reasons. The footer is two buttons
+   * with one primary on every step — the 390px rule the review modal follows too —
+   * and a third would break it. And this is a different kind of movement from the one
+   * the footer makes: Back walks one step of a task, this leaves the task.
+   *
+   * **Only in the wizard.** The review screen's whole content is Discard-or-Save, and
+   * a third exit there would be a way to walk away from a recording without saying
+   * what became of it. Home has nothing behind it.
+   *
+   * It leads the header, before the title, and `this.step` is deliberately untouched:
+   * `placed` decides the landing step once, so pressing `Review configuration` again
+   * comes back to the step the user left rather than to the top of a form they have
+   * already walked half of.
+   */
+  private backButton(): HTMLElement[] {
+    if (this.mode !== 'wizard') return [];
+    const back = el('button', 'cf-back');
+    // No text: the mark is a masked icon, so the accessible name is the whole of
+    // what this control is called — the same rule `.cf-fullscreen` follows.
+    back.setAttribute('aria-label', ACTION_LABELS.backToHome);
+    back.onclick = () => this.showHome();
+    return [back];
+  }
+
   protected buildCard(): HTMLElement {
     const data = this.data!;
     const card = el('div', 'cf-card');
@@ -356,7 +394,7 @@ export class SetupPanel extends Sheet<SetupData> {
     // is the same mistake the review modal's close button used to make.
     close.setAttribute('aria-label', 'Minimize');
     close.onclick = () => this.minimize();
-    header.append(title, full, close);
+    header.append(...this.backButton(), title, full, close);
     this.makeDraggable(card, header);
 
     if (this.mode === 'review' && data.recording && data.compiled) {

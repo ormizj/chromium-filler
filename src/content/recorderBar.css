@@ -269,6 +269,14 @@
   overflow-y: auto;
   min-width: 260px;
   max-width: min(320px, calc(100vw - 2 * var(--space-4)));
+  /*
+   * No padding on the block axis, because this is the scrollport and a sticky head
+   * comes to rest *below* it: with `padding: var(--space-1)` all round, a 4px strip
+   * of the item passing behind the head showed through above it — a sliver of a word
+   * hanging under the popover's top edge. The space is real, so the first and last
+   * groups carry it instead, where it scrolls away with them.
+   */
+  padding-block: 0;
 }
 
 @media (pointer: coarse) {
@@ -306,9 +314,48 @@
   margin-top: var(--space-2);
 }
 
+/*
+ * A hairline between the groups, not a gap. The captions under the two marks groups
+ * are prose that wraps, so whatever space is put above a head is space the paragraph
+ * above it may have used anyway — and a head with nothing but air over it went on
+ * reading as one more line of that paragraph. The rule is the one thing a caption
+ * cannot produce by accident.
+ */
+/* The block padding the scrollport gave up, on the two groups at the ends of it. */
+.cf-rec-menu-group:first-child {
+  padding-top: var(--space-1);
+}
+
+.cf-rec-menu-group:last-child {
+  padding-bottom: var(--space-1);
+}
+
+.cf-rec-menu-group + .cf-rec-menu-group {
+  margin-top: var(--space-1);
+  padding-top: var(--space-1);
+  border-top: 1px solid var(--border);
+}
+
+/*
+ * `--muted`, not `--muted-2`: the head has to out-rank the captions beneath it, and
+ * at the caption's own colour and size the only thing separating them was the
+ * uppercasing.
+ *
+ * Sticky within its own group, which is what makes a 60vh list of ~26 marks
+ * readable: scrolled into the middle of it, the head that is still on screen is the
+ * one whose group you are in. It paints over the items passing under it, so it needs
+ * both the menu's own background and a stacking context — sticky alone makes
+ * neither. `top: 0` comes to rest inside the scrollport's own padding, which is why
+ * that padding is not on the scrollport: 4px of the item passing behind the head
+ * showed through above it otherwise.
+ */
 .cf-rec-menu-head {
+  position: sticky;
+  top: 0;
+  z-index: 1;
   padding: var(--space-1) var(--space-2);
-  color: var(--muted-2);
+  background: var(--bg);
+  color: var(--muted);
   font-size: var(--text-xs);
   text-transform: uppercase;
   letter-spacing: 0.04em;

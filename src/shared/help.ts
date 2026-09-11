@@ -158,7 +158,7 @@ export const CONFIG_HELP: Record<keyof SiteConfig, HelpEntry> = {
     title: 'submitSelector',
     body: 'The site\'s own Send button — the control Apply presses for you. Leave it '
       + 'unset and the button is found by its label; save one to settle it for good.',
-    short: 'The site\u2019s own button that sends the application.',
+    short: 'Usually the last button on the form \u2014 \u201cSubmit application\u201d.',
     when: 'Apply is greyed out because nothing was found, or the page has several '
       + 'buttons and you want to be certain which one is pressed.',
     example: 'button[data-qa="submit-application"]',
@@ -214,7 +214,7 @@ export const REDIRECT_HELP: Record<keyof RedirectConfig, HelpEntry> = {
     title: 'applySelector',
     body: 'The control that leaves for the external application — usually the "Apply '
       + 'on company website" link, but a button with no href works too.',
-    short: 'The link out to the employer\u2019s own application.',
+    short: 'Usually \u201cApply on company website\u201d.',
     example: 'a.external-apply',
   },
   quickApplySelector: {
@@ -225,7 +225,7 @@ export const REDIRECT_HELP: Record<keyof RedirectConfig, HelpEntry> = {
       + 'the postings that apply here have, like the form itself, and not a header '
       + 'every posting carries: a marker that matches everywhere quietly stops this '
       + 'board\'s external postings from ever handing off.',
-    short: 'Proof the form is on this page, so the posting fills here.',
+    short: 'Something only the postings that apply here have \u2014 the form itself will do.',
     when: 'A quick-apply posting is being mistaken for an external one.',
     example: 'form.quick-apply',
   },
@@ -233,7 +233,7 @@ export const REDIRECT_HELP: Record<keyof RedirectConfig, HelpEntry> = {
     title: 'markerSelector',
     body: 'A badge or label that means "this one is external", for boards whose apply '
       + 'link looks internal until you click it.',
-    short: 'A badge meaning this posting applies somewhere else.',
+    short: 'A badge saying the job applies somewhere else.',
     example: '.badge--external',
   },
   beforeFollow: {
@@ -269,6 +269,15 @@ export const REDIRECT_HELP: Record<keyof RedirectConfig, HelpEntry> = {
  * until it has an explanation, like every other catalog here. The profile fields are
  * not keyed: their name *is* the explanation, and sixteen captions under sixteen
  * self-evident labels is a wall rather than help.
+ *
+ * **The `short` each of these reaches is an example, not a definition**, and that is
+ * the one rule this map imposes on the catalogs above it. A caption sits under the
+ * mark's own name and under the head of its group, so a definition is that name said
+ * twice — "External apply link · the link out to the employer's own application",
+ * read under "Applying on the employer's site". What the menu is missing at that
+ * moment is *which thing on this page*, so the shorts name the words a user is
+ * looking at: “Apply on company website”, the last button on the form, the badge.
+ * `help.test.ts` fails a short that contains its own `BIND_LABELS` name.
  */
 export const BIND_HELP: Record<ConfigBindKey, HelpEntry> = {
   submit: CONFIG_HELP.submitSelector,

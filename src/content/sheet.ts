@@ -86,6 +86,17 @@ const NARROW = NARROW_WIDTH;
 /** A drag under this many px is a tap, not a gesture (narrow sheets only). */
 const TAP_SLOP = 24;
 
+/**
+ * The controls that live inside a drag handle, and so must never start a drag.
+ *
+ * The header *is* the handle, and everything a header carries is a button: close,
+ * fullscreen, the review modal's view toggle, the setup panel's way back out of the
+ * wizard. One list rather than one `stopPropagation` per control, because the cost
+ * of forgetting is silent — the press does nothing on a mouse and, with the handle's
+ * `touch-action: none`, may never resolve as a click at all on a phone.
+ */
+const NOT_A_DRAG = '.cf-close, .cf-back, .cf-views, .cf-fullscreen, .cf-grab';
+
 /** What a rebuild would otherwise throw away. See `Sheet.userPlace`. */
 interface UserPlace {
   scrollTop: number;
@@ -438,7 +449,11 @@ export abstract class Sheet<D extends SheetData> {
     let narrow = false;
 
     const onDown = (e: PointerEvent) => {
-      if ((e.target as HTMLElement).closest('.cf-close, .cf-views, .cf-fullscreen, .cf-grab')) return;
+      // The header is the drag handle, so every control living in it has to be
+      // excused here or its press becomes a drag of the whole card — and with
+      // `touch-action: none` on the handle, on a phone that press may never
+      // resolve as a click at all.
+      if ((e.target as HTMLElement).closest(NOT_A_DRAG)) return;
       // Nothing to drag while fullscreen: moving the card would take it out from
       // under the flag, leaving it looking restored while the setting still said
       // fullscreen — and on narrow it would strand a 40vh peek claiming to be one.
