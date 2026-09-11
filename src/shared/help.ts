@@ -894,8 +894,11 @@ export const CONCEPT_HELP: Record<ConceptKey, HelpEntry> = {
       + 'it for itself: this posting is marked applied, and every later one on this site '
       + 'is too, without asking again. Nothing is recorded as applied until you point at '
       + 'something, so if the form came back with an error instead, press "Not yet" and '
-      + 'nothing is lost.',
-    when: 'The first time you apply on a site whose first setup pass is done. Turn '
+      + 'nothing is lost. Or press "I\u2019ll send it myself" and press the site\u2019s own '
+      + 'button when you are ready: the same bar comes up and waits, and the setup '
+      + 'finishes the same way.',
+    when: 'The first time you apply on a site whose first setup pass is done \u2014 the '
+      + 'review card opens on this question the moment a first pass is saved. Turn '
       + '"Finish setup when you apply" off in Settings to keep Apply blocked instead, '
       + 'and press "Mark the confirmation" in Site setup when you apply by hand.',
   },

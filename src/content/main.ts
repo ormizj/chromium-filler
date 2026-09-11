@@ -165,6 +165,25 @@ class Controller {
    */
   private recorderNotice?: string;
   /**
+   * Whether the after-sending pass was reached by actually sending something.
+   *
+   * Apply presses the site's Send button and *then* opens the bar; the panel's
+   * `Mark the confirmation` and the review card's `I’ll send it myself` open it over
+   * a page where nothing has gone in yet. The bar's one sentence is a different
+   * sentence in each case, and through the second door the first one is untrue.
+   */
+  private confirmationPassSent = false;
+  /**
+   * A recording's first pass was saved a moment ago and the card in front of the user
+   * is the report of it.
+   *
+   * One render only — `detectAndFill` clears it, the same rule `confirmedFields`
+   * follows: it is a fact about the press that got here, not about the site, so a
+   * Re-run must not still be claiming it. All it changes is which of the two
+   * `finishSetup` wordings the banner uses.
+   */
+  private setupJustSaved = false;
+  /**
    * What happened when a declared field was filled, so the field sweep can redraw it.
    *
    * `markBoundSteps` runs a few hundred milliseconds after every recorded gesture and
@@ -238,8 +257,18 @@ class Controller {
       // Say so on screen. The site's own confirmation is often below the fold,
       // or behind this very modal, so "did that go through?" is otherwise a
       // question the user answers by scrolling around the page they just sent.
+      //
+      // Unfolded first, and that is the whole of the receipt appearing at all on the
+      // path that most needs it. `apply()` folds the card to its pill before pressing
+      // Send — the user is about to be asked to point at the page — so `showModal`
+      // alone repainted a *pill*, and the green banner, the `Sent` chip and
+      // `Applied ✓` were only ever seen by someone who reloaded. `restore` is a no-op
+      // on a card that is already expanded, so the ordinary Apply is untouched.
       this.applied = true;
-      if (this.modal) this.showModal();
+      if (this.modal) {
+        this.modal.restore();
+        this.showModal();
+      }
     };
 
     // Wait for the confirmation element to be VISIBLE, not merely present.
@@ -341,6 +370,9 @@ class Controller {
     if (this.recorder || this.recordingPhase() === 'afterSend') return;
     if (!this.config) return;
     const config = this.config;
+    // A fresh run is a fresh record, so the report of the save that led here goes
+    // with the last one — `Re-run` is the press that most obviously ends it.
+    this.setupJustSaved = false;
 
     // Refresh profile + CV each run (user may have edited them).
     const state = await getState();
@@ -454,6 +486,41 @@ class Controller {
   private async fillHere(): Promise<void> {
     this.fillAnyway = true;
     await this.run();
+  }
+
+  /**
+   * The fill a freshly-saved recording hands to the review card.
+   *
+   * A recording leaves the page half-filled — `pickForBind` fills the fields the user
+   * *declared* and nothing else — and `run()` stands down for the whole of one, so
+   * the form behind the setup panel has never seen a real fill. This is that fill,
+   * and then the card, so the question the card is about to ask ("send this
+   * application?") is asked over the application it would send.
+   *
+   * A near-copy of the tail of `run()` rather than a call to it, for two reasons:
+   *
+   * - **It must not replay `prep`.** Those steps are the clicks the user has just
+   *   made by hand — that is where they came from — so the page is already where they
+   *   would take it, and running them again re-presses "Show more" and re-toggles the
+   *   disclosure that opened the form.
+   * - **It must not follow a handoff.** `run()` decides `shouldFollow` before
+   *   anything else, and a two-step config saved a second ago would navigate straight
+   *   off the page the recording was made on.
+   */
+  private async fillForSend(): Promise<void> {
+    const state = await getState();
+    this.profile = state.profile;
+    this.config = findMatchingConfig(location.href, state.siteConfigs) ?? this.config;
+    this.readAppliedRecord(state.jobUrls);
+    await this.loadDocs();
+    this.session = await this.fetchSession();
+    if (!this.config) return;
+
+    this.detectAndFill();
+    this.setupSubmitDetection();
+    this.noteApplying();
+    this.showModal();
+    this.hasRun = true;
   }
 
   /**
@@ -602,6 +669,17 @@ class Controller {
         onFollow: () => { this.followed = false; void this.followRedirect(this.detection!); },
         onFillAnyway: () => this.fillHere(),
         onSkip: () => this.skipPosting(),
+        // The other answer to `finishSetup`: the user presses the site's own Send
+        // button, and the extension stands by to ask where the reply is. It is the
+        // same second pass Apply reaches — only the finger that sends is different,
+        // which is why it goes to the same method the panel's own offer does.
+        onSendMyself: () => {
+          // The card folds first, for the same reason it does under Apply: what
+          // happens next happens on the page — the user has to reach the site's own
+          // Send button, and then point at whatever it answers with.
+          this.modal?.minimize();
+          void this.startConfirmationPass(false);
+        },
         // The two ways out of a posting, from the overflow menu. Setup is a
         // direct call and not a message: the panel lives in this same content
         // script, and `openSetup` already folds the modal to its pill through
@@ -646,6 +724,7 @@ class Controller {
       applied: this.applied,
       alreadyApplied: this.alreadyApplied,
       appliedAt: this.appliedAt,
+      setupSaved: this.setupJustSaved,
       redirect: isRedirect
         ? { host: det!.href ? hostOf(det!.href) : undefined, reason: det!.reason, followed: this.followed }
         : undefined,
@@ -826,8 +905,9 @@ class Controller {
    * live and nothing they do is watched — the only thing this pass can produce is the
    * one thing they point at.
    */
-  private async startConfirmationPass(): Promise<void> {
+  private async startConfirmationPass(sent: boolean): Promise<void> {
     if (this.recording) return;
+    this.confirmationPassSent = sent;
     this.config = await ensureConfigForUrl(location.href);
     await chrome.runtime.sendMessage({
       type: MSG.RECORD_START,
@@ -895,7 +975,16 @@ class Controller {
     if (!recording) return;
 
     const compiled = compileRecording(recording);
-    if (!compiled.posting.successSelector) return;
+    if (!compiled.posting.successSelector) {
+      // Nothing to write, and the bar must not go on asking as though nothing had
+      // happened — the user pointed at something and a silent return reads as the
+      // press having done nothing at all. Same rule as `heldSendNotice`: a refusal
+      // explains itself where it happened.
+      this.recorderNotice = 'That mark could not be saved. Point at the message the '
+        + 'site shows back, or press Done to leave this site as it is.';
+      this.paintBar();
+      return;
+    }
 
     const config = await ensureConfigForUrl(compiled.posting.url);
     await applyConfigPatch(config.id, compiled.posting);
@@ -920,6 +1009,7 @@ class Controller {
     this.recorderBar?.destroy();
     this.recorderBar = undefined;
     this.recorderNotice = undefined;
+    this.confirmationPassSent = false;
     this.clearRecording();
   }
 
@@ -1256,7 +1346,7 @@ class Controller {
       const field = isFieldBind(bind) ? fieldOf(bind) : undefined;
       const target = field ? resolveControl(element, field === 'resume') : element;
 
-      void this.onRecordedStep({
+      const pushed = this.onRecordedStep({
         id: `p${Date.now().toString(36)}`,
         at: Math.max(0, Date.now() - recording.startedAt),
         leg,
@@ -1296,9 +1386,20 @@ class Controller {
       // then the Send button and, unlabelled, they are two identical green outlines
       // with nothing saying which is which — on exactly the two marks that gate Apply.
       highlight(target as HTMLElement, filled === false ? 'low' : 'high', bindLabel(bind));
-      // The after-sending pass exists for exactly one mark, so making it is the end
-      // of the pass — there is nothing further to press Done about.
-      if ((recording.phase ?? 'beforeSend') === 'afterSend') void this.finishConfirmationPass();
+      /*
+       * The after-sending pass exists for exactly one mark, so making it is the end
+       * of the pass — there is nothing further to press Done about.
+       *
+       * After the push has landed, though, and that is not tidiness. `RECORD_PUSH`
+       * and the `RECORD_STOP` this ends in are both read-modify-writes of the same
+       * `chrome.storage.session` entry with no lock between them; if the stop's read
+       * won, it returned a recording with no steps, `finishConfirmationPass`
+       * overwrote the good local copy with it, and the one mark the user came here
+       * to make compiled to nothing — silently.
+       */
+      if ((recording.phase ?? 'beforeSend') === 'afterSend') {
+        void pushed.then(() => this.finishConfirmationPass());
+      }
       // No sweep is scheduled here: the step above went through `onRecordedStep`,
       // which arms one, and `markBoundSteps` redraws this mark from that very step.
     }, bindLabel(bind), () => this.paintBar());
@@ -1316,6 +1417,7 @@ class Controller {
       last: recording.steps[recording.steps.length - 1],
       bound: recording.steps.map((s) => s.bind).filter((b): b is BindKey => !!b),
       notice: this.recorderNotice,
+      sent: this.confirmationPassSent,
     });
   }
 
@@ -1399,6 +1501,47 @@ class Controller {
     this.clearRecording();
     this.setupPanel?.showHome({ saved: true });
     await this.refreshSetup();
+
+    /*
+     * And then hand the user to the card that can finish the job.
+     *
+     * The first pass ends with the site able to fill and knowing what sends it, and
+     * exactly one thing outstanding: the message it shows once an application has
+     * really gone in, which does not exist until one has. Home said so and offered
+     * `Mark the confirmation` — a control that waits over a live page for something
+     * to point at, on a page where nothing has been sent and nothing is going to be.
+     * So the seam was silent in the one place it had to speak.
+     *
+     * Four guards, and each says a different thing. `refreshSetup` above is what
+     * makes all of them current: it re-reads the config this save just wrote and
+     * re-runs the classifier, so every one of them is about the page as it now is.
+     */
+    // Nothing to finish, and nothing to send: a posting on record as applied has no
+    // decision left on it at all.
+    if (this.applied || this.alreadyApplied) return;
+    // Never over a card that is about to say something else. On a posting the
+    // classifier reads as a handoff the review's banner leads with "Applies on the
+    // employer's own site" and its primary opens that application — pushing it in
+    // front of the user with an offer to send *here* would be two answers to one
+    // question, on the one surface whose whole job is saying what happens next.
+    if (this.detection?.kind === 'redirect') return;
+    // A *saved* Send button, which is rule 10: the leg that sends the application
+    // owns the sending, so a selector saved for this page is the user having marked
+    // the button on it. Deliberately not `findSubmitControl`'s label heuristic, which
+    // nominates something on almost any page — nothing is offered on a guess.
+    if (!this.config?.submitSelector) return;
+    // And the rest of the offer's honesty, in the one place it is already written:
+    // `settings.finishSetupOnApply` is on, no confirmation is saved yet, and the
+    // button resolves here and now. With the setting off, or on a page where it does
+    // not resolve, this is exactly what it always was — home, and no hand-off.
+    if (this.applyState(false) !== 'finishSetup') return;
+
+    this.setupJustSaved = true;
+    await this.fillForSend();
+    // Over the panel, which folds to its pill: `restore` reports the unfold through
+    // `onFold`, and `arbitrateSheets` is what hands the one slot across. A card that
+    // was already expanded is left exactly as it is.
+    this.modal?.restore();
   }
 
   /** Leave the review, keeping whatever was already in the config. */
@@ -1449,7 +1592,8 @@ class Controller {
         onStartRecording: () => void this.startRecording(),
         // The panel's way into the second pass: no Send is pressed, because the user
         // is going to apply by hand. The bar is identical — it has only ever waited.
-        onMarkConfirmation: () => void this.startConfirmationPass(),
+        // By hand, from the panel: nothing has been sent, and the bar has to say so.
+        onMarkConfirmation: () => void this.startConfirmationPass(false),
         onRebindStep: (id, bind) => void this.rebindStep(id, bind),
         onRepickStep: (id) => this.repickStep(id),
         onRemoveStep: (id) => void this.removeStep(id),
@@ -1906,7 +2050,7 @@ class Controller {
      */
     if (this.applyState(false) === 'finishSetup') {
       this.modal?.minimize();
-      await this.startConfirmationPass();
+      await this.startConfirmationPass(true);
     }
     if (this.config?.submitCv?.length) {
       try {

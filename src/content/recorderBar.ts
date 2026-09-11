@@ -29,7 +29,8 @@
  */
 
 import {
-  ACTION_LABELS, BIND_LABELS, MARK_GROUP_TEXT, RECORD_PASS_TEXT, resetRecordingPrompt,
+  ACTION_LABELS, AFTER_SEND_ASK, BIND_LABELS, MARK_GROUP_TEXT, RECORD_PASS_TEXT,
+  resetRecordingPrompt,
 } from '../shared/labels';
 import { BIND_HELP } from '../shared/help';
 import { FIELD_LABELS } from '../shared/fieldKeys';
@@ -78,6 +79,16 @@ export interface RecorderBarState {
   last?: RecordedStep;
   /** What has already been marked, so the menu can lead with what has not. */
   bound: BindKey[];
+  /**
+   * Whether the application has already gone in — `afterSend` only.
+   *
+   * The pass has two doors: Apply presses the site's Send button and then opens this
+   * bar, and `I’ll send it myself` (or the panel's own `Mark the confirmation`) opens
+   * it over a page where nothing has been sent at all. The one sentence this bar
+   * carries is a different sentence in each case, and through the second door the
+   * first one is simply untrue.
+   */
+  sent?: boolean;
   /**
    * One thing to say about the press that just happened, when it was not simply
    * recorded — today, only that a send was held. Transient: it is cleared by the next
@@ -164,6 +175,10 @@ export class RecorderBar {
     bar.setAttribute('role', 'toolbar');
     bar.setAttribute('aria-label', RECORD_PASS_TEXT[data.phase].aria);
     if (data.phase === 'afterSend') bar.classList.add('cf-bar-after');
+    // Reporting rather than asking, which is also the moment the review card comes
+    // back expanded underneath — and on a phone that card owns the bottom of the
+    // screen. See the placement note in `recorderBar.css`.
+    if (data.phase === 'afterSend' && data.notice) bar.classList.add('cf-bar-report');
     // The held send's explanation is a paragraph, and a paragraph cannot share a row
     // with four controls — see the wrap rule in `recorderBar.css`. Only on the first
     // pass: the after-sending bar is three children wide and its sentence *is* the
@@ -363,9 +378,7 @@ export class RecorderBar {
       // over a page that has just changed under them. Once the mark is written the
       // same line carries the report instead — one place to look, either way.
       what.classList.add('cf-rec-ask');
-      what.append(text('span', data.notice
-        ?? 'Your application went in. Point at the message the site shows back, and '
-          + 'this site is finished.'));
+      what.append(text('span', data.notice ?? AFTER_SEND_ASK[data.sent ? 'sent' : 'unsent']));
       wrap.append(what);
       return wrap;
     }

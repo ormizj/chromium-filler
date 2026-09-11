@@ -252,3 +252,51 @@ describe('finishing the setup as you apply', () => {
       .toBe('finishSetup');
   });
 });
+
+/**
+ * The same offer, at the one moment it is an answer to something the user just did.
+ *
+ * A recording's first pass ends by writing a config that can fill this site and
+ * knows what sends it, and leaves exactly one thing outstanding — the message the
+ * site shows back, which does not exist until an application has gone in. The card
+ * is put in front of the user right then, so it has to lead with the press that got
+ * there rather than with the site. Same split as `applied` / `alreadyApplied`: one
+ * consequence, two moments, two keys.
+ */
+describe('the offer immediately after a first pass is saved', () => {
+  it('is its own state, worded for the save that just happened', () => {
+    const b = flowBanner({ ...base, applyState: 'finishSetup', setupSaved: true });
+    expect(b.key).toBe('finishSetupSaved');
+    expect(b.tone).toBe('accent');
+    expect(b.help).toBe('finishSetup');
+    expect(b.title).toMatch(/saved/i);
+  });
+
+  /** Both answers have to be in the words, because both are on the card. */
+  it('names the two ways on: send it now, or send it yourself', () => {
+    for (const key of ['finishSetup', 'finishSetupSaved'] as const) {
+      const b = flowBanner({
+        ...base, applyState: 'finishSetup', setupSaved: key === 'finishSetupSaved',
+      });
+      expect(b.key).toBe(key);
+      expect(b.detail).toMatch(/point at/i);
+      expect(b.detail).toMatch(/yourself/i);
+    }
+  });
+
+  /**
+   * It is a rendering of `finishSetup` and of nothing else. The flag rides on the
+   * controller for one render, so every other state has to ignore it rather than
+   * quietly re-word itself.
+   */
+  it('is ignored unless the site really is one press from finished', () => {
+    for (const applyState of ['ready', 'noButton', 'noConfirmation'] as const) {
+      expect(flowBanner({ ...base, applyState, setupSaved: true }).key).not.toBe('finishSetupSaved');
+    }
+    expect(flowBanner({ ...base, applyState: 'finishSetup', setupSaved: true, applied: true }).key)
+      .toBe('applied');
+    expect(flowBanner({
+      ...base, applyState: 'finishSetup', setupSaved: true, alreadyApplied: true,
+    }).key).toBe('alreadyApplied');
+  });
+});

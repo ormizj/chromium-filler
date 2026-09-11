@@ -29,6 +29,7 @@ function modalCallbacks(over: Partial<ModalCallbacks> = {}): ModalCallbacks {
   return {
     onRerun: noop, onApply: noop, onConfirm: noop, onPick: noop,
     onFollow: noop, onFillAnyway: noop, onSkip: noop, onClose: noop,
+    onSendMyself: noop,
     onOpenSetup: noop, onOpenOptions: noop,
     ...over,
   };

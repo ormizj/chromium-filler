@@ -38,6 +38,13 @@ export interface ModalCallbacks extends SheetCallbacks {
   onRerun(): void;
   /** Run the CV-confirmation steps, then press the site's own Send button. */
   onApply(): void;
+  /**
+   * The other answer to `finishSetup`: the user will press the site's own Send
+   * button themselves, and the extension stands by to ask where the reply is. It
+   * reaches the same second pass Apply does — the only difference is whose finger
+   * sends the application.
+   */
+  onSendMyself(): void;
   onConfirm(field: FieldMatch['field']): void;
   onPick(field: FieldMatch['field']): void;
   /** Follow (or re-try) the external application handoff. */
@@ -106,6 +113,12 @@ export interface ModalData extends SheetData {
   alreadyApplied?: boolean;
   /** When the record says the application went in, if the entry carries it. */
   appliedAt?: number;
+  /**
+   * A recording's first pass was saved a moment ago and this card is the report of
+   * it. Only ever changes the wording of `finishSetup`, and only for one render —
+   * see `FLOW_TEXT.finishSetupSaved`.
+   */
+  setupSaved?: boolean;
   redirect?: RedirectNotice;
   /**
    * This page's apply control hands off to a phone app and was left alone. Never
@@ -386,11 +399,28 @@ export class FillerModal extends Sheet<ModalData> {
         : 'Apply — no Send button found on this page, press to find out why');
     }
 
+    /*
+     * The one branch where Skip is not one of the two visible buttons.
+     *
+     * This footer is asking a question — send this application now, or send it
+     * yourself — and both of its answers have to be on screen: a user who would
+     * rather press the site's own button has no way to learn that doing so still
+     * finishes the setup if that route is behind a `⋯`. The two-buttons-plus-`⋯`
+     * rule is the 390px one and does not bend, so the third control is the one that
+     * is not an answer to the question. Skip stays reachable in the overflow, which
+     * is all its own rule ("a posting you do not want is worth skipping whether or
+     * not you can apply to it here") actually asks for.
+     */
+    const second = finishing
+      ? btn(ACTION_LABELS.sendItMyself, () => this.cb.onSendMyself())
+      : skip;
+
     actions.append(
       apply,
-      skip,
+      second,
       this.overflow([
         ...this.commonMenuItems(),
+        ...(finishing ? [skip] : []),
         btn(ACTION_LABELS.rerun, () => this.cb.onRerun()),
       ]),
     );
@@ -420,6 +450,7 @@ export class FillerModal extends Sheet<ModalData> {
       applied: data.applied,
       alreadyApplied: data.alreadyApplied,
       appliedAt: data.appliedAt,
+      setupSaved: data.setupSaved,
       redirect: data.redirect,
       appLink: data.appLink,
       filled: data.matches.filter((m) => m.filled).length,

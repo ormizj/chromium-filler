@@ -14,7 +14,9 @@ import {
   RecorderBar, bindLabel, type RecorderBarCallbacks, type RecorderBarState,
 } from './recorderBar';
 import type { BindKey } from '../shared/recording';
-import { ACTION_LABELS, MARK_GROUP_TEXT, RECORD_PASS_TEXT, heldSendNotice } from '../shared/labels';
+import {
+  ACTION_LABELS, AFTER_SEND_ASK, MARK_GROUP_TEXT, RECORD_PASS_TEXT, heldSendNotice,
+} from '../shared/labels';
 import { BIND_HELP } from '../shared/help';
 import { RECORDER_HOST_ID } from './extensionUi';
 
@@ -486,6 +488,22 @@ describe('the after-sending bar', () => {
     expect(s.querySelector('.cf-rec-count')?.textContent ?? '').not.toContain('7');
   });
 
+  /**
+   * The pass has two doors and only one of them has sent anything. Reached from the
+   * panel — or from the review card's `I’ll send it myself` — the application is
+   * still sitting on the page unsent, and a bar claiming it "went in" is telling the
+   * user the one thing they most need to be right about.
+   */
+  it('says the application has gone in when Apply is what sent it', () => {
+    expect(after({ sent: true }).querySelector('.cf-rec-ask')?.textContent)
+      .toBe(AFTER_SEND_ASK.sent);
+  });
+
+  it('asks the user to send it when nothing has been sent yet', () => {
+    expect(after({ sent: false }).querySelector('.cf-rec-ask')?.textContent)
+      .toBe(AFTER_SEND_ASK.unsent);
+  });
+
   it('reaches the picker through its one button', () => {
     let marked = 0;
     const s = render(state({ phase: 'afterSend' }), callbacks({ onMarkConfirmation: () => { marked += 1; } }));
@@ -503,6 +521,20 @@ describe('the after-sending bar', () => {
     expect(s.querySelector('.cf-rec-what')?.textContent).toContain('Saved.');
     expect(button(s, RECORD_PASS_TEXT.afterSend.action)).toBeUndefined();
     expect(button(s, ACTION_LABELS.done)).toBeTruthy();
+  });
+
+  /**
+   * The receipt arrives on the same gesture in the review card, which under 640px is
+   * a full-width bottom sheet — where this bar sits on a coarse pointer. Two reports
+   * over one another, so the smaller one moves; the class is what the stylesheet
+   * hangs that on, and jsdom can see nothing but the class.
+   */
+  it('gets out of the way of the card once it is only reporting', () => {
+    expect(card(after({ notice: 'Saved.' })).classList.contains('cf-bar-report')).toBe(true);
+  });
+
+  it('stays where it is while it is still asking', () => {
+    expect(card(after()).classList.contains('cf-bar-report')).toBe(false);
   });
 
   /**

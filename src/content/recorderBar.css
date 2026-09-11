@@ -38,6 +38,19 @@
     top: auto;
     bottom: calc(12px + env(safe-area-inset-bottom, 0px));
   }
+
+  /*
+   * Except once the mark has landed. The review card comes back expanded on the
+   * same gesture, carrying the receipt for the application — and under 640px that
+   * card is a full-width bottom sheet, which is exactly where this bar sits. Two
+   * reports over one another, and the one under is the one that matters. So the
+   * bar moves: it is the smaller object, all that is left of it is a line and a
+   * Done, and there is nothing at the top of the page competing for the space.
+   */
+  .cf-bar.cf-bar-report {
+    top: 12px;
+    bottom: auto;
+  }
 }
 
 /*

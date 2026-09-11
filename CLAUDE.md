@@ -55,13 +55,17 @@ escape hatch in a bar that is otherwise one line of readout, so the state most l
 to break the narrow layout), `recording-declare` and `recording-declare-external` (the
 Declare menu open — ~26 marks under four heads with a caption on four of them, none of
 it on screen until something opens it, and the two states differ only in which group
-leads, which is the whole of what the leg decides), and `after-send` / `after-send-saved` (the second pass's
-own bar: one question over a live page, and the report that replaces it — neither
-reachable by pressing anything, both being downstream of a real application), `review` /
+leads, which is the whole of what the leg decides), and `after-send` /
+`after-send-unsent` / `after-send-saved` (the second pass's
+own bar: one question over a live page, the same question through the by-hand door
+where nothing has been sent yet, and the report that replaces both — none of the three
+reachable by pressing anything, all being downstream of a real application), `review` /
 `review-external`, which are the two renderings a real page can only reach by
 applying to a job; modal: `long`, `redirect`,
 `redirect-followed`, `app-link`, `landed`, `empty`, `listing`, `failed-fill`, `apply-unset`,
-`apply-unverified`, `finish-setup`, `applied`, `already-applied`, `already-applied-redirect`,
+`apply-unverified`, `finish-setup`, `finish-setup-saved` (the same offer as the report
+of a first pass that has just been saved — downstream of a whole recording, so
+unreachable by any press), `applied`, `already-applied`, `already-applied-redirect`,
 `flush`, `fullscreen`; setup: `external`, `help`,
 `cv-steps`, `submit-unset`, `success-unset`; options *and popup*: `fresh`, which
 seeds an empty store — on options so the getting-started checklist is reachable
@@ -120,7 +124,11 @@ the two decisions: **Apply** (run any CV-confirmation steps, then press the site
 own Send button) and **Skip** (record the posting as skipped, and close the tab if
 `settings.closeTabOnSkip`). Re-run lives in the overflow behind them — the footer
 must never grow past two visible buttons plus `⋯`, because a third clipped the
-primary action off the right edge at 390px. **Reset is deliberately not there**:
+primary action off the right edge at 390px. **The `finishSetup` branch is the one
+place Skip is not one of the two**: that footer is asking a question with two
+answers (`Apply · finish setup` · `I’ll send it myself`) and both have to be on
+screen, so the control that is not an answer to it is the one that moves. Skip
+stays in the `⋯`, which is all its own rule asks for. **Reset is deliberately not there**:
 it blanks every field just filled and destroys the card holding the report, and
 an unconfirmed wipe with no undo does not belong one tap from Site setup on the
 surface whose whole job is showing what was filled. It stays on the popup
@@ -147,14 +155,23 @@ exists. See "Two passes, because the page has two halves".
 ### The flow banner
 `src/shared/flowState.ts` (pure) is the one place that decides **where a posting
 is in the flow**, and `labels.FLOW_TEXT` is where each state is worded.
-`flowBanner()` returns `{ key, tone, title, detail, help? }` for one of ten
+`flowBanner()` returns `{ key, tone, title, detail, help? }` for one of eleven
 states: `applied` / `alreadyApplied` · `appLink` · `external` / `externalOpened` ·
-`noButton` / `noConfirmation` / `finishSetup` · `empty` · `ready`.
+`noButton` / `noConfirmation` / `finishSetup` / `finishSetupSaved` · `empty` ·
+`ready`.
 
 `finishSetup` is the odd one in that group: it is `noConfirmation` with a way out, and
 the only non-`ready` state whose Apply is **live** and **coral**. See "Two passes"
 below — it is worded as an offer because the press is going to do something, and the
 banner has to say what before the button does it.
+
+`finishSetupSaved` is that same offer at the one moment it answers something the user
+just did: a recording's first pass has been saved and `saveRecording` has pushed this
+card in front of them. Same tone, same help, same two buttons — it leads with the save
+rather than with the site, which is the `applied` / `alreadyApplied` split exactly
+(one consequence, two moments, two keys). `FlowInput.setupSaved` is a one-shot flag on
+the controller, cleared by the next `run()`, and it is a rendering of `finishSetup`
+and of nothing else: every other state ignores it.
 
 It exists because the modal used to say none of this. Three unrelated renderings
 — an applied banner, a redirect notice, and an explanation of the greyed-out
@@ -441,12 +458,13 @@ on both phrases. Before this, one flow had four names (`Apply` in the modal,
 in the popup's session chips).
 
 `src/shared/labels.ts` is the wording counterpart to help.ts: `FLOW_TEXT`
-(the seven flow states above, keyed `Record<FlowKey, …>`), `STATUS_TEXT`
+(the eleven flow states above, keyed `Record<FlowKey, …>`), `STATUS_TEXT`
 (tile / word / aria for each `MatchConfidence`), `SETUP_STATUS_TEXT` (the same three
 outcomes worded for *setting a site up*, keyed `Record<RowStatus, …>`),
 `RECORD_PASS_TEXT` (the two passes — name, lead, action, the redo verb `again`, and
-the recorder bar's spoken toolbar name — keyed `Record<RecordPhase, …>`) and
-`ACTION_LABELS` (Apply,
+the recorder bar's spoken toolbar name — keyed `Record<RecordPhase, …>`),
+`AFTER_SEND_ASK` (the after-sending bar's one sentence, in its `sent` and `unsent`
+forms — see "Two passes") and `ACTION_LABELS` (Apply,
 Skip, Confirm, Pick, …), typed `Record<>` so a new status, pass or action fails
 `npm run typecheck` until it is named. `markConfirmation` is deliberately *not* in
 `ACTION_LABELS`: it is one pass's own verb, so it lives with that pass, and the same
@@ -793,6 +811,24 @@ The element the user just pointed at is visible, so the **existing** observer fi
 it. Stopping the recording *before* that is what lets `handleSubmitted` close the tab
 as usual — its "never while a recording is running" guard is for the first pass.
 
+Two things that path gets wrong if they are left out:
+
+- **The receipt has to be unfolded, not merely repainted.** `report()` ends in
+  `this.modal.restore()` before `showModal()`, because `apply()` folds the card to its
+  pill before pressing Send — so the repaint drew a *pill*, and the green banner, the
+  `Sent` chip and `Applied ✓` were only ever seen by someone who reloaded the posting.
+  `restore()` is a no-op on an expanded card, so the ordinary Apply is untouched. The
+  bar stays up with its own report, and takes the `cf-bar-report` class for it: on a
+  coarse pointer the bar lives at the bottom edge, which under 640px is exactly where
+  the restored bottom sheet is, so the smaller of the two reports moves to the top.
+- **The mark's push has to land before the stop.** `RECORD_PUSH` and `RECORD_STOP` are
+  read-modify-writes of the same `chrome.storage.session` entry with no lock, so
+  `pickForBind` chains the stop off the push. If the stop's read won, it returned a
+  recording with no steps, `finishConfirmationPass` overwrote the good local copy with
+  it, and the one mark the user came to make compiled to nothing — silently. A
+  `successSelector` that cannot be written must say so (`recorderNotice`), never
+  return quietly.
+
 **Apply is how the second pass is reached** (`applyState` → `'finishSetup'`, gated on
 `settings.finishSetupOnApply`, default on). This is the one place the rule "nothing is
 sent to a site whose outcome cannot be read back" bends, and it had to bend somewhere:
@@ -803,6 +839,35 @@ forever after. Guarded four ways: only while `successSelector` is unset, only on
 user press, only with a real submit control, and **nothing is recorded as applied
 until the user marks something**. Turning the setting off restores the old
 `noConfirmation` dead end exactly, and an E2E holds that branch.
+
+**And the offer is made, rather than waited for.** The seam between the two passes was
+silent in the one place it had to speak: `saveRecording` landed on the panel's home,
+whose second-pass block offers `Mark the confirmation` — a control that waits over a
+page where nothing has been sent and nothing is going to be. So a save that leaves the
+site one thing short hands the user to the card that can do something about it:
+`fillForSend()` fills the page and `showModal()` raises it, `restore()`d over the
+panel's pill, with `finishSetupSaved` on it. Three guards, and each is a different
+statement: the posting is not already applied; the *live classifier* does not read
+this page as a handoff (the card would then lead with "Applies on the employer's own
+site", and two answers to one question on that surface is worse than none); and the
+config has a **saved** `submitSelector`, which is rule 10 — the leg that sends owns
+the sending, so a selector saved for this page is the user having marked the button on
+it. Never the label heuristic, which nominates something on almost any page.
+
+`fillForSend` is a near-copy of the tail of `run()` and deliberately not a call to it:
+`run()` replays `config.prep`, which is the clicks the user has just made by hand (the
+form is already open — replaying them re-presses "Show more"), and it decides
+`shouldFollow` first, which on a two-step config saved a second ago would navigate off
+the page the recording was made on.
+
+**The card asks with two visible answers**, because the other one is a route nobody
+discovers behind a `⋯`: `Apply · finish setup` sends, and `I’ll send it myself`
+(`ACTION_LABELS.sendItMyself` → `onSendMyself`) folds the card and opens the same
+second pass over a live page. Both end at the same mark; only the finger that presses
+Send differs. Which is also why the bar has **two** sentences (`AFTER_SEND_ASK`, keyed
+`sent` | `unsent`, `RecorderBarState.sent`): through Apply the application has gone in,
+and through either by-hand door it has not — where "Your application went in" was
+simply untrue, on the route the panel has always offered.
 
 The panel reaches the same pass without pressing Send, for the user who applies by
 hand (`onMarkConfirmation`) — from home's second pass block, and from the wizard's
@@ -1400,6 +1465,13 @@ landed the user four steps into the manual surface with nothing saying it had wo
 `showHome({ saved: true })` is the report — the two pass blocks say what the site now
 knows and what is left, and the heading says once that a recording landed.
 
+**And then, when the site is one thing short, it goes on to the review card.** Home
+is a report; the thing still outstanding is an application nobody has sent, and the
+only surface that can send one is the card. So `saveRecording` ends by filling the
+page and raising it with `finishSetupSaved` on it — see "Apply is how the second pass
+is reached" above for the three guards. The panel is not destroyed, only folded:
+`openSetupPanel`/Site setup brings the same report straight back.
+
 **The Controller sets the mode *before* it refreshes**, and that ordering is the fix
 for a bug that predates the screen: `showReview(false)` derived its landing step from
 `this.data`, which is still the **pre-save** render — `refreshSetup` runs afterwards
@@ -1940,6 +2012,21 @@ needs no `downloads` permission, and an MV3 service worker has no
   it — only while the element is unset, only on a user press, only with a real submit
   control, and **the posting is not recorded as applied until the user marks
   something visible**. With the setting off the old blocked state stands unchanged.
+  The same `applyState` is what decides whether a saved first pass hands the user to
+  the card at all — so the setting gates the offer as well as the press, and there is
+  deliberately no second toggle for it.
+- **A save may raise the review card, and only over a page the card agrees about.**
+  `saveRecording`'s hand-off is refused on an applied posting, on anything the live
+  classifier reads as a handoff, and on a config with no *saved* `submitSelector` —
+  never on `findSubmitControl`'s label heuristic, which nominates something on almost
+  any page. The middle one is not fussiness: the card's own banner would lead with
+  "Applies on the employer's own site", and pushing it forward with an offer to send
+  here is two answers to one question on the surface whose job is saying what next.
+- **Nothing may claim an application went in before one has.** The after-sending pass
+  has two doors and only one of them sent anything, so `AFTER_SEND_ASK` is keyed
+  `sent` | `unsent` and `startConfirmationPass` takes which it was. The by-hand door
+  (the panel's `Mark the confirmation`, the card's `I’ll send it myself`) opens over a
+  page holding an unsent application.
 - **`successSelector` becoming VISIBLE is the ONLY "actually sent" signal.**
   Not merely present — sites pre-render hidden success nodes; the
   `MutationObserver` in `main.ts` watches `style`/`class`/`hidden` flips. There is

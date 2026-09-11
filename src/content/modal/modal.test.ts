@@ -18,6 +18,7 @@ function callbacks(over: Partial<ModalCallbacks> = {}): ModalCallbacks {
   return {
     onRerun: noop, onApply: noop, onConfirm: noop, onPick: noop,
     onFollow: noop, onFillAnyway: noop, onSkip: noop, onClose: noop,
+    onSendMyself: noop,
     onOpenSetup: noop, onOpenOptions: noop,
     ...over,
   };
@@ -1335,5 +1336,47 @@ describe('Apply while the setup is unfinished', () => {
   /** One coral per card, as ever — the label changed, not the rank. */
   it('is still the only primary', () => {
     expect(finishing().querySelectorAll('.cf-btn.primary')).toHaveLength(1);
+  });
+
+  /**
+   * Both answers on screen, and still only two buttons plus the `⋯`.
+   *
+   * The user who would rather press the site's own Send button has to be able to see
+   * that doing so finishes the setup too — behind the overflow it is a route nobody
+   * discovers. Skip is the control that is not an answer to this question, so Skip is
+   * the one that moves.
+   */
+  it('offers the other answer beside it, and moves Skip into the overflow', () => {
+    const shadow = finishing();
+    const visible = [...shadow.querySelectorAll('.cf-footer-actions > .cf-btn')]
+      .map((b) => b.textContent?.trim());
+    expect(visible).toEqual([ACTION_LABELS.applyFinishSetup, ACTION_LABELS.sendItMyself]);
+    expect(shadow.querySelectorAll('.cf-footer-actions > .cf-more')).toHaveLength(1);
+
+    const menu = [...shadow.querySelectorAll('.cf-more-menu button')]
+      .map((b) => b.textContent?.trim());
+    expect(menu).toContain(ACTION_LABELS.skip);
+  });
+
+  it('runs onSendMyself when the other answer is pressed', () => {
+    const onSendMyself = vi.fn();
+    const shadow = render(
+      data([match()], { applyState: 'finishSetup' }),
+      callbacks({ onSendMyself }),
+    );
+    footerBtn(shadow, ACTION_LABELS.sendItMyself)!.click();
+    expect(onSendMyself).toHaveBeenCalledOnce();
+  });
+
+  /**
+   * The report of a save that just happened, which is the one moment the card can
+   * lead with the press rather than with the site. Same footer either way: the
+   * question and its two answers do not change, only the sentence above them.
+   */
+  it('leads with the save when a first pass has just been written', () => {
+    const shadow = render(data([match()], { applyState: 'finishSetup', setupSaved: true }));
+    expect(shadow.querySelector('.cf-flow')!.textContent).toMatch(/saved/i);
+    expect(footerBtn(shadow, ACTION_LABELS.applyFinishSetup)).toBeTruthy();
+    expect(footerBtn(shadow, ACTION_LABELS.sendItMyself)).toBeTruthy();
   });
 });

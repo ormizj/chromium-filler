@@ -336,6 +336,11 @@ const MODAL_STATES: Record<string, Partial<ModalData>> = {
   // the commonest thing a set-up site can look like before it has ever been applied
   // to, and the only state where the banner and the primary are both about setup.
   'finish-setup': { applyState: 'finishSetup' },
+  // The same offer at the one moment it is the answer to something the user just
+  // did: a first pass has been saved and the card was pushed in front of them by
+  // `saveRecording`. Only the banner differs — and it is unreachable by any press,
+  // being downstream of a whole recording.
+  'finish-setup-saved': { applyState: 'finishSetup', setupSaved: true },
   // Sent and confirmed. The banner, the retired Apply, and the pill all change,
   // and none of it is reachable without actually submitting a real application.
   applied: { applied: true },
@@ -393,6 +398,7 @@ function modalCallbacks(self: () => FillerModal | undefined): ModalCallbacks {
   return {
     onRerun: () => console.log('[harness] re-run'),
     onApply: () => console.log('[harness] apply'),
+    onSendMyself: () => console.log('[harness] send it myself'),
     onConfirm: (f) => console.log('[harness] confirm', f),
     onPick: (f) => console.log('[harness] pick', f),
     onFollow: () => console.log('[harness] follow'),
@@ -716,7 +722,7 @@ function bootSetup(): void {
   const BAR_STATES = [
     'recording', 'recording-armed', 'recording-reset', 'recording-held',
     'recording-declare', 'recording-declare-external',
-    'after-send', 'after-send-saved',
+    'after-send', 'after-send-unsent', 'after-send-saved',
   ];
   if (BAR_STATES.includes(state)) {
     panel.minimize();
@@ -743,6 +749,10 @@ function bootSetup(): void {
       mode: state === 'recording-armed' ? 'armed' : 'idle',
       last: steps[1],
       bound: ['field:email'],
+      // Which door the pass was reached through, and it is the whole of the
+      // sentence the bar carries: Apply has already sent the application, while
+      // `I’ll send it myself` and the panel's own offer leave it sitting unsent.
+      sent: state !== 'after-send-unsent',
       notice: state === 'recording-held'
         ? heldSendNotice('Submit application')
         : state === 'after-send-saved'

@@ -57,6 +57,13 @@ export interface FlowInput {
   alreadyApplied?: boolean;
   /** When that record says the application went in, if the entry carries it. */
   appliedAt?: number;
+  /**
+   * A recording's first pass was saved a moment ago, and this card is the report of
+   * it. Only ever a rendering of `finishSetup` — the flag rides on the controller for
+   * one render, so every other state ignores it rather than re-wording itself around
+   * a press that has nothing to do with what it is saying.
+   */
+  setupSaved?: boolean;
   redirect?: { host?: string; followed: boolean };
   /**
    * This page's apply control hands off to a phone app with no web form to reach
@@ -92,6 +99,7 @@ const TONES: Record<FlowKey, FlowTone> = {
   // "something is about to happen" the redirect states use, and the button below it
   // is live — a warning tone over a working primary says the two disagree.
   finishSetup: 'accent',
+  finishSetupSaved: 'accent',
   ready: 'quiet',
   empty: 'quiet',
 };
@@ -106,6 +114,8 @@ const HELP: Partial<Record<FlowKey, ConceptKey>> = {
   noButton: 'apply',
   noConfirmation: 'applyUnverified',
   finishSetup: 'finishSetup',
+  // The same explanation: it is the same offer, made at a different moment.
+  finishSetupSaved: 'finishSetup',
   external: 'twoStep',
   externalOpened: 'twoStep',
   appLink: 'appLink',
@@ -149,7 +159,13 @@ function classify(input: FlowInput): FlowKey {
   // "why can't I apply?" — answering "nothing to fill here" instead leaves a
   // dead-looking control unexplained, which is the failure this whole banner
   // exists to prevent.
-  if (input.applyState !== 'ready') return input.applyState;
+  if (input.applyState !== 'ready') {
+    // The one state with two renderings. Both are the same offer and the same live
+    // Apply; what differs is whether the user arrived here by saving a recording,
+    // which is the only moment the card can lead with that rather than with the site.
+    if (input.applyState === 'finishSetup' && input.setupSaved) return 'finishSetupSaved';
+    return input.applyState;
+  }
   // `total` is the number of rows in the report, and `main.ts` builds one per
   // field it has something to fill *with* (`wantedFields`) — so this is not "the
   // page had no form". It is "the profile is empty": a page whose fields all went

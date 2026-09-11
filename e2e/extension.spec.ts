@@ -15,7 +15,7 @@ import type { JobUrlEntry } from '../src/shared/types';
 import type { JobDetailsMap } from '../src/shared/jobDetails';
 import type { ExportedJob } from '../src/shared/jobExport';
 import { MSG } from '../src/shared/messages';
-import { RECORD_PASS_TEXT } from '../src/shared/labels';
+import { ACTION_LABELS, AFTER_SEND_ASK, RECORD_PASS_TEXT } from '../src/shared/labels';
 import { ATS_URL, HOSTS, queueSeedUrls, urlFor } from '../test/fixtures/scenarios.mjs';
 import path from 'node:path';
 import fs from 'node:fs';
@@ -2690,6 +2690,43 @@ test('Recording: a held press that was not the Send button can be pressed anyway
     expect(config?.submitSelector).toContain('lever-submit');
     // The button that opened the form is a step to replay, not the button that sends.
     expect(JSON.stringify(config?.prep ?? [])).toContain('apply-btn');
+
+    /*
+     * And Save hands the user on, rather than stopping at the panel.
+     *
+     * A first pass ends with the site able to fill and knowing what sends it, and
+     * exactly one thing outstanding: the message it shows once an application has
+     * really gone in, which does not exist until one has. The panel said so and
+     * offered "Mark the confirmation" — a control that waits over a page where
+     * nothing has been sent and nothing is going to be. So the card that *can* do
+     * something about it is put in front of the user, filled, with the question and
+     * both of its answers on it.
+     *
+     * Asserted on this site rather than on QuickBoard because the offer is withheld
+     * wherever the classifier reads a handoff, and QuickBoard's decoy sidebar link
+     * makes it one as soon as `clearConfigs` takes its quick-apply marker away.
+     */
+    const review = page.locator('.cf-card[data-sheet="review"]');
+    await expect(review).toBeVisible({ timeout: 20_000 });
+    await expect(review.locator('.cf-flow.accent')).toContainText('Site setup saved');
+    await expect(review.getByRole('button', { name: ACTION_LABELS.applyFinishSetup }))
+      .toBeVisible();
+    // The other answer, and it has to be *visible*: a user who would rather press the
+    // site's own button has no way to learn that doing so finishes the setup too if
+    // that route is behind the overflow.
+    await expect(review.getByRole('button', { name: ACTION_LABELS.sendItMyself }))
+      .toBeVisible();
+    // Two buttons and the `⋯`, as on every other branch — Skip is what moved.
+    await expect(review.locator('.cf-footer-actions > .cf-btn')).toHaveCount(2);
+    // Filled, too: a recording leaves the page with only the fields the user
+    // declared in it, and the question above is about the application that would go.
+    await expect(page.locator('#modal-form input[aria-label="Full name"]'))
+      .toHaveValue('Ada Lovelace');
+
+    // And the panel is one press away, holding the same report.
+    await openSetupPanel(page, { home: true });
+    await expect(page.locator('.cf-card[data-sheet="setup"]').getByText('Site setup saved'))
+      .toBeVisible({ timeout: 10_000 });
   } finally {
     await page.close();
   }
@@ -2739,6 +2776,66 @@ test('Apply finishes the setup on a site that has never been applied to', async 
     await expect.poll(async () => statusOf(urlFor('record-internal')), { timeout: 15_000 })
       .toBe('applied');
     await expect(bar(page)).toContainText('Saved');
+
+    /*
+     * And the receipt is on screen, on this page-load.
+     *
+     * Apply folds the card to its pill before pressing Send — the user is about to be
+     * asked to point at the page — so the `applied` repaint drew a *pill*, and the
+     * green banner, the `Sent` chip and `Applied ✓` were only ever seen by someone who
+     * reloaded the posting. The confirmation landing is the one moment the card has
+     * something to say, and it now says it.
+     */
+    const review = page.locator('.cf-card[data-sheet="review"]');
+    await expect(review).toBeVisible({ timeout: 15_000 });
+    await expect(review.locator('.cf-flow.ok.cf-applied')).toContainText(/confirmed it/i);
+    await expect(review.getByRole('button', { name: ACTION_LABELS.applied })).toBeVisible();
+  } finally {
+    await page.close();
+  }
+});
+
+/**
+ * The other answer to the same question: the user presses the site's own Send button.
+ *
+ * The second pass had exactly one door that reached it with anything sent — Apply —
+ * and the by-hand door (the panel's `Mark the confirmation`, and now this) raised a
+ * bar that said "Your application went in" over a page where nothing had. So the one
+ * sentence the bar carries was, on that route, untrue; and from the review card there
+ * was no way to say "I will send this one myself" at all.
+ */
+test('“I’ll send it myself” waits for a send the user makes, and finishes the setup', async () => {
+  const page = await context.newPage();
+  try {
+    await page.setViewportSize({ width: 1280, height: 900 });
+    // A posting of its own: the specs around this one apply to the others, and an
+    // applied posting retires every decision on the card.
+    const url = `${urlFor('record-internal')}&n=myself`;
+    await rewindToBeforeSend(url, '#submit');
+    await page.goto(url);
+
+    const review = page.locator('.cf-card[data-sheet="review"]');
+    await expect(review).toBeVisible({ timeout: 20_000 });
+    await review.getByRole('button', { name: ACTION_LABELS.sendItMyself }).click();
+
+    // The bar comes up over a live page and says what is true of it: nothing has been
+    // sent. The card gets out of the way, exactly as it does for Apply.
+    await expect(bar(page)).toBeVisible({ timeout: 10_000 });
+    await expect(bar(page).locator('.cf-rec-ask')).toHaveText(AFTER_SEND_ASK.unsent);
+    await expect(page.locator('#quick-success')).toBeHidden();
+
+    // The page really is live — this pass installs no suppression, because the user
+    // is applying for real.
+    await page.click('#submit');
+    await expect(page.locator('#quick-success')).toBeVisible({ timeout: 10_000 });
+
+    await bar(page).getByRole('button', { name: RECORD_PASS_TEXT.afterSend.action }).click();
+    await pickOnPage(page, page.locator('#quick-success'));
+
+    await expect.poll(async () => (await configFor(url))?.successSelector, { timeout: 15_000 })
+      .toBeTruthy();
+    await expect.poll(async () => statusOf(url), { timeout: 15_000 }).toBe('applied');
+    await expect(review.locator('.cf-flow.ok.cf-applied')).toBeVisible({ timeout: 15_000 });
   } finally {
     await page.close();
   }

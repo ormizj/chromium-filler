@@ -91,6 +91,7 @@ export type FlowKey =
   | 'noButton'
   | 'noConfirmation'
   | 'finishSetup'
+  | 'finishSetupSaved'
   | 'ready'
   | 'empty';
 
@@ -152,7 +153,24 @@ export const FLOW_TEXT: Record<FlowKey, FlowText> = {
   finishSetup: {
     title: 'Set up to fill, not yet to confirm',
     detail: 'Apply sends this application and then asks you to point at the message the '
-      + 'site shows back. That message is the last thing this site needs.',
+      + 'site shows back — or send it yourself and mark that message when it appears. '
+      + 'Either way, it is the last thing this site needs.',
+  },
+  /**
+   * The same offer, at the one moment it answers something the user just did.
+   *
+   * A first pass ends by writing a config that can fill this site and knows what
+   * sends it, and it leaves exactly one thing outstanding — which is why the card is
+   * put in front of the user right then. So it leads with the press that got here
+   * rather than with the site, exactly as `alreadyApplied` leads with the record and
+   * `applied` with the moment. Two moments, one consequence, two keys.
+   */
+  finishSetupSaved: {
+    title: 'Site setup saved — one thing left',
+    detail: 'This site still needs the message it shows once an application has really '
+      + 'gone in, and that only exists after one has. Apply sends this application and '
+      + 'then asks you to point at the reply — or send it yourself and mark the reply '
+      + 'when it appears.',
   },
   ready: { title: 'Filled — nothing has been sent yet', detail: 'ready to review' },
   // Not "no form was found here". This state is reached when the *report* has no
@@ -201,6 +219,7 @@ export type ActionKey =
   | 'interactArmed'
   | 'declare'
   | 'applyFinishSetup'
+  | 'sendItMyself'
   | 'notTheSendButton'
   | 'notYet'
   | 'keepAsClick'
@@ -274,6 +293,12 @@ export const ACTION_LABELS: Record<ActionKey, string> = {
   // not decoration: this is the one Apply that starts a second job after sending,
   // and the vocabulary rule ("our action is Apply") is kept by leading with the verb.
   applyFinishSetup: 'Apply · finish setup',
+  // The other answer to the same question, and it has to be a *visible* control:
+  // the one thing this site still needs is the message it shows after an
+  // application, and a user who would rather press Send themselves has to be able
+  // to see that doing so still finishes the setup. Named for the user's half of it
+  // — the extension's half (watch for the reply, and ask) is unchanged either way.
+  sendItMyself: 'I’ll send it myself',
   // The way out of a held press. `looksLikeSend` matches "apply" and "finish", and on
   // most boards the button that *opens* the form says "Apply now" — so the guess has
   // to be refusable in one press, or the first pass cannot be run on those sites at
@@ -365,6 +390,27 @@ export const RECORD_PASS_TEXT: Record<RecordPhase, {
     again: 'Mark it again',
     aria: 'Finishing this site’s setup',
   },
+};
+
+/**
+ * The one thing the after-sending bar has to say, and there are two of them because
+ * the pass has two doors.
+ *
+ * Through Apply the application has already gone in, and the bar is explaining a page
+ * that changed under the user a moment ago. Through `I’ll send it myself` — or the
+ * panel's own `Mark the confirmation` — nothing has been sent yet, and the same
+ * sentence would be a plain untruth: the user is being asked to press the site's own
+ * button and come back. That second wording is what the by-hand route has always
+ * lacked.
+ *
+ * Here rather than inline in `recorderBar.ts` for the reason everything else in this
+ * file is: it is the only copy on the surface, and the surface is one line long.
+ */
+export const AFTER_SEND_ASK: Record<'sent' | 'unsent', string> = {
+  sent: 'Your application went in. Point at the message the site shows back, and '
+    + 'this site is finished.',
+  unsent: 'Send this application yourself when you are ready. The moment the site '
+    + 'answers, point at its message and this site is finished.',
 };
 
 /**
