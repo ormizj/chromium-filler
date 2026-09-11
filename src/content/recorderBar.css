@@ -14,12 +14,35 @@
   all: initial;
 }
 
+/*
+ * Centred by auto margins, not by `left: 50%` and a transform.
+ *
+ * That is not a preference. A `position: fixed` box with `left: 50%` and `right:
+ * auto` shrinks to fit inside what is left of the viewport — from the 50% mark to
+ * the right-hand edge — so the bar could never be wider than **half the screen**,
+ * and the `720px` its own `max-width` claims was unreachable on anything narrower
+ * than 1440px. On a 1280px window that made the real cap 640px, which the wide
+ * layout does not fit once `Interact` becomes `Click one thing…`: the exits wrapped
+ * to a third row and the bar grew 50px taller, moving `Reset` · `Undo` · `Done`
+ * down a whole row at the exact moment the user is being told to go and click
+ * something on the page. A HUD that changes shape as it hands the page over is the
+ * failure the fixed row order at 390px exists to prevent, arriving by the back door
+ * at every other width.
+ *
+ * `left: 0; right: 0` gives it the whole viewport to shrink inside, `width:
+ * max-content` keeps it shrink-to-fit rather than stretched, and `margin-inline:
+ * auto` centres what is left — so `max-width` is finally the only thing deciding how
+ * wide it may be. The narrow block turns `width` back to `auto`, where the bar spans
+ * between two gutters instead.
+ */
 .cf-bar {
   position: fixed;
   z-index: 2147483645; /* below the picker, which is used *from* here */
-  left: 50%;
+  left: 0;
+  right: 0;
   top: 12px;
-  transform: translateX(-50%);
+  width: max-content;
+  margin-inline: auto;
   display: flex;
   align-items: center;
   gap: var(--space-2);
@@ -33,24 +56,151 @@
   font: var(--text-sm) / 1.4 var(--font);
 }
 
-@media (pointer: coarse) {
-  .cf-bar {
-    top: auto;
-    bottom: calc(12px + env(safe-area-inset-bottom, 0px));
-  }
+/*
+ * Which edge the bar is docked to, stamped by `paint()` rather than answered by a
+ * media query here.
+ *
+ * The pointer still decides where it *starts* — a top bar sits under the mobile URL
+ * bar and out of the thumb's reach — but the user can move it now, and the report
+ * bar overrides both (see `RecorderBar.place()`). Three different answers to one
+ * question, so the question is asked once, in one place, and the result arrives here
+ * as an attribute. It is also the only form of it vitest can see.
+ */
+.cf-bar[data-place='top'] {
+  top: 12px;
+  bottom: auto;
+}
 
-  /*
-   * Except once the mark has landed. The review card comes back expanded on the
-   * same gesture, carrying the receipt for the application — and under 640px that
-   * card is a full-width bottom sheet, which is exactly where this bar sits. Two
-   * reports over one another, and the one under is the one that matters. So the
-   * bar moves: it is the smaller object, all that is left of it is a line and a
-   * Done, and there is nothing at the top of the page competing for the space.
-   */
-  .cf-bar.cf-bar-report {
-    top: 12px;
-    bottom: auto;
-  }
+.cf-bar[data-place='bottom'] {
+  top: auto;
+  bottom: calc(12px + env(safe-area-inset-bottom, 0px));
+}
+
+/*
+ * The first pass wraps at every width, because its readout takes a row of its own —
+ * see `.cf-rec-last`. The after-sending bar does not: it is three children wide, its
+ * sentence *is* the content rather than a trailing note, and given a row of its own
+ * that sentence would sit above the `Done` that dismisses it. It still wraps at
+ * 390px, where the narrow block turns this back on for every bar.
+ */
+.cf-bar:not(.cf-bar-after) {
+  flex-wrap: wrap;
+  row-gap: var(--space-2);
+}
+
+/*
+ * A seam at every join, rather than a box round one section.
+ *
+ * The wide bar holds four different kinds of thing — what is being recorded, what
+ * just happened, the two ways to act, the three ways out — and only the options
+ * carried dividers, so the rest ran together at an 8px gap and the strip read as one
+ * undifferentiated thing. One rule over the children draws every seam and can never
+ * be half-applied the way three bespoke paddings were.
+ *
+ * `+` is source order, which is the wide layout's order and nothing else: the narrow
+ * block and `.cf-bar-notice` both re-order with `order`, and both drop these below.
+ */
+.cf-bar > * {
+  padding-inline: var(--space-2);
+}
+
+.cf-bar > :first-child {
+  padding-inline-start: 0;
+}
+
+.cf-bar > :last-child {
+  padding-inline-end: 0;
+}
+
+.cf-bar > * + * {
+  border-inline-start: 1px solid var(--border);
+}
+
+/* Except the readout, which is a row rather than a section: a vertical rule at the
+   start of a full-width row encloses nothing, and this is the one child whose source
+   position and visual position disagree at full width. `.cf-rec-options` correctly
+   inherits the seam it leaves behind. */
+.cf-bar:not(.cf-bar-after) .cf-rec-last {
+  padding-inline: 0;
+  border-inline-start: none;
+}
+
+/*
+ * Armed, and it is the *bar* that is armed.
+ *
+ * This used to be a tint on one control, which is nothing like as much as the moment
+ * needs: the page has just gone live under the user's finger, and a recoloured 100px
+ * button among four others is not a state a page can be in. So the toolbar itself
+ * takes the accent skin, the readout below becomes the statement of the mode, and
+ * every control that is not the way out of it goes `aria-disabled` — one loud thing,
+ * one sentence, and nothing else that acts.
+ *
+ * The place toggle is the exception and is untouched here by construction: it is a
+ * bare `<button>` rather than a `.cf-btn`, so none of the rules below can reach it.
+ * It is furniture rather than one of the bar's decisions, and on a bar that has just
+ * told the user to go and click something it is the one control that still has a job
+ * — the thing they are being asked to press may be underneath it.
+ *
+ * Two things this deliberately is not, both of them rules the button's version
+ * already followed. It does **not** take the primary fill: `Done` is the one thing
+ * this bar is for. And it does **not** pulse — the tint holds still, and the ring
+ * stays on the one control that is still live (see `.cf-rec-armed`, which explains
+ * why it did not move up here).
+ *
+ * `.cf-bar.cf-bar-armed` rather than `.cf-bar-armed`: it overrides the background and
+ * border `.cf-bar` sets a few rules above, and at equal specificity that is decided
+ * by nothing but the order of two rules in one file.
+ */
+.cf-bar.cf-bar-armed {
+  background: var(--accent-weak);
+  border-color: var(--accent);
+}
+
+/*
+ * The seams, against the new ground. `--border` is a hairline drawn for paper and all
+ * but disappears on the tint — in dark the two are a shade apart — which is exactly
+ * the four sections running together that the seam rule above exists to fix, and
+ * `--border-strong` is the answer for the reason `.cf-rec-menu-decides` takes it: it
+ * is competing with a tone a few pixels away.
+ *
+ * Colour only, and that is load-bearing: the narrow block at the end of this file
+ * sets `border-inline-start: none` on every child, and `style: none` draws nothing
+ * whatever colour it is given — so this cannot resurrect a seam on a row where it
+ * would enclose nothing, even though it outranks that rule.
+ */
+.cf-bar-armed > * + * {
+  border-inline-start-color: var(--border-strong);
+}
+
+/*
+ * The instruction is the statement of the mode now, not a trailing note — the same
+ * move `.cf-rec-notice` and `.cf-rec-ask` make, and for the same reason: it is the
+ * most important thing on screen at the moment it appears.
+ *
+ * Colour only. A weight bump can push a sentence from one line to two on a 720px bar,
+ * where nothing reserves the second line, and a bar that changes height as the page
+ * goes live lifts every button out from under the thumb on a bottom-docked one.
+ */
+.cf-bar-armed .cf-rec-what {
+  color: var(--fg);
+}
+
+/*
+ * Blocked, and still legible on the tint.
+ *
+ * Primitives' `[aria-disabled]` rule gives `--surface` / `--border` / `--muted-2`,
+ * which is right on paper and too quiet here — `--muted-2` on `--accent-weak` is
+ * about 2.6:1 in light, i.e. a label you cannot read on a control you cannot find.
+ * Unavailable is a state a control is *in*, not a control that half exists, so the
+ * ground recedes and the border and the word do not.
+ *
+ * (0,3,0) beats primitives' (0,2,1). `Done` is `button.cf-btn.primary[aria-disabled]`
+ * at (0,3,1) and still wins, which is what keeps it de-filling through the shared
+ * blocked-primary rule rather than through this one.
+ */
+.cf-bar-armed .cf-btn[aria-disabled='true'] {
+  color: var(--muted);
+  border-color: var(--border-strong);
 }
 
 /*
@@ -74,16 +224,24 @@
   .cf-bar {
     left: var(--space-2);
     right: var(--space-2);
-    transform: none;
+    /* Spanning the gutters rather than shrink-to-fit — the wide bar's `max-content`
+       would hold it to its content and leave the centring to do the rest. */
+    width: auto;
+    margin-inline: 0;
     max-width: none;
     flex-wrap: wrap;
     row-gap: var(--space-2);
   }
 
   .cf-rec-state { order: 1; }
+  /* Sharing the state's row, held against the far end of it. It is furniture rather
+     than one of the bar's decisions, and a row of its own for one 44px square would
+     cost a fifth of the screen; there is slack on this row because the state readout
+     is the one thing here that is not a control. */
+  .cf-rec-place { order: 2; margin-inline-start: auto; }
   /* A row of its own, because three controls will not share one with the readout at
      390px — see the end-of-file block for the rest of what that costs. */
-  .cf-rec-exits { order: 2; flex-basis: 100%; }
+  .cf-rec-exits { order: 3; flex-basis: 100%; }
 
   /*
    * Order only. Everything else these two need at this width is at the **end** of
@@ -91,8 +249,56 @@
    * loses to the component's own base rule below at equal specificity, which is
    * how the readout kept its side borders on a row where they enclose nothing.
    */
-  .cf-rec-options { order: 3; flex-basis: 100%; }
-  .cf-rec-last { order: 4; flex-basis: 100%; }
+  .cf-rec-options { order: 4; flex-basis: 100%; }
+  /* The readout is already a row of its own with `order: 9` — see its own rule. */
+}
+
+/*
+ * The way out from under the page's own header.
+ *
+ * A masked `::before` on `--i`, the same mechanism as the sheets' fullscreen toggle
+ * — a glyph would be sized by the font and would need a character that is reliably
+ * in it on Android, where this button matters most. `--i` is keyed off the bar's own
+ * `data-place`, which is also what `paint()` writes the `aria-label` from, so what
+ * the arrow points at and what a screen reader hears are one answer.
+ *
+ * Square, and pinned square: `min-width`/`min-height` beside width and height,
+ * because the guardrail test fails any fixed square that declares `cursor: pointer`
+ * without them — and `--tap` is the height of every other control on this bar, so it
+ * is not a bigger target than its neighbours, it is the same one.
+ */
+.cf-rec-place {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 auto;
+  width: var(--tap);
+  height: var(--tap);
+  min-width: var(--tap);
+  min-height: var(--tap);
+  padding: 0;
+  border: none;
+  background: transparent;
+  cursor: pointer;
+  --i: var(--icon-move-down);
+}
+
+.cf-bar[data-place='bottom'] .cf-rec-place {
+  --i: var(--icon-move-up);
+}
+
+.cf-rec-place::before {
+  content: '';
+  display: block;
+  width: 18px;
+  height: 18px;
+  background: var(--muted);
+  -webkit-mask: var(--i) center / contain no-repeat;
+  mask: var(--i) center / contain no-repeat;
+}
+
+.cf-rec-place:hover::before {
+  background: var(--fg);
 }
 
 /* The live indicator. A recording is a mode the whole page is in, and the one thing
@@ -141,31 +347,70 @@
   display: flex;
   align-items: center;
   gap: var(--space-1);
-  padding: 0 var(--space-2);
-  border-left: 1px solid var(--border);
-  border-right: 1px solid var(--border);
 }
 
 /*
- * Armed. The page has just gone live under the user's finger and nothing else on
- * screen says so, so this has to read as a mode rather than as a button.
+ * The mode's own control, on the ground the mode has just painted.
  *
- * Two things it deliberately is not. It does **not** take the primary fill: Done is
- * the one thing this bar is for, and a second coral beside it makes neither of them
- * mean anything. And it does **not** pulse its own opacity — the live dot can,
- * being a 10px dot, but a full-width control fading to a third and back is the same
- * muddy half-there block a disabled primary used to be, and "waiting for you" would
- * read as "not available". So the tint holds still and the *ring* is what moves.
+ * It can no longer be `--accent-weak`: the *bar* is that tint now, so the old fill
+ * would have made this the one thing on it you could not see. So it inverts — paper,
+ * with the accent's border and the accent's word — and it is the only filled control
+ * left, every other one on the bar being blocked and de-filled to `--surface`. Not
+ * the primary fill, for the reason `.cf-bar-armed` gives: Done is the one primary
+ * here, and a second coral makes neither of them mean anything.
+ *
+ * It does **not** pulse its own opacity — the live dot can, being a 10px dot, but a
+ * full-width control fading to a third and back is the same muddy half-there block a
+ * disabled primary used to be, and "waiting for you" would read as "not available".
+ *
+ * **The ring stays here and did not move up to the bar**, which looks like the
+ * obvious thing to do and is three separate mistakes. `box-shadow` is one property
+ * rather than a stack, so a ring keyframe on `.cf-bar` deletes the toolbar's
+ * `--shadow-2` lift for the whole armed state. The ring's colour is `--accent-weak`,
+ * which is now the bar's own ground — an invisible halo — and unlike this one it
+ * would land on the *website*, whose backdrop we do not control. And a 720px halo
+ * breathing over a page the user is trying to read is a second moving thing beside
+ * the live dot. So the rule holds exactly as it was written: the tint holds still —
+ * it is the bar's now — and the *ring* moves, on the one control that is still live.
+ *
+ * Spelled **twice**, exactly as `.btn-danger` and `.btn-ghost` are, and for the
+ * reason primitives.css spells out there: `button.cf-btn` is (0,1,1) and is inlined
+ * ahead of this file, so a bare `.cf-rec-armed` loses its fill, its border and its
+ * colour. That is what was happening — silently, for months — with the animation the
+ * only declaration in this block that could land.
  */
-.cf-rec-armed {
-  background: var(--accent-weak);
+.cf-rec-armed,
+button.cf-btn.cf-rec-armed {
+  background: var(--bg);
   border-color: var(--accent);
   color: var(--accent);
   animation: cf-rec-ring 1.6s ease-in-out infinite;
 }
 
+/* And the hover it needs for the same reason: `button.cf-btn:not(.primary):hover` is
+   (0,3,1) and would otherwise repaint the one live control `--surface` the moment a
+   pointer crossed it. */
+.cf-rec-armed:hover,
+button.cf-btn.cf-rec-armed:hover {
+  background: var(--surface);
+  border-color: var(--accent);
+}
+
+/*
+ * A running `box-shadow` animation beats `:focus-visible`'s `var(--ring)` however
+ * specific that rule is, so the one control a keyboard user is being asked to press
+ * was the one with no focus ring at all. Standing the ring down while it is focused
+ * is the whole fix — the mode is still legible from the tinted bar around it.
+ */
+.cf-rec-armed:focus-visible,
+button.cf-btn.cf-rec-armed:focus-visible {
+  animation: none;
+  box-shadow: var(--ring);
+}
+
 @media (prefers-reduced-motion: reduce) {
-  .cf-rec-armed {
+  .cf-rec-armed,
+  button.cf-btn.cf-rec-armed {
     animation: none;
     /* The resting frame of the ring, so the state is still legible without it. */
     box-shadow: 0 0 0 3px var(--accent-weak);
@@ -178,19 +423,59 @@
 }
 
 /* What the last action turned into. A readout, never a control. */
+/*
+ * What the last action turned into. A readout, never a control — and a row of its
+ * own, at every width.
+ *
+ * It used to share the toolbar's line, which is what made it the one part of the bar
+ * that could not be read: the row is four controls capped at 720px, so the readout
+ * got whatever was left, which on a wide bar is about 56px. A sentence in a 56px
+ * column is not a sentence, and it was clipped to one line with `text-overflow:
+ * ellipsis` on top of that.
+ *
+ * `order: 9` rather than a number in the narrow block's sequence, because it is the
+ * last thing in the bar on **both** layouts now and the narrow rules order everything
+ * else. This is also what `.cf-bar-notice` used to do for the held-send sentence
+ * alone; a paragraph is a paragraph whichever one it is, so there is one rule.
+ *
+ * Not on the after-sending bar. That one is three children wide and its sentence *is*
+ * the content rather than a trailing note, so a row of its own puts `Done` above the
+ * line it dismisses.
+ */
+.cf-bar:not(.cf-bar-after) .cf-rec-last {
+  flex: 1 0 100%;
+  order: 9;
+}
+
 .cf-rec-last {
   display: flex;
   align-items: center;
   gap: var(--space-1);
   flex: 1 1 auto;
   min-width: 0;
-  padding: 0 var(--space-2);
 }
 
+/*
+ * Two lines, always two lines, and clamped rather than ellipsed at the first.
+ *
+ * It used to be a single nowrap line with `text-overflow: ellipsis` at **every**
+ * width — including the narrow layout, where this already owns a full-width row and
+ * had the space to say the whole thing. So the one part of the bar that reports what
+ * the extension just did was the one part that could not be read, with no hover, no
+ * disclosure and no second line to fall back on.
+ *
+ * Two lines are headroom at full width, where the row is ~620px and a clipped label
+ * runs to one — and the space they take is reserved in the narrow block rather than
+ * here, for the reason `picker.ts` gives about its own two rows: the controls that
+ * are always there must not move. At 390px the readout really does wrap, so without
+ * the reserve the bar would change height between "Clicked Next" and a long name, and
+ * on a bottom-docked bar that lifts every button out from under the thumb.
+ */
 .cf-rec-what {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
   overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
   color: var(--muted);
 }
 
@@ -210,39 +495,32 @@
  */
 .cf-rec-notice,
 .cf-rec-ask {
+  /* Out of the clamp entirely: these are sentences, and two lines of one is the same
+     unreadable cut the readout above just stopped making. */
+  display: block;
+  -webkit-line-clamp: none;
+  min-height: 0;
   white-space: normal;
   overflow: visible;
   color: var(--fg);
 }
 
-/* The held-send notice sits beside the way past it, so it must not eat the row. */
-.cf-rec-notice {
-  max-width: 42ch;
+/* The readout is a row of its own now, so the text in it takes what the control
+   beside it does not — capped at 42ch it stayed a 300px column four lines tall on a
+   620px row, which is the same squeeze the readout has just been let out of. */
+.cf-rec-last > .cf-rec-what {
+  flex: 1 1 auto;
+  min-width: 0;
 }
 
 /*
- * A bar with something to say takes a second row for saying it, at every width.
- *
- * The wide bar is a single flex line of four controls capped at 720px, and the
- * readout is what gives: a sentence dropped into that row came out as a 70px column
- * eleven lines tall, with the control beside it sitting under Interact. It is a
- * paragraph, so it gets a line — the toolbar above it does not move, which is the
- * whole point of a HUD, and the explanation lands directly under the button that
- * did nothing.
- *
- * `order: 9` rather than a number in the narrow block's sequence: this is the last
- * thing in the bar on both layouts, and the narrow rules already order everything
- * else 1–4.
+ * The held-send notice is a sentence *with a control beside it*, which the ordinary
+ * readout is not, so it drops the row's width cap and lets the two sit together.
+ * Everything else it used to need — the row of its own, the wrap — is the readout's
+ * own rule above now.
  */
-.cf-bar-notice {
-  flex-wrap: wrap;
-  row-gap: var(--space-2);
-}
-
 .cf-bar-notice .cf-rec-last {
-  flex-basis: 100%;
-  order: 9;
-  padding: 0;
+  align-items: flex-start;
 }
 
 /* The way out, always in the same place. */
@@ -292,12 +570,11 @@
   padding-block: 0;
 }
 
-@media (pointer: coarse) {
-  .cf-rec-menu,
-  .cf-rec-confirm {
-    top: auto;
-    bottom: calc(100% + var(--space-1));
-  }
+/* Away from the edge we are docked to, off the same one stamped answer. */
+.cf-bar[data-place='bottom'] .cf-rec-menu,
+.cf-bar[data-place='bottom'] .cf-rec-confirm {
+  top: auto;
+  bottom: calc(100% + var(--space-1));
 }
 
 /*
@@ -328,18 +605,66 @@
 }
 
 /*
+ * The two marks that decide how an application is sent, in a box of their own.
+ *
+ * Flat, they were told from the six posting facts and the sixteen profile fields
+ * below them by the same hairline every group already shares — so the pair that gates
+ * Apply read as the first four of twenty-six equivalent things to point at. The box
+ * says the question is a different question. The hairline between the two heads stays
+ * exactly as it was: they are opposite answers to *that* question, which is the whole
+ * reason they are two groups and not one.
+ *
+ * An inset, so `--surface` — the popover is paper, and a thing standing in it alternates
+ * to the other side. `--border-strong` because it is competing with a hairline of
+ * `--border` a few pixels away.
+ */
+.cf-rec-menu-decides {
+  margin-block: var(--space-1);
+  padding-block: var(--space-1);
+  background: var(--surface);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-card);
+  /*
+   * `clip`, and it has to be `clip` rather than `hidden`.
+   *
+   * The heads inside this box are `position: sticky`, which makes them *positioned*
+   * — so they paint after their parent's background **and its border**, and with no
+   * inline padding here their square top corners sit flush against the inside of a
+   * 14px curve. The result was a wedge of `--surface` painted over the border at the
+   * top corners: the rounded corner with a bite taken out of it, on the first thing
+   * the menu shows. The bottom corners had the same fault waiting on the last item's
+   * hover fill.
+   *
+   * `hidden` would fix the paint and break the heads: it makes this a scroll
+   * container, so the sticky heads would resolve against *it* — a box that never
+   * scrolls — and stop following the list. `clip` is explicitly not a scroll
+   * container, so the nearest scrollport is still `.cf-rec-menu` and the heads go on
+   * sticking; it only clips, and it clips to the radius.
+   */
+  overflow: clip;
+}
+
+/* The heads inside it are sticky, so they paint over the items scrolling under them —
+   in the box's tone, or a scrolled head drops a strip of paper onto the inset. */
+.cf-rec-menu-decides .cf-rec-menu-head {
+  background: var(--surface);
+}
+
+/*
  * A hairline between the groups, not a gap. The captions under the two marks groups
  * are prose that wraps, so whatever space is put above a head is space the paragraph
  * above it may have used anyway — and a head with nothing but air over it went on
  * reading as one more line of that paragraph. The rule is the one thing a caption
  * cannot produce by accident.
  */
-/* The block padding the scrollport gave up, on the two groups at the ends of it. */
-.cf-rec-menu-group:first-child {
+/* The block padding the scrollport gave up, on whatever is at the ends of it — a
+   bare group, or the box holding the first two. Keyed off the menu's own children
+   rather than off `.cf-rec-menu-group`, which the box displaces. */
+.cf-rec-menu > :first-child {
   padding-top: var(--space-1);
 }
 
-.cf-rec-menu-group:last-child {
+.cf-rec-menu > :last-child {
   padding-bottom: var(--space-1);
 }
 
@@ -390,8 +715,23 @@
   text-align: left;
 }
 
+/* The name and its tick, on one line. The item itself is a column so it can carry a
+   caption underneath, which is exactly what sent a bare `✓` appended beside the label
+   onto a row of its own — a stray mark floating between a name and its explanation. */
+.cf-rec-menu-line {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-1);
+  width: 100%;
+}
+
 .cf-rec-menu-label {
   font-weight: 500;
+}
+
+.cf-rec-menu-mark {
+  margin-inline-start: auto;
+  color: var(--ok);
 }
 
 /*
@@ -419,12 +759,12 @@
  * deciding them.
  */
 @media (max-width: 640px) {
-  .cf-rec-options,
-  .cf-rec-last {
-    padding: 0;
-    /* The dividers separate things on one line; on their own row they are a box
-       drawn round the only thing there. */
-    border: none;
+  /* The dividers separate things on one line; stacked, a vertical rule at the start
+     of a full-width row encloses nothing. Every child, because `+` is source order
+     and `order` has just rearranged all of them. */
+  .cf-bar > * {
+    padding-inline: 0;
+    border-inline-start: none;
   }
 
   /* Two options, one row, equal halves — the popup's idiom. Left to shrink-to-fit,
@@ -479,8 +819,9 @@
     gap: var(--space-2);
   }
 
-  .cf-rec-notice {
-    max-width: none;
+  /* Where the second line is really used, and so where it has to be held open. */
+  .cf-rec-what {
+    min-height: 2lh;
   }
 
   .cf-rec-last .cf-rec-wrap .cf-btn {

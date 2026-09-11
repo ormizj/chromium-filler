@@ -8,8 +8,8 @@
  */
 import { describe, it, expect } from 'vitest';
 import {
-  ACTION_LABELS, EXPORT_FIELD_LABELS, JOB_STATUS_LABELS, STATUS_TEXT, SETUP_STATUS_TEXT,
-  resetRecordingPrompt, type ActionKey,
+  ACTION_LABELS, EXPORT_FIELD_LABELS, JOB_STATUS_LABELS, RECORDER_READOUT, STATUS_TEXT,
+  SETUP_STATUS_TEXT, resetRecordingPrompt, type ActionKey,
 } from './labels';
 import { STATUS_LABELS } from './fieldStatus';
 import { DOT_LEGEND } from './help';
@@ -63,6 +63,22 @@ describe('labels — the wording catalog', () => {
       'cancel', 'wider', 'deeper',
     ];
     for (const k of keys) expect(ACTION_LABELS[k].trim(), k).not.toBe('');
+  });
+
+  /**
+   * The recorder bar's three readout lines, which lived inline in the surface that
+   * draws them until the armed one became the statement of a mode.
+   *
+   * `armed` is held to a length as well as to being said at all: `.cf-rec-what`
+   * reserves its second line only under 640px, so a sentence that wraps on a 720px
+   * bar changes the bar's height the instant the page goes live. The cap is measured
+   * against the readout's own row on the wide bar, not guessed.
+   */
+  it('says what the bar is waiting for, briefly enough to hold one line', () => {
+    for (const [k, v] of Object.entries(RECORDER_READOUT)) {
+      expect(v.trim(), k).not.toBe('');
+      expect(v.length, k).toBeLessThanOrEqual(90);
+    }
   });
 
   it('is the source of the dot aria-labels', () => {

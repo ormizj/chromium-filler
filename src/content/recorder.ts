@@ -55,6 +55,7 @@ import type { RecordLeg, RecordedStep } from '../shared/recording';
 import { pickSelector } from '../shared/selector';
 import { isSubmitCandidate, looksLikeSend } from '../shared/submitDetect';
 import { normalizeText } from '../shared/query';
+import { clip } from '../shared/jobText';
 import { guessField } from './fieldDetect';
 import { PICKER_ATTR, isExtensionUi } from './extensionUi';
 import { swallowPageInput } from './inertPage';
@@ -358,5 +359,9 @@ export function labelFor(el: Element): string {
     parts.push(el.textContent);
   }
   const raw = parts.find((p) => p && normalizeText(p)) ?? '';
-  return raw.replace(/\s+/g, ' ').trim().slice(0, MAX_LABEL);
+  // `clip`, not `slice`: a bare cut at 80 characters ends mid-word with nothing
+  // saying it was cut, so the review and the recorder bar both showed a label that
+  // looked like the whole of a button's name and was not. Same one answer to "one
+  // line, cut to n" as the picker's preview and the setup panel's snippets.
+  return clip(raw, MAX_LABEL);
 }

@@ -32,8 +32,25 @@ const SAME_SPOT_PX = 8;
 /** Three clamped lines' worth. Enough to recognise a description, not to read one. */
 const PREVIEW_CHARS = 220;
 
-export function startPicker(onPick: PickHandler, fieldLabel: string, onCancel?: () => void): () => void {
+/**
+ * Where the toolbar docks. Defaults to the pointer's answer — bottom on touch,
+ * where the hands are — but the recorder bar hands its own current end down when a
+ * pick starts from there: the user may have moved that bar, and a picker opening at
+ * the opposite edge from the button that opened it reads as a different tool.
+ */
+export type PickerPlace = 'top' | 'bottom';
+
+export function startPicker(
+  onPick: PickHandler,
+  fieldLabel: string,
+  onCancel?: () => void,
+  place?: PickerPlace,
+): () => void {
+  // Two different questions off one media query. `coarse` sizes the buttons and is
+  // about the pointer; `docked` is which edge the toolbar sits on, and the caller may
+  // have an answer of its own.
   const coarse = window.matchMedia?.('(pointer: coarse)').matches ?? false;
+  const docked: PickerPlace = place ?? (coarse ? 'bottom' : 'top');
   // The toolbar lives on the host page's light DOM, which never sees tokens.css,
   // so its colours come from the palette copy rather than a `var(--…)`.
   const p = currentPalette();
@@ -51,7 +68,7 @@ export function startPicker(onPick: PickHandler, fieldLabel: string, onCancel?: 
     position: 'fixed', zIndex: '2147483647', left: '50%',
     // A top bar sits under the mobile URL bar and the reachable thumb zone is
     // at the bottom, so on touch the toolbar goes where the hands are.
-    ...(coarse
+    ...(docked === 'bottom'
       ? { bottom: 'calc(12px + env(safe-area-inset-bottom, 0px))', top: 'auto' }
       : { top: '12px', bottom: 'auto' }),
     transform: 'translateX(-50%)', background: p.ink, color: p.onInk,

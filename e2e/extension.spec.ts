@@ -2424,7 +2424,7 @@ async function type(page: Page, selector: string, value: string): Promise<void> 
 
 /** Say what something on the page is, then point at it. */
 async function declare(page: Page, item: string): Promise<void> {
-  await bar(page).getByRole('button', { name: 'Declare…', exact: true }).click();
+  await bar(page).getByRole('button', { name: 'Declare', exact: true }).click();
   await bar(page).getByRole('menuitem', { name: item, exact: true }).click();
 }
 
@@ -2900,7 +2900,7 @@ test('Recording: the Declare menu holds its place while the clock ticks', async 
     expect(chip.y + chip.height).toBeLessThanOrEqual(field.y + 1);
     expect(Math.abs((chip.x + chip.width) - (field.x + field.width))).toBeLessThan(4);
 
-    await bar(page).getByRole('button', { name: 'Declare…', exact: true }).click();
+    await bar(page).getByRole('button', { name: 'Declare', exact: true }).click();
     const menu = bar(page).locator('.cf-rec-menu');
     await expect(menu).toBeVisible();
 
@@ -2921,6 +2921,41 @@ test('Recording: the Declare menu holds its place while the clock ticks', async 
     expect(await bar(page).locator('.cf-rec-clock').textContent()).not.toBe(clock);
     expect(await menu.getAttribute('data-probe')).toBe('1');
     expect(await menu.evaluate((el) => el.scrollTop)).toBe(scrolled);
+
+    /*
+     * And the boxed pair keeps both halves of what `overflow: clip` buys it.
+     *
+     * The heads are `position: sticky`, which makes them *positioned* — so they paint
+     * after their parent's background **and its border**, and with no inline padding
+     * on `.cf-rec-menu-decides` their square top corners painted a wedge of
+     * `--surface` over a 14px curve: the box's rounded corner with a bite out of it,
+     * on the first thing the menu shows.
+     *
+     * `clip` fixes the paint. `hidden` would fix it too and break the heads, by
+     * making the box a scroll container the sticky heads would resolve against — a
+     * box that never scrolls, so they would stop following the list. That swap is the
+     * tidy-up this guards: paint is invisible to a DOM assertion, so what is pinned
+     * here is the behaviour the wrong answer costs.
+     */
+    const boxed = menu.locator('.cf-rec-menu-decides');
+    expect(await boxed.evaluate((el) => getComputedStyle(el).overflow)).toBe('clip');
+
+    // Measured as a *lag*, which is what sticky means, rather than against a fixed
+    // offset: scroll by less than the first group is tall, and its head must move
+    // less far than the list did. A head that keeps up with the scroll exactly is one
+    // that has stopped sticking. (Scrolled back to the top first — 200px is already
+    // past this group, and a head whose group has left is meant to leave with it.)
+    const headLag = await menu.evaluate((el) => {
+      const head = el.querySelector('.cf-rec-menu-decides .cf-rec-menu-head')!;
+      const top = () => head.getBoundingClientRect().y - el.getBoundingClientRect().y;
+      el.scrollTop = 0;
+      const rest = top();
+      el.scrollTop = 40;
+      const after = top();
+      return { rest: Math.round(rest), after: Math.round(after), moved: Math.round(rest - after) };
+    });
+    expect(headLag.moved).toBeLessThan(40);
+    expect(headLag.after).toBeGreaterThanOrEqual(0);
   } finally {
     await page.close();
   }
@@ -3179,7 +3214,7 @@ test('Recording: choosing a mark closes the Declare menu before the picker opens
   try {
     await beginRecording(page, 'record-internal');
 
-    await bar(page).getByRole('button', { name: 'Declare…', exact: true }).click();
+    await bar(page).getByRole('button', { name: 'Declare', exact: true }).click();
     await expect(bar(page).locator('.cf-rec-menu')).toBeVisible();
 
     await bar(page).getByRole('menuitem', { name: 'Send button', exact: true }).click();
@@ -3192,6 +3227,103 @@ test('Recording: choosing a mark closes the Declare menu before the picker opens
     await page.keyboard.press('Escape');
     await expect(page.locator('[data-cf-picker="bar"]')).toHaveCount(0);
     await expect(bar(page).locator('.cf-rec-menu')).toHaveCount(0);
+  } finally {
+    await page.close();
+  }
+});
+
+/**
+ * Armed is a mode the whole toolbar is in, and the only place that can be checked is
+ * a real browser.
+ *
+ * jsdom evaluates neither the cascade nor layout, which is exactly how the armed
+ * treatment came to be almost entirely absent without a single test going red:
+ * `.cf-rec-armed` is (0,1,0) and `button.cf-btn` in primitives.css is (0,1,1), and
+ * the shadow root inlines primitives *first* — so the fill, the border and the colour
+ * all lost, and the ring was the only declaration in the block that could land. The
+ * class was on the button the whole time, so every DOM assertion agreed it was fine.
+ *
+ * Computed colour, therefore, and both halves of the claim: the bar itself changes,
+ * and the one live control still reads as a control against the blocked one beside it.
+ */
+test('Recording: arming says so with the whole bar, not one button', async () => {
+  const page = await context.newPage();
+  try {
+    await beginRecording(page, 'record-internal');
+
+    const declare = bar(page).getByRole('button', { name: ACTION_LABELS.declare, exact: true });
+    const fill = (l: Locator) => l.evaluate((el) => getComputedStyle(el).backgroundColor);
+    const edge = (l: Locator) => l.evaluate((el) => getComputedStyle(el).borderTopColor);
+
+    const restingBar = await fill(bar(page));
+    const restingDeclare = await edge(declare);
+
+    await interact(page);
+    const armedButton = bar(page).getByRole('button', { name: ACTION_LABELS.interactArmed });
+    await expect(armedButton).toBeVisible();
+
+    // The toolbar wears it.
+    expect(await fill(bar(page))).not.toBe(restingBar);
+    // And the one control that is still live is told from the blocked one beside it —
+    // which is the half a bare `.cf-rec-armed` class assertion could never see.
+    expect(await edge(armedButton)).not.toBe(await edge(declare));
+    // Blocked, not merely quiet: Declare cannot be pressed while a gesture is out.
+    await expect(declare).toHaveAttribute('aria-disabled', 'true');
+    expect(await edge(declare)).not.toBe(restingDeclare);
+
+    // And it all goes away again when the page is handed back.
+    await armedButton.click();
+    await expect(bar(page).getByRole('button', { name: 'Interact', exact: true })).toBeVisible();
+    expect(await fill(bar(page))).toBe(restingBar);
+    await expect(declare).not.toHaveAttribute('aria-disabled', 'true');
+  } finally {
+    await page.close();
+  }
+});
+
+test('Recording: the bar can be moved off the page’s own header', async () => {
+  /*
+   * Geometry, so it belongs here: jsdom evaluates neither the cascade nor layout, and
+   * where this bar sits used to be a `@media (pointer: coarse)` rule nothing could
+   * see or change. On a mouse that put it at the top of the viewport — which on a job
+   * board is where the nav is, and routinely where "Apply now" is, i.e. the one
+   * control the recording is about.
+   *
+   * The popovers have to come with it. They open *away* from the edge the bar is
+   * docked to, and that rule used to be keyed off the same media query rather than
+   * off where the bar actually is.
+   */
+  const page = await context.newPage();
+  try {
+    await page.setViewportSize({ width: 1280, height: 900 });
+    await beginRecording(page, 'record-internal');
+
+    const move = bar(page).locator('.cf-rec-place');
+    const before = (await bar(page).boundingBox())!;
+    expect(before.y).toBeLessThan(450);
+
+    await move.click();
+
+    const after = (await bar(page).boundingBox())!;
+    expect(after.y).toBeGreaterThan(450);
+
+    // The menu now opens upward, out of the bar rather than off the bottom of the
+    // screen. Measured against the toggle it hangs from, which is what it is anchored
+    // to — the bar's own padding sits between that and the card's edge.
+    const declare = bar(page).getByRole('button', { name: 'Declare', exact: true });
+    await declare.click();
+    const toggle = (await declare.boundingBox())!;
+    const list = (await bar(page).locator('.cf-rec-menu').boundingBox())!;
+    expect(list.y + list.height).toBeLessThanOrEqual(toggle.y + 1);
+
+    // And a press that is neither the list nor the toggle puts it away. The page
+    // underneath is inert, so without this the only way out is the button the list
+    // is very likely covering.
+    await bar(page).locator('.cf-rec-state').click();
+    await expect(bar(page).locator('.cf-rec-menu')).toHaveCount(0);
+
+    await move.click();
+    expect((await bar(page).boundingBox())!.y).toBeLessThan(450);
   } finally {
     await page.close();
   }

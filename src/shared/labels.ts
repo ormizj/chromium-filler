@@ -218,6 +218,8 @@ export type ActionKey =
   | 'interact'
   | 'interactArmed'
   | 'declare'
+  | 'moveBarToBottom'
+  | 'moveBarToTop'
   | 'applyFinishSetup'
   | 'sendItMyself'
   | 'notTheSendButton'
@@ -287,8 +289,18 @@ export const ACTION_LABELS: Record<ActionKey, string> = {
   // The armed form of the verb above, paired with it the way `applied` is with
   // `apply`. It has to name what the extension is now waiting for, because the
   // page has just gone live under the user's finger and nothing else says so.
+  //
+  // Its ellipsis is deliberate and is *not* the one `declare` used to carry: here
+  // it means "waiting for you", there it meant "opens a further choice" — and the
+  // choice is the menu that drops open under the button, so the mark said nothing
+  // the press did not already show. Do not make these two match.
   interactArmed: 'Click one thing…',
-  declare: 'Declare…',
+  declare: 'Declare',
+  // Where the toolbar will go if this is pressed, never where it is now: the
+  // button is a move, so it is named for its destination. Drawn as an icon, so
+  // these two strings are the whole of what a screen reader gets.
+  moveBarToBottom: 'Move the toolbar to the bottom of the page',
+  moveBarToTop: 'Move the toolbar to the top of the page',
   // Apply, plus what else this particular press is going to do. The extra half is
   // not decoration: this is the one Apply that starts a second job after sending,
   // and the vocabulary rule ("our action is Apply") is kept by leading with the verb.
@@ -390,6 +402,34 @@ export const RECORD_PASS_TEXT: Record<RecordPhase, {
     again: 'Mark it again',
     aria: 'Finishing this site’s setup',
   },
+};
+
+/**
+ * What the recorder bar says in the space where it usually reports the last step.
+ *
+ * Here for the reason `AFTER_SEND_ASK` is: these are the recorder's own sentences,
+ * and a sentence written inline in the surface that draws it is the drift this file
+ * exists to stop.
+ *
+ * `armed` is the loudest thing on the bar. While a gesture is armed the whole
+ * toolbar takes the accent skin and every control but one is blocked, so this line
+ * is the statement of the mode in words — colour is never the only signal, and the
+ * second half of it is what says the rest of the bar is standing down.
+ *
+ * One sentence for `armed` and `live` alike: the difference between "waiting for a
+ * click" and "you are typing into a field" is the recorder's business, and both mean
+ * the same thing to the user — the page is theirs for one gesture.
+ *
+ * **Keep `armed` short enough to hold one line on a 720px bar.** `.cf-rec-what` is a
+ * two-line clamp whose second line is reserved only under 640px, deliberately, so a
+ * sentence that wraps up there changes the bar's height the instant the page goes
+ * live — and on a bottom-docked bar that lifts every button out from under the thumb.
+ */
+export const RECORDER_READOUT: Record<'armed' | 'start' | 'element', string> = {
+  armed: 'The page is live for one click — use it as you normally would. Nothing else here acts.',
+  start: 'Interact to use the page, Declare to name something on it.',
+  // The readout's fallback name for a step that has neither a label nor a selector.
+  element: 'that element',
 };
 
 /**

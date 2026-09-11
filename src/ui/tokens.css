@@ -120,6 +120,17 @@
      beside two 16px masked marks it came out a speck. */
   --icon-back: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2.4' stroke-linecap='round' stroke-linejoin='round'><path d='M14.5 6l-6 6 6 6'/></svg>");
 
+  /* The recorder bar's "move me out of the way" control — an arrow running into
+     the edge it is being sent to. The edge is the half that carries the meaning:
+     a bare arrow says "down", and what the button does is dock the toolbar
+     against the bottom of the screen. Drawn rather than typeset for the reason
+     `--icon-back` gives, and given a silhouette no other 18px mark here has —
+     `--icon-chevron` and `--icon-back` are both bare strokes with nothing to
+     land on. Two tokens rather than one rotated, so the rule that draws them is
+     a swap of `--i` like the fullscreen toggle's and never a transform. */
+  --icon-move-down: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2.4' stroke-linecap='round' stroke-linejoin='round'><path d='M12 4v10'/><path d='M7.5 10l4.5 4.5 4.5-4.5'/><path d='M4.5 19.5h15'/></svg>");
+  --icon-move-up: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2.4' stroke-linecap='round' stroke-linejoin='round'><path d='M12 20V10'/><path d='M7.5 14l4.5-4.5 4.5 4.5'/><path d='M4.5 4.5h15'/></svg>");
+
   /* Geometry. `--tap` is the minimum comfortable touch target; primitives.css
      applies it to every control under `@media (pointer: coarse)`. */
   --tap: 44px;

@@ -1402,7 +1402,11 @@ class Controller {
       }
       // No sweep is scheduled here: the step above went through `onRecordedStep`,
       // which arms one, and `markBoundSteps` redraws this mark from that very step.
-    }, bindLabel(bind), () => this.paintBar());
+      // The picker's toolbar docks where the bar that opened it is docked. The user
+      // may have moved that bar off the page's own header, and a picker opening back
+      // at the edge they moved it away from reads as a different tool — and lands on
+      // the very nav the move was about.
+    }, bindLabel(bind), () => this.paintBar(), this.recorderBar?.place());
   }
 
   private paintBar(): void {

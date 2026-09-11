@@ -47,7 +47,12 @@ footer overflow menu.
 screen Site setup opens on for **every** site and so the most-seen screen in the
 panel: the coral moving from `Record the first pass` to `Mark the confirmation` to
 `Done` as the two passes come in is the whole argument of it, and a swap only one
-fixture can produce is a swap nobody looks at; `recording`, `recording-armed` and `recording-reset` (the bar up over a page
+fixture can produce is a swap nobody looks at; `recording`, `recording-armed`, `recording-long` (a step label at the full
+`MAX_LABEL`, which is the only way to see the readout's second line — a button with an
+eighty-character name is not something a fixture can be relied on to have),
+`recording-bottom` (the bar moved to the other edge, pressed rather than posed: where
+it sits is page-lifetime state on the instance, so there is no prop to set it with)
+and `recording-reset` (the bar up over a page
 held inert, the same bar with the page live for one gesture, and the warning behind
 Reset — the panel folded to its pill in all three), `recording-held` (a press that
 would have sent the application, refused and marked instead — a full sentence and an
@@ -921,7 +926,7 @@ first, and there are two answers:
 - **Interact** arms one gesture. The next click reaches the page and is kept as a
   step. `RecorderMode` is `idle` | `armed` | `live`, held on the handle and reported
   through `onMode` — the bar is the only thing on screen that can say which.
-- **Declare…** picks a `BindKey` from the bar's menu and hands off to `startPicker`,
+- **Declare** picks a `BindKey` from the bar's menu and hands off to `startPicker`,
   so a mark is chosen *before* it is pointed at. It works on anything, not only on
   what was just done, which is the only way to catch the confirmation banner — that
   appears because the application went in, and is never the thing you pressed.
@@ -1042,15 +1047,97 @@ description you forgot must not wipe the Send button you got right the first tim
 `src/content/recorderBar.ts` is a **toolbar, not a `Sheet`** — it never takes a
 `--pill-slot`, so "one slot, two sheets" is untouched, and it is the smallest thing
 that can still be pressed, because the page underneath is what the user is working
-in. Placement mirrors `picker.ts`: bottom on a coarse pointer, top on a fine one.
+in.
+
+**Which edge it sits on is a decision, and the bar makes it.** `RecorderBar.place()`
+is the one answer, stamped onto `.cf-bar` as `data-place` and read by the bar, the
+Declare menu and the Reset confirm — three things that must agree about which way is
+"away from the edge we are docked to". It was a `@media (pointer: coarse)` rule in the
+stylesheet, which is why it was also invisible to vitest. Three inputs, in order: the
+pointer seeds it (bottom on a coarse one, top on a fine one, mirroring `picker.ts`);
+the **place toggle** in the bar's leading corner moves it; and a `cf-bar-report` bar
+goes to the top whatever the other two said, because the review card comes back
+expanded on the same gesture and under 640px owns the bottom of the screen.
+
+The toggle is **page-lifetime, on the instance** — `Controller.draggedLayout`'s kind of
+thing rather than `modalFullscreen`'s. It exists because on a fine pointer the bar
+docks to the top, which on a job board is where the nav is and routinely where "Apply
+now" is: the one control the recording is about could be sitting under the toolbar
+asking the user to press it. It carries no `aria-pressed` — it is a move, not a state —
+so its `aria-label` names the end it will move *to*, and `--i` is keyed off the same
+`data-place` that names it. Drawn only on the first pass: the after-sending bar is one
+sentence and a `Done`, and where that sits is already decided for it. `pickForBind`
+hands `place()` to `startPicker`, or declaring a mark from a moved bar would open the
+picker's toolbar back at the edge the user moved away from.
 
 **The middle is the two options, and it is the whole reason the bar exists:**
-`Interact` · `Declare…`. Neither is a default — while neither is chosen a click does
+`Interact` · `Declare`. Neither is a default — while neither is chosen a click does
 nothing at all — so the question "is this a step, or is it a thing" is answered
 *before* the user acts rather than reconstructed from a list of nine clicks at the
-end. `Declare…`'s menu is `marksFor(phase, flow, leg)` — see rule 11, which is what
+end. `Declare`'s menu is `marksFor(phase, flow, leg)` — see rule 11, which is what
 takes the Confirmation out of the first pass; `Interact` is a
 toggle, because the button holding the page live has to be the way back out of it.
+`ACTION_LABELS.interactArmed` (`Click one thing…`) keeps its ellipsis and `declare`
+does not: there it means "waiting for you", where here it meant "opens a further
+choice" — and the choice drops open under the button, so the mark said nothing the
+press did not already show.
+
+**Every join draws a seam** (`.cf-bar > * + *`), rather than one section owning a box.
+The bar holds four different kinds of thing — what is being recorded, what just
+happened, the two ways to act, the three ways out — and only `.cf-rec-options` carried
+dividers, so the rest ran together at an 8px gap. `+` is source order, which is the
+wide layout's order and nothing else; the narrow block and the readout's own row rule
+both drop the seam, because a vertical rule at the start of a full-width row encloses
+nothing.
+
+**The readout takes a row of its own at every width**, and that is what made it
+readable. It shared the toolbar's line, which is four controls capped at 720px — so it
+got about 56px, and was clipped to one line with `text-overflow: ellipsis` on top of
+that, at *every* width including the narrow layout that had the space. There was no
+hover, no disclosure and no second line: the one part of the bar reporting what the
+extension just did was the one part that could not be read. It is a two-line clamp now
+(reserved at 390px, where the second line is really used, so the bar does not change
+height between "Clicked Next" and a long name), and the label is clipped to
+`READOUT_CHARS` with an ellipsis rather than cut. `labelFor` (`recorder.ts`) uses
+`clip` for the same reason — a bare `slice(0, 80)` ended mid-word with nothing saying
+it had. This is what `.cf-bar-notice` used to do for the held-send sentence alone; a
+paragraph is a paragraph whichever one it is, so there is one rule. **Not on the
+after-sending bar**: that one is three children wide and its sentence *is* the content,
+so a row of its own puts `Done` above the line it dismisses.
+
+**The two marks that decide how an application is sent are boxed together**
+(`.cf-rec-menu-decides`, from the `DECIDES` set that also decides which items carry a
+caption — one fact, two renderings). Flat, `Applying on this page` and `Applying on the
+employer's site` were told from the six posting facts and the sixteen profile fields by
+the same hairline every group already shares, so the pair that gates Apply read as the
+first four of twenty-six equivalent things to point at. The hairline *between* the two
+heads stays: they are opposite answers to one question, which is the whole reason they
+are two groups. The box is `role="none"` — a drawing, not a grouping: `role="menu"`
+owns its `menuitem`s and only a `group` may come between them, and the two real groups
+inside are already that.
+
+**And it takes `overflow: clip`, which must never be "tidied" to `hidden`.** The heads
+inside it are `position: sticky`, which makes them *positioned* — so they paint after
+their parent's background **and its border**, and the box has no inline padding, so
+their square top corners painted a wedge of `--surface` over a 14px curve: the rounded
+corner with a bite out of it, on the first thing the menu shows. (The bottom corners
+had the same fault waiting on the last item's hover fill.) `hidden` fixes the paint
+and breaks the heads — it makes the box a scroll container, so the sticky heads would
+resolve against a box that never scrolls and stop following the list. `clip` is
+explicitly not a scroll container, so the scrollport is still `.cf-rec-menu`. The E2E
+pins both halves: the computed value, and the head's *lag* behind a scroll.
+
+**A menu item's name and its ✓ share a line.** The item is a `flex-direction: column`
+box so it can carry a caption under the name, so a tick appended beside the label
+landed on a row of its own — a stray mark between a name and its explanation.
+`.cf-rec-menu-line` is that row; the glyph is `aria-hidden` and the word is folded into
+the item's `aria-label` instead, which the captioned branch used to drop entirely.
+
+**Either popover closes on Escape or on a press elsewhere in the bar**, both scoped to
+the shadow root. The page underneath is inert, so a press anywhere else does nothing at
+all: a 60vh list of ~26 marks opened by mistake could only be dismissed by finding the
+one button it is very likely covering. The toggle is excluded — closing there would
+land a second close under the press that reopens it.
 
 **Choosing a mark closes the menu and repaints, in that order, before `onDeclare`** —
 the same rule the modal's overflow menu follows, and for a sharper reason. It used to
@@ -1060,12 +1147,60 @@ stayed hanging over the very page the picker was asking the user to point at —
 the picker's cancel path nothing ever came along to take it down. Hence also
 `pickForBind`'s `onCancel`, which every other picker call site already passed.
 
-**The armed state is a mode, and drawn as one.** It does *not* take the primary fill
-— `Done` is the one thing this bar is for, and a second coral beside it makes neither
-mean anything — and it does *not* pulse its own opacity: the live dot can, being a
-10px dot, but a full-width control fading to a third and back is the same muddy
-half-there block a disabled primary used to be, so "waiting for you" would read as
-"not available". The tint holds still and the **ring** moves.
+**The armed state is a mode, and the whole bar is drawn in it.** It was a tint on one
+control, which is not what the moment needs: the page has just gone live under the
+user's finger, and a recoloured 100px button among four others is not a state a page
+can be in. So `.cf-bar-armed` takes the accent skin, the readout becomes
+`RECORDER_READOUT.armed` — the statement of the mode, in words, because colour is
+never the only signal — and `Declare` · `Reset` · `Undo` · `Done` all go
+`aria-disabled`. One loud thing, one sentence, and nothing else that acts. `isArmed`
+(`recorderBar.ts`) is the single answer all five renderings read, because a toolbar
+whose parts disagree about the mode is saying two things at once.
+
+**The place toggle is the one exception, and by construction rather than by an
+exclusion someone has to remember**: it is a bare `<button>`, not a `.cf-btn`, so none
+of the armed rules can reach it. It is furniture rather than one of the bar's
+decisions, and on a bar that has just told the user to go and click something it is
+the one control with a job still to do — the thing they are being asked to press may
+be underneath it.
+
+**Blocked is not demoted.** `Done` keeps `.primary` and de-fills through primitives'
+blocked-primary rule; `Reset` keeps `.btn-danger`. A control that changed what it *is*
+while it cannot act would come back as something else. What the armed bar adds is one
+rule of its own — `.cf-bar-armed .cf-btn[aria-disabled]` takes `--muted` and
+`--border-strong` — because primitives' `--muted-2` on `--border` is written for paper
+and measures about 2.6:1 on the tint: a label you cannot read on a control you cannot
+find, which is the opposite of "unavailable is a state a control is *in*".
+
+The armed control itself **inverts**: paper, with the accent's border and the accent's
+word, the only filled control left. It does *not* take the primary fill — `Done` is
+the one thing this bar is for, and a second coral beside it makes neither mean
+anything — and it does *not* pulse its own opacity: the live dot can, being a 10px
+dot, but a full-width control fading to a third and back is the same muddy half-there
+block a disabled primary used to be, so "waiting for you" would read as "not
+available". The tint holds still — it is the bar's now — and the **ring** moves, on
+the one control that is still live.
+
+**The ring stays on the button and must not be moved up to the bar**, which is the
+obvious next idea and is three mistakes: `box-shadow` is one property rather than a
+stack, so a ring keyframe on `.cf-bar` deletes the toolbar's `--shadow-2` lift for the
+whole mode; the ring's colour is `--accent-weak`, which is now the bar's own ground,
+so the halo would be invisible — and unlike the button's it would land on the
+*website*, whose backdrop we do not control; and a 720px halo breathing over a page
+the user is reading is a second moving thing beside the live dot.
+
+**`.cf-rec-armed` joins `.btn-danger` and `.btn-ghost` on the list of classes that
+must be spelled twice** (`.cf-rec-armed, button.cf-btn.cf-rec-armed`). It was not, and
+so for months it rendered almost none of itself: `button.cf-btn` in primitives.css is
+(0,1,1) against its (0,1,0) and the shadow root inlines primitives *first*, so the
+fill, the border and the colour all lost and the animation was the only declaration
+that could land — with the class on the button the whole time, so every DOM assertion
+agreed it was fine. That is why the E2E asserts a *computed* colour: jsdom evaluates
+neither the cascade nor layout, and this is the shape of bug it structurally cannot
+see. The same pairing is why the block carries a `:hover` of its own, and why
+`:focus-visible` stands the animation down — a running `box-shadow` animation beats
+`var(--ring)` however specific that rule is, so the one control a keyboard user is
+being asked to press was the one with no focus ring.
 
 The extension's own guess still runs (`guessField`, exported from `fieldDetect` —
 same scoring as `detectFields` but for one element, since the bar cannot wait for a
@@ -1114,9 +1249,11 @@ specificity** in `primitives.css` (`.btn-danger, button.cf-btn.btn-danger`) exac
 `.btn-ghost` already is: `button.cf-btn` names a class of its own, so the bare rule
 lost both the colour and the border and Reset drew as an ordinary secondary button.
 
-At ≤640px the bar wraps to **four** rows in a fixed order — state, the three exits,
-the two options, the readout — because left to source order the options moved with the
-length of the readout and took the exits with them. It was three while the exits were
+At ≤640px the bar wraps to **four** rows in a fixed order — state (sharing its row
+with the place toggle, held against the far end), the three exits, the two options,
+the readout — because left to source order the options moved with the length of the
+readout and took the exits with them. The readout's row is not part of that sequence
+any more: it is `order: 9` in its own rule, at both widths. It was three while the exits were
 two buttons sharing the first row: at 390px the state readout ends around x=175 and
 Undo began around x=258, so a third control eats the last of that slack the moment the
 clock reaches two digits or the count reaches ten, and a row that reflows while the
@@ -2176,6 +2313,22 @@ needs no `downloads` permission, and an MV3 service worker has no
   application. For the same reason the capture-phase suppression covers
   `pointerdown`/`mousedown`/`mouseup`/`dblclick`/`contextmenu` and not just
   `click`: a site that acts on `mousedown` would otherwise act once per step.
+- **The recorder bar's placement has one answer, and `place()` is it.** The pointer
+  seeds it, the bar's own toggle moves it, and a `cf-bar-report` bar overrides both —
+  three inputs, resolved once in JS and stamped as `data-place`, because the bar, the
+  Declare menu and the Reset confirm must agree about which way is "away from the edge
+  we are docked to". Never reinstate the `@media (pointer: coarse)` rules that used to
+  answer it three times over: a user who moves the bar to the bottom would get popovers
+  still opening downward, off the screen. The dock is page-lifetime and must stay so —
+  stored, it would quietly redefine where the bar opens on every later site, which is
+  exactly the bug `Controller.draggedLayout` exists to avoid. **And it is centred by auto
+  margins, never by `left: 50%`**: a `position: fixed` box with `left: 50%` and
+  `right: auto` shrinks to fit inside what is left of the viewport, so the bar was
+  capped at *half the screen* and the `720px` its own `max-width` claims was
+  unreachable below a 1440px window. The symptom was the armed bar: `Click one
+  thing…` is wider than `Interact`, so at 1280px the exits wrapped to a third row and
+  the bar grew 50px taller — three buttons moving down a row at the exact moment the
+  user is told to go and click the page.
 - **The recorder bar's clock must never repaint the bar.** Its ticker writes
   `.cf-rec-clock`'s text and nothing else (`RecorderBar.tick`). It used to call
   `paint()`, which removes and rebuilds `.cf-bar` — including the open Declare

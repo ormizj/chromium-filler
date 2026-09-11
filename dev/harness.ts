@@ -722,6 +722,7 @@ function bootSetup(): void {
   const BAR_STATES = [
     'recording', 'recording-armed', 'recording-reset', 'recording-held',
     'recording-declare', 'recording-declare-external',
+    'recording-long', 'recording-bottom',
     'after-send', 'after-send-unsent', 'after-send-saved',
   ];
   if (BAR_STATES.includes(state)) {
@@ -747,7 +748,19 @@ function bootSetup(): void {
       leg: 'posting',
       stepCount: steps.length,
       mode: state === 'recording-armed' ? 'armed' : 'idle',
-      last: steps[1],
+      // `recording-long` is a step whose label runs the full `MAX_LABEL`, which is the
+      // only way to see the readout's second line. It reserves two lines at every
+      // width and the ordinary "Clicked Next" uses one of them, so a short label
+      // proves nothing about the half of that box nobody ever fills — and a button
+      // with an eighty-character name is not something a fixture can be relied on to
+      // have.
+      last: state === 'recording-long'
+        ? {
+          ...steps[1],
+          label: 'Submit your application for Senior Platform Engineer, '
+            + 'Remote (EMEA) — final step',
+        }
+        : steps[1],
       bound: ['field:email'],
       // Which door the pass was reached through, and it is the whole of the
       // sentence the bar carries: Apply has already sent the application, while
@@ -772,6 +785,13 @@ function bootSetup(): void {
     // four heads with a caption on four of them — none of which is on screen until
     // something opens it, and it is the one thing here that can overflow a phone.
     if (state.startsWith('recording-declare')) press('.cf-rec-options', ACTION_LABELS.declare);
+    // The other end of the page. Pressed rather than posed for the same reason as the
+    // popovers above — where the bar sits is page-lifetime state on the instance, so
+    // there is no prop to set it with, and a screenshot cannot press the button.
+    if (state === 'recording-bottom') {
+      const host = document.getElementById(RECORDER_HOST_ID) as HTMLElement | null;
+      host?.shadowRoot?.querySelector<HTMLButtonElement>('.cf-rec-place')?.click();
+    }
   }
 
   // `&step=…` opens one of the six wizard steps. Each is a distinct rendering

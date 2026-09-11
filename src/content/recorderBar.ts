@@ -14,8 +14,13 @@
  * does nothing at all, so reading the posting cannot leave a stray press behind to
  * be replayed on every later visit.
  *
- * The armed state is loud on purpose. The page has just gone live under the
- * user's finger, and the bar is the only thing that can say so.
+ * The armed state is loud on purpose, and it is the **whole bar** that wears it.
+ * The page has just gone live under the user's finger and the bar is the only thing
+ * that can say so, so the toolbar takes the accent skin, the readout becomes the
+ * statement of the mode, and every control that is not the way out of it is blocked.
+ * The one exception is the place toggle: it is furniture rather than one of the
+ * bar's decisions, and moving the HUD off the control you are about to click is
+ * exactly what it is for.
  *
  * The right-hand end is three sizes of changing your mind — **Reset** throws the
  * recording away and starts it again from the posting, **Undo** takes back the last
@@ -30,9 +35,10 @@
 
 import {
   ACTION_LABELS, AFTER_SEND_ASK, BIND_LABELS, MARK_GROUP_TEXT, RECORD_PASS_TEXT,
-  resetRecordingPrompt,
+  RECORDER_READOUT, resetRecordingPrompt,
 } from '../shared/labels';
 import { BIND_HELP } from '../shared/help';
+import { clip } from '../shared/jobText';
 import { FIELD_LABELS } from '../shared/fieldKeys';
 import type { FieldKey } from '../shared/types';
 import {
@@ -98,12 +104,50 @@ export interface RecorderBarState {
 }
 
 /**
- * Which groups draw a caption under each mark. The two that decide how an
- * application is sent, and no others: a field's name is its own explanation, and
- * `What the posting says` is explained by the head the six sit under — twenty-two
- * more captions turn a 60vh list into a wall of prose.
+ * The marks that decide **how an application is sent** — and the one set behind two
+ * renderings, because it is one fact about them.
+ *
+ * They draw a caption under each mark: their names are terms of art, where a field's
+ * name is its own explanation and `What the posting says` is explained by the head
+ * the six sit under. Twenty-two more captions turn a 60vh list into a wall of prose.
+ *
+ * And they are boxed together in the menu. Flat, they were told from the posting
+ * facts and the profile fields below them by a hairline every group already shares,
+ * so the two marks that gate Apply read as the first four of twenty-six things to
+ * point at. The box keeps the split between them — they are opposite answers to one
+ * question, which is the whole reason they are two groups — while saying that the
+ * question is not the one the rest of the list is answering.
  */
-const HINTED = new Set<MarkGroupId>(['sending', 'leaving']);
+const DECIDES = new Set<MarkGroupId>(['sending', 'leaving']);
+
+/**
+ * How much of a step's label the readout shows. `labelFor` stores up to 80
+ * characters, which is right for the review's rows and half again too much for a
+ * toolbar: `Clicked ` + 60 + ` — Send button` is two lines at 390px and one on a
+ * 720px bar, which is exactly the space `.cf-rec-what` reserves. Mirrors the
+ * picker's `PREVIEW_CHARS` — same decision about the same kind of text.
+ */
+const READOUT_CHARS = 60;
+
+/**
+ * Whether the page has been handed to the user — one armed gesture, or a field that
+ * gesture landed in and is now being typed into.
+ *
+ * One answer, because the bar, the Interact button, the readout and the four blocked
+ * controls are five renderings of one mode, and any disagreement between them is a
+ * toolbar saying two things at once.
+ *
+ * `afterSend` is excluded rather than incidentally false: that bar is built with no
+ * recorder at all (`main.ts`'s `attachAfterSendBar`), over a page the user is really
+ * applying on, so it has no mode to be in.
+ */
+const isArmed = (d: RecorderBarState): boolean => d.phase !== 'afterSend' && d.mode !== 'idle';
+
+/** Which edge the bar — and the picker it opens — is docked to. */
+export type BarPlace = 'top' | 'bottom';
+
+/** Fixed, because the Declare toggle has to name it through `aria-controls`. */
+const MENU_ID = 'cf-rec-menu';
 
 export class RecorderBar {
   private host: HTMLElement;
@@ -122,6 +166,18 @@ export class RecorderBar {
   private ticker?: ReturnType<typeof setInterval>;
   /** The elapsed-time span, kept so the tick can write it without a repaint. */
   private clockEl?: HTMLElement;
+  /**
+   * Which edge the bar is docked to. Seeded with the rule this used to keep in a
+   * `@media (pointer: coarse)` block — a top bar sits under the mobile URL bar and
+   * out of the thumb's reach — and moved here because the user can now change it,
+   * and because a media query is invisible to vitest.
+   *
+   * Page-lifetime, deliberately: it is `Controller.draggedLayout`'s kind of thing
+   * rather than `modalFullscreen`'s. Moving the HUD off the page's own header is a
+   * nudge made while looking at one posting, and a stored answer would quietly
+   * redefine where the bar opens on every site afterwards.
+   */
+  private dock: BarPlace = window.matchMedia?.('(pointer: coarse)').matches ? 'bottom' : 'top';
 
   constructor(cb: RecorderBarCallbacks) {
     this.cb = cb;
@@ -141,11 +197,58 @@ export class RecorderBar {
     // and a focused item as much as it is a list: scrolling down to a profile field
     // meant racing the timer back to the top of it.
     this.ticker = setInterval(() => this.tick(), 1000);
+
+    /*
+     * The two ways out of a popover that are not pressing the toggle again.
+     *
+     * Both are needed and neither exists by accident. The page underneath is inert
+     * while a recording runs, so a press anywhere else does nothing at all — a 60vh
+     * list of ~26 marks opened by mistake could only be dismissed by finding the one
+     * button that opened it, which the list is very likely covering. Bound on the
+     * shadow root rather than the document: the page's own inertness is `inertPage`'s
+     * business, and a listener out there would be one more thing racing it.
+     */
+    this.shadow.addEventListener('keydown', (e) => {
+      if ((e as KeyboardEvent).key !== 'Escape' || !this.isOpen()) return;
+      e.preventDefault();
+      e.stopPropagation();
+      this.closePopovers();
+      this.paint();
+    });
+    this.shadow.addEventListener('pointerdown', (e) => {
+      if (!this.isOpen()) return;
+      const target = e.target as Element | null;
+      // Inside the popover is using it; on the toggle is its own business, and
+      // closing here would land a second close under the press that reopens it.
+      if (target?.closest('.cf-rec-menu, .cf-rec-confirm, [aria-expanded="true"]')) return;
+      this.closePopovers();
+      this.paint();
+    });
+  }
+
+  /** Whether either popover is up. Both are mutually exclusive — see `closePopovers`. */
+  private isOpen(): boolean {
+    return this.menu || this.confirming;
   }
 
   render(state: RecorderBarState): void {
     this.data = state;
     this.paint();
+  }
+
+  /**
+   * Which edge the bar is really on, which is not always the one that was chosen.
+   *
+   * Once the mark has landed the review card comes back expanded on the same
+   * gesture, carrying the receipt for the application — and under 640px that card is
+   * a full-width bottom sheet, which is exactly where this bar would sit. Two reports
+   * over one another, and the one underneath is the one that matters. So the report
+   * bar moves to the top whatever the dock says: that is collision avoidance rather
+   * than taste, and it outranked the media query this replaced for the same reason.
+   */
+  place(): BarPlace {
+    const report = this.data?.phase === 'afterSend' && !!this.data.notice;
+    return report && this.dock === 'bottom' ? 'top' : this.dock;
   }
 
   destroy(): void {
@@ -174,27 +277,70 @@ export class RecorderBar {
     const bar = el('div', 'cf-bar');
     bar.setAttribute('role', 'toolbar');
     bar.setAttribute('aria-label', RECORD_PASS_TEXT[data.phase].aria);
+    // One computed answer drives the bar, the Declare menu and the Reset confirm, so
+    // the three cannot disagree about which way is "away from the edge we are on".
+    bar.dataset.place = this.place();
     if (data.phase === 'afterSend') bar.classList.add('cf-bar-after');
-    // Reporting rather than asking, which is also the moment the review card comes
-    // back expanded underneath — and on a phone that card owns the bottom of the
-    // screen. See the placement note in `recorderBar.css`.
+    // Reporting rather than asking. `place()` is what actually moves it; this is the
+    // class the E2E reads, and what the CSS uses to quieten the bar down to a line.
     if (data.phase === 'afterSend' && data.notice) bar.classList.add('cf-bar-report');
     // The held send's explanation is a paragraph, and a paragraph cannot share a row
     // with four controls — see the wrap rule in `recorderBar.css`. Only on the first
     // pass: the after-sending bar is three children wide and its sentence *is* the
     // content, so wrapping there put Done above the line it dismisses.
     if (data.notice && data.phase !== 'afterSend') bar.classList.add('cf-bar-notice');
+    // The mode is the whole bar's, not one button's. The page has just gone live
+    // under the user's finger, and a recoloured 100px button among four others is
+    // not a thing a page can be in — see the armed block in `recorderBar.css`, and
+    // the four controls that go `aria-disabled` below it. The place toggle is the
+    // one exception, and deliberately: it is furniture rather than one of the bar's
+    // decisions, and moving the HUD off the control you are about to click is
+    // exactly what it is for.
+    if (isArmed(data)) bar.classList.add('cf-bar-armed');
     // Source order is the wide layout: state, what just happened, the two options,
     // the way out. Narrow re-orders it with `order`, which is where the readout drops
     // to a row of its own.
     bar.append(...(data.phase === 'afterSend'
       ? [this.state(data), this.lastStep(data), this.afterSendActions(data)]
-      : [this.state(data), this.lastStep(data), this.options(data), this.exits()]));
+      : [this.placeButton(), this.state(data), this.lastStep(data), this.options(data), this.exits()]));
     this.shadow.append(bar);
     if (scroll) {
       const list = this.shadow.querySelector('.cf-rec-menu');
       if (list) list.scrollTop = scroll;
     }
+  }
+
+  /**
+   * The way out from under the page's own header.
+   *
+   * On a fine pointer this bar docks to the top, which is where a job board keeps its
+   * nav — and routinely where "Apply now" is. There was no way to move it, so the one
+   * control the recording is about could be sitting underneath the toolbar asking the
+   * user to press it.
+   *
+   * Drawn only on the first pass: that is the full toolbar, and the thing in the way.
+   * The after-sending bar is one sentence and a `Done`, and its own placement is
+   * already decided for it by the card coming back underneath — see `place()`.
+   *
+   * No `aria-pressed`. This is not a state being toggled, it is a move, so the name
+   * is where the bar will go and the icon points the same way. Both are written here,
+   * from one call to `place()`, so they cannot drift apart.
+   */
+  private placeButton(): HTMLElement {
+    const to = this.place() === 'top' ? 'bottom' : 'top';
+    const b = document.createElement('button');
+    b.className = 'cf-rec-place';
+    b.setAttribute('aria-label', to === 'bottom' ? ACTION_LABELS.moveBarToBottom : ACTION_LABELS.moveBarToTop);
+    b.addEventListener('click', (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      this.dock = to;
+      // The popovers open away from the edge the bar is docked to, so one that is
+      // already up would be pointing the wrong way the instant the bar lands.
+      this.closePopovers();
+      this.paint();
+    });
+    return b;
   }
 
   private state(data: RecorderBarState): HTMLElement {
@@ -239,11 +385,16 @@ export class RecorderBar {
    * The middle: the two ways to act on the page. Interact is the one that changes
    * what the page is doing, so it takes the emphasis while it is armed — and only
    * while it is armed, because a permanently loud button says nothing.
+   *
+   * Once it is armed it is also the only live control on the bar, Declare having
+   * gone `aria-disabled` beside it: the question "is this a step, or is it a thing"
+   * is asked *before* the page goes live, and there is nothing to answer it with
+   * while a gesture is still outstanding.
    */
   private options(data: RecorderBarState): HTMLElement {
     const wrap = el('div', 'cf-rec-options');
 
-    const armed = data.mode !== 'idle';
+    const armed = isArmed(data);
     // Not `.primary` when armed: Done is the one thing this bar is for, and a second
     // coral beside it makes neither of them mean anything. `.cf-rec-armed` is a mode,
     // drawn as one.
@@ -272,7 +423,18 @@ export class RecorderBar {
       this.menu = open;
       this.paint();
     });
+    // Not while a gesture is armed. The bar is in a mode with exactly one live
+    // control — the one that armed it, and so the one that stands it down — and
+    // naming a thing is the other half of the question this bar asks *before* the
+    // page goes live, not something to reach for while it already is. Same
+    // `aria-disabled` convention as Reset and Undo at zero steps: never the
+    // `disabled` property, which swallows the press that asks why it is grey.
+    if (isArmed(data)) toggle.setAttribute('aria-disabled', 'true');
     toggle.setAttribute('aria-expanded', String(this.menu));
+    // It opens a `role="menu"`, and said so nowhere: without these a screen reader
+    // announces a plain button and gives no way to reach what it opened.
+    toggle.setAttribute('aria-haspopup', 'menu');
+    toggle.setAttribute('aria-controls', MENU_ID);
     wrap.append(toggle);
     if (this.menu) wrap.append(this.buildMenu(data));
     return wrap;
@@ -280,6 +442,7 @@ export class RecorderBar {
 
   private buildMenu(data: RecorderBarState): HTMLElement {
     const menu = el('div', 'cf-rec-menu');
+    menu.id = MENU_ID;
     menu.setAttribute('role', 'menu');
     // Closed *and* painted, in that order, before the picker is asked for.
     // Setting the flag alone left the flag and the DOM disagreeing: nothing on the
@@ -308,6 +471,29 @@ export class RecorderBar {
      */
     const groups = markGroups(marksFor(data.phase, data.flow, data.leg));
 
+    /*
+     * The two groups that decide how an application is sent go in one box — see
+     * `DECIDES`. `marksFor` always emits them adjacent and first (lead then trail,
+     * whichever way round the leg puts them), so this is a contiguous run and the
+     * box is built lazily on the first of them.
+     *
+     * `role="none"`: it is a drawing, not a grouping. `role="menu"` owns its
+     * `menuitem`s and only a `group` may come between, and the two real groups
+     * inside it — each with its own head and name — are already that. A second
+     * semantic layer would put the items one level further from the menu and buy
+     * nothing a border does not already say.
+     */
+    let boxed: HTMLElement | undefined;
+    const into = (id: MarkGroupId): HTMLElement => {
+      if (!DECIDES.has(id)) return menu;
+      if (!boxed) {
+        boxed = el('div', 'cf-rec-menu-decides');
+        boxed.setAttribute('role', 'none');
+        menu.append(boxed);
+      }
+      return boxed;
+    };
+
     for (const { id, keys } of groups) {
       const pending = keys.filter((k) => !data.bound.includes(k));
       const shown = pending.length ? pending : keys;
@@ -332,8 +518,30 @@ export class RecorderBar {
       for (const key of shown) {
         const b = btn('', () => choose(key), 'btn-ghost');
         b.setAttribute('role', 'menuitem');
-        b.append(text('span', bindLabel(key), 'cf-rec-menu-label'));
-        if (data.bound.includes(key)) b.append(text('span', ' ✓'));
+        const marked = data.bound.includes(key);
+        /*
+         * The name and the tick share a line, and that needs a line to share: the
+         * item is a `flex-direction: column` box so it can carry a caption under the
+         * name, so a `✓` appended beside the label landed on a *row of its own* —
+         * a stray mark floating between a name and its explanation.
+         */
+        const line = el('div', 'cf-rec-menu-line');
+        line.append(text('span', bindLabel(key), 'cf-rec-menu-label'));
+        if (marked) {
+          // The glyph is for the eye only. What a screen reader gets is the word, in
+          // the name below — a bare "check mark" announced after a mark's name says
+          // less than the tick does, and says it in the wrong grammar.
+          const tick = text('span', '✓', 'cf-rec-menu-mark');
+          tick.setAttribute('aria-hidden', 'true');
+          line.append(tick);
+        }
+        b.append(line);
+        // Named here whenever the name is not simply the label: with a caption to
+        // keep out of it, with a tick to fold in, or both. Spelling it out and
+        // stopping at the label is what used to drop the ✓ from the accessible name
+        // entirely, so the four marks that matter most announced nothing about
+        // already being done.
+        const name = marked ? `${bindLabel(key)}, marked` : bindLabel(key);
         // Only the marks that decide how an application is sent. Their names are
         // terms of art — "Quick-apply marker" says nothing on its own, and this is
         // the last surface where the choice is still open. Drawn rather than hidden
@@ -343,7 +551,7 @@ export class RecorderBar {
         // where that rule is written down: the label above it and the head above
         // that have both already given the definition, so a third go at it is the
         // one thing a caption here must not be.
-        const hint = !isFieldBind(key) && HINTED.has(id) ? BIND_HELP[key].short : undefined;
+        const hint = !isFieldBind(key) && DECIDES.has(id) ? BIND_HELP[key].short : undefined;
         if (hint) {
           // Described by, not labelled by. The item's name is the mark's name — that
           // is what the compiler stores and what every other surface calls it — and a
@@ -351,13 +559,15 @@ export class RecorderBar {
           // sentence where the list says "Send button".
           const note = text('span', hint, 'cf-rec-menu-hint');
           note.id = `cf-hint-${key}`;
-          b.setAttribute('aria-label', bindLabel(key));
+          b.setAttribute('aria-label', name);
           b.setAttribute('aria-describedby', note.id);
           b.append(note);
+        } else if (marked) {
+          b.setAttribute('aria-label', name);
         }
         group.append(b);
       }
-      menu.append(group);
+      into(id).append(group);
     }
     return menu;
   }
@@ -385,22 +595,31 @@ export class RecorderBar {
     if (data.notice) {
       // Louder than the ordinary readout, and it has to be: it is the answer to "why
       // did that button do nothing", and it is competing with the page underneath.
+      //
+      // And announced. The bar's one live region is `.cf-rec-state`, which this is not
+      // in, so the one sentence explaining a press that was refused reached a screen
+      // reader nowhere at all. `alert` rather than `status` for the same reason it is
+      // drawn louder: it is about a press that has just been taken away.
       what.classList.add('cf-rec-notice');
+      what.setAttribute('role', 'alert');
       what.append(text('span', data.notice));
       wrap.append(what, inWrap(btn(
         ACTION_LABELS.notTheSendButton, () => { this.closePopovers(); this.cb.onForceSend(); },
       )));
       return wrap;
     }
-    if (data.mode !== 'idle') {
-      what.append(text('span', 'The page is live — use it as you normally would.'));
+    if (isArmed(data)) {
+      what.append(text('span', RECORDER_READOUT.armed));
     } else if (last) {
-      const name = last.label || last.target?.selector || 'that element';
+      // Clipped for the bar, not at the source: `labelFor` stores a label the review
+      // shows in full, and this is a toolbar. Marked with an ellipsis rather than cut,
+      // so a name that ran on says it ran on.
+      const name = clip(last.label || last.target?.selector || RECORDER_READOUT.element, READOUT_CHARS);
       const verb = last.action === 'input' ? 'Filled in' : 'Clicked';
       what.append(text('span', `${verb} `), text('b', name));
       if (last.bind) what.append(text('span', ` — ${bindLabel(last.bind)}`));
     } else {
-      what.append(text('span', 'Interact to use the page, Declare to name something on it.'));
+      what.append(text('span', RECORDER_READOUT.start));
     }
 
     wrap.append(what);
@@ -450,15 +669,23 @@ export class RecorderBar {
    */
   private exits(): HTMLElement {
     const wrap = el('div', 'cf-rec-exits');
+    // While a gesture is armed there is one thing to do and one way out of it, so
+    // the three ways of changing your mind stand down with everything else. Done
+    // included: the press the user has already paid for is one click away, and
+    // finishing the recording in the middle of it would leave a step half-taken.
+    // Pressing the armed button hands the page back, and it is the loudest control
+    // on the bar while it does.
+    const armed = !!this.data && isArmed(this.data);
 
     const undo = btn(ACTION_LABELS.undo, () => this.cb.onUndo());
-    if (!this.data?.stepCount) undo.setAttribute('aria-disabled', 'true');
+    if (armed || !this.data?.stepCount) undo.setAttribute('aria-disabled', 'true');
 
-    wrap.append(
-      this.resetButton(),
-      inWrap(undo),
-      inWrap(btn(ACTION_LABELS.stopRecording, () => this.cb.onDone(), 'primary')),
-    );
+    const done = btn(ACTION_LABELS.stopRecording, () => this.cb.onDone(), 'primary');
+    // It keeps `.primary` and de-fills through primitives' blocked-primary rule,
+    // which is the one treatment that reads as "unavailable" rather than "broken".
+    if (armed) done.setAttribute('aria-disabled', 'true');
+
+    wrap.append(this.resetButton(), inWrap(undo), inWrap(done));
     return wrap;
   }
 
@@ -480,7 +707,9 @@ export class RecorderBar {
     }, 'btn-danger');
     // Same convention as Undo beside it, and as the modal's blocked Apply: never the
     // `disabled` property, which swallows the press that asks why the control is grey.
-    if (!this.data?.stepCount) toggle.setAttribute('aria-disabled', 'true');
+    if ((this.data && isArmed(this.data)) || !this.data?.stepCount) {
+      toggle.setAttribute('aria-disabled', 'true');
+    }
     toggle.setAttribute('aria-expanded', String(this.confirming));
     wrap.append(toggle);
     if (this.confirming) wrap.append(this.buildConfirm());

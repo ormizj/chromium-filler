@@ -15,7 +15,8 @@ import {
 } from './recorderBar';
 import type { BindKey } from '../shared/recording';
 import {
-  ACTION_LABELS, AFTER_SEND_ASK, MARK_GROUP_TEXT, RECORD_PASS_TEXT, heldSendNotice,
+  ACTION_LABELS, AFTER_SEND_ASK, MARK_GROUP_TEXT, RECORD_PASS_TEXT, RECORDER_READOUT,
+  heldSendNotice,
 } from '../shared/labels';
 import { BIND_HELP } from '../shared/help';
 import { RECORDER_HOST_ID } from './extensionUi';
@@ -412,6 +413,316 @@ describe('picking something out of the Declare menu', () => {
     toggle.click();
     expect(menu(shadow)).toBeTruthy();
   });
+
+  /**
+   * It opens a `role="menu"` and said so nowhere: a screen reader announced a plain
+   * button, with no way to reach the list it had just put on screen.
+   */
+  it('says it opens a menu, and which one', () => {
+    const shadow = render();
+    openMenu(shadow);
+    const toggle = [...shadow.querySelectorAll<HTMLButtonElement>('.cf-rec-options .cf-btn')]
+      .find((b) => b.getAttribute('aria-haspopup') === 'menu')!;
+    expect(toggle).toBeTruthy();
+    expect(shadow.getElementById(toggle.getAttribute('aria-controls')!)).toBe(menu(shadow));
+  });
+
+  /**
+   * The pair that decides how an application is sent, boxed away from the six posting
+   * facts and the sixteen profile fields. Flat, they were told from those by the same
+   * hairline every group already shares, so the two marks that gate Apply read as the
+   * first four of twenty-six equivalent things to point at.
+   */
+  it('boxes the marks that decide how the application is sent', () => {
+    const shadow = render();
+    openMenu(shadow);
+    const box = shadow.querySelector('.cf-rec-menu-decides')!;
+    const heads = [...box.querySelectorAll('.cf-rec-menu-head')].map((h) => h.textContent);
+    expect(heads).toEqual([MARK_GROUP_TEXT.sending, MARK_GROUP_TEXT.leaving]);
+  });
+
+  /** And nothing else: the posting facts and the fields stay outside it. */
+  it('leaves every other group out of that box', () => {
+    const shadow = render();
+    openMenu(shadow);
+    const outside = [...menu(shadow)!.children]
+      .filter((c) => c.classList.contains('cf-rec-menu-group'))
+      .map((g) => g.querySelector('.cf-rec-menu-head')?.textContent);
+    expect(outside).toEqual([MARK_GROUP_TEXT.info, MARK_GROUP_TEXT.fields]);
+  });
+
+  /**
+   * A drawing, not a grouping. `role="menu"` owns its `menuitem`s and only a `group`
+   * may come between them — the two real groups inside already are that, and a second
+   * semantic layer would put the items one level further from the menu for nothing a
+   * border does not say.
+   */
+  it('draws that box without claiming to be a group', () => {
+    const shadow = render();
+    openMenu(shadow);
+    expect(shadow.querySelector('.cf-rec-menu-decides')!.getAttribute('role')).toBe('none');
+  });
+
+  /**
+   * The item is a column so it can carry a caption under the name, which is exactly
+   * what sent a `✓` appended beside the label onto a row of its own — a stray mark
+   * floating between a name and its explanation.
+   */
+  it('keeps an already-marked item on one line with its name', () => {
+    // Both of the group's marks, because an item that is still outstanding elsewhere
+    // in its group is filtered out of the list — the menu leads with what is left.
+    const shadow = render(state({ bound: ['submit', 'quickApplySelector'] }));
+    openMenu(shadow);
+    const item = [...shadow.querySelectorAll('[role="menuitem"]')]
+      .find((b) => itemLabel(b) === bindLabel('submit'))!;
+    const line = item.querySelector('.cf-rec-menu-line')!;
+    expect(line.querySelector('.cf-rec-menu-label')).toBeTruthy();
+    expect(line.querySelector('.cf-rec-menu-mark')?.textContent).toBe('✓');
+  });
+
+  /**
+   * And says so in words. The captioned branch names the item to keep the caption out
+   * of its name, which used to drop the ✓ out of it as well — so the four marks that
+   * matter most announced nothing about already being done.
+   */
+  it('announces that a mark is already made', () => {
+    // Both of the group's marks, because an item that is still outstanding elsewhere
+    // in its group is filtered out of the list — the menu leads with what is left.
+    const shadow = render(state({ bound: ['submit', 'quickApplySelector'] }));
+    openMenu(shadow);
+    const item = [...shadow.querySelectorAll('[role="menuitem"]')]
+      .find((b) => itemLabel(b) === bindLabel('submit'))!;
+    expect(item.getAttribute('aria-label')).toBe(`${bindLabel('submit')}, marked`);
+    expect(item.querySelector('.cf-rec-menu-mark')?.getAttribute('aria-hidden')).toBe('true');
+  });
+});
+
+/**
+ * Getting out of a popover without finding the button that opened it.
+ *
+ * The page underneath is inert while a recording runs, so a press anywhere else does
+ * nothing at all: a 60vh list of ~26 marks opened by mistake could only be dismissed
+ * by pressing the one control it is very likely covering.
+ */
+describe('dismissing a popover', () => {
+  const escape = (s: ShadowRoot) => s.dispatchEvent(
+    new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }),
+  );
+
+  it('closes the menu on Escape', () => {
+    const shadow = render();
+    openMenu(shadow);
+    escape(shadow);
+    expect(menu(shadow)).toBeNull();
+  });
+
+  it('closes the Reset warning on Escape too', () => {
+    const shadow = render();
+    openConfirm(shadow);
+    escape(shadow);
+    expect(confirm(shadow)).toBeNull();
+  });
+
+  it('closes on a press elsewhere in the bar', () => {
+    const shadow = render();
+    openMenu(shadow);
+    shadow.querySelector('.cf-rec-state')!
+      .dispatchEvent(new Event('pointerdown', { bubbles: true }));
+    expect(menu(shadow)).toBeNull();
+  });
+
+  /** Pressing inside the list is using it, not leaving it. */
+  it('stays open for a press inside the list', () => {
+    const shadow = render();
+    openMenu(shadow);
+    menu(shadow)!.dispatchEvent(new Event('pointerdown', { bubbles: true }));
+    expect(menu(shadow)).not.toBeNull();
+  });
+
+  /**
+   * And the toggle is its own business: closing here would land a second close under
+   * the very press that is about to reopen it.
+   */
+  it('leaves the toggle to close what the toggle opened', () => {
+    const shadow = render();
+    openMenu(shadow);
+    [...shadow.querySelectorAll<HTMLButtonElement>('.cf-rec-options .cf-btn')]
+      .find((b) => b.textContent === ACTION_LABELS.declare)!
+      .dispatchEvent(new Event('pointerdown', { bubbles: true }));
+    expect(menu(shadow)).not.toBeNull();
+  });
+});
+
+/* ---------------- The mode the whole bar is in ---------------- */
+
+/**
+ * Armed, and drawn as a state the *page* is in rather than as a button that happens
+ * to be a different colour.
+ *
+ * The page has just gone live under the user's finger and the bar is the only thing
+ * that can say so, so the toolbar takes the accent skin, the readout becomes the
+ * statement of the mode, and every control that is not the way back out of it is
+ * blocked. jsdom evaluates neither the cascade nor layout, so what is pinned here is
+ * the half a test can see: the class, the blocks, the copy, and the fact that nothing
+ * is added or taken away.
+ */
+describe('the armed bar', () => {
+  const armed = (over: Partial<RecorderBarState> = {}, cb = callbacks()) =>
+    render(state({ mode: 'armed', ...over }), cb);
+  const blocked = (b: HTMLButtonElement) => b.getAttribute('aria-disabled') === 'true';
+
+  it('stamps the mode on the bar, not just on one button', () => {
+    expect(card(armed()).classList.contains('cf-bar-armed')).toBe(true);
+  });
+
+  /**
+   * An armed click that lands in a text control decays to `live`, and the page is
+   * every bit as live then — the user is typing into it. Pinned separately because an
+   * `=== 'armed'` refactor would read correctly and quietly drop the whole treatment
+   * for the length of every email address.
+   */
+  it('says the same while a field is being typed into', () => {
+    expect(card(armed({ mode: 'live' })).classList.contains('cf-bar-armed')).toBe(true);
+  });
+
+  it('is an ordinary toolbar while nothing is armed', () => {
+    expect(card(render()).classList.contains('cf-bar-armed')).toBe(false);
+  });
+
+  /** That bar is built with no recorder at all, so it has no mode to be in. */
+  it('has no mode on the after-sending pass', () => {
+    const s = render(state({ phase: 'afterSend', mode: 'armed' }));
+    expect(card(s).classList.contains('cf-bar-armed')).toBe(false);
+  });
+
+  it('blocks every control that is not the way back out', () => {
+    const s = armed();
+    for (const label of [
+      ACTION_LABELS.declare, ACTION_LABELS.resetRecording,
+      ACTION_LABELS.undo, ACTION_LABELS.stopRecording,
+    ]) {
+      expect(blocked(button(s, label)), label).toBe(true);
+    }
+    expect(blocked(button(s, ACTION_LABELS.interactArmed))).toBe(false);
+  });
+
+  it('means it — a press on a blocked control does nothing at all', () => {
+    let declared = 0;
+    let done = 0;
+    const s = armed({}, callbacks({
+      onDeclare: () => { declared += 1; },
+      onDone: () => { done += 1; },
+    }));
+
+    button(s, ACTION_LABELS.declare).click();
+    expect(menu(s)).toBeNull();
+    expect(declared).toBe(0);
+
+    button(s, ACTION_LABELS.resetRecording).click();
+    expect(confirm(s)).toBeNull();
+
+    button(s, ACTION_LABELS.stopRecording).click();
+    expect(done).toBe(0);
+  });
+
+  /** The button holding the page live has to be the way back out of it. */
+  it('leaves the control that armed it live', () => {
+    let interacted = 0;
+    const s = armed({}, callbacks({ onInteract: () => { interacted += 1; } }));
+    button(s, ACTION_LABELS.interactArmed).click();
+    expect(interacted).toBe(1);
+  });
+
+  it('lifts every block the moment the page is inert again', () => {
+    const s = armed();
+    bar!.render(state({ mode: 'idle' }));
+    for (const label of [
+      ACTION_LABELS.declare, ACTION_LABELS.resetRecording,
+      ACTION_LABELS.undo, ACTION_LABELS.stopRecording,
+    ]) {
+      expect(blocked(button(s, label)), label).toBe(false);
+    }
+  });
+
+  /** The two blocks that are about having nothing to undo, not about the mode. */
+  it('leaves the empty-recording blocks exactly as they were', () => {
+    const s = armed();
+    bar!.render(state({ mode: 'idle', stepCount: 0 }));
+    expect(blocked(button(s, ACTION_LABELS.undo))).toBe(true);
+    expect(blocked(button(s, ACTION_LABELS.resetRecording))).toBe(true);
+    expect(blocked(button(s, ACTION_LABELS.stopRecording))).toBe(false);
+  });
+
+  it('says what the mode is, in words and from the catalog', () => {
+    expect(armed().querySelector('.cf-rec-what')?.textContent).toBe(RECORDER_READOUT.armed);
+  });
+
+  it('says how to start one while the page is still inert', () => {
+    const s = render(state({ last: undefined }));
+    expect(s.querySelector('.cf-rec-what')?.textContent).toBe(RECORDER_READOUT.start);
+  });
+
+  /** A held press is about the gesture that was just taken away, and outranks both. */
+  it('still lets a held send have the readout', () => {
+    const s = armed({ notice: 'held' });
+    expect(s.querySelector('.cf-rec-what')?.textContent).toBe('held');
+  });
+
+  it('names the mode on its own control too', () => {
+    const s = armed();
+    const b = button(s, ACTION_LABELS.interactArmed);
+    expect(b.classList.contains('cf-rec-armed')).toBe(true);
+    expect(b.getAttribute('aria-pressed')).toBe('true');
+
+    bar!.render(state({ mode: 'idle' }));
+    const idle = button(s, ACTION_LABELS.interact);
+    expect(idle.classList.contains('cf-rec-armed')).toBe(false);
+    expect(idle.getAttribute('aria-pressed')).toBe('false');
+  });
+
+  /**
+   * Blocked is not demoted. Done keeps `.primary` and de-fills through primitives'
+   * blocked-primary rule, and Reset keeps `--err` through `.btn-danger`: a control
+   * that changed what it *is* while it cannot act would come back as something else.
+   */
+  it('leaves Done the one primary and Reset the destructive one', () => {
+    const s = armed();
+    const primaries = [...s.querySelectorAll<HTMLButtonElement>('.cf-btn.primary')];
+    expect(primaries.map((b) => b.textContent)).toEqual([ACTION_LABELS.stopRecording]);
+    expect(button(s, ACTION_LABELS.resetRecording).classList.contains('btn-danger')).toBe(true);
+  });
+
+  /**
+   * The one control the mode does not touch. On a bar that has just told the user to
+   * go and click something, it is the one with a job still to do — the thing they are
+   * being asked to press may be underneath it.
+   */
+  it('leaves the place toggle exactly as it was', () => {
+    const s = armed();
+    const move = s.querySelector<HTMLButtonElement>('.cf-rec-place')!;
+    expect(move.className).toBe('cf-rec-place');
+    expect(move.hasAttribute('aria-disabled')).toBe(false);
+    expect(move.getAttribute('aria-label')).toBe(ACTION_LABELS.moveBarToBottom);
+  });
+
+  /**
+   * As much of the no-reflow rule as jsdom can see, and the half that catches the
+   * next good idea: a badge, a cancel, a second line. The bar must not change shape
+   * as the page goes live — at 390px it is four rows in a fixed order, and on a
+   * bottom-docked bar a taller bar lifts every button out from under the thumb.
+   */
+  it('adds and removes nothing when the page goes live', () => {
+    const s = render();
+    const shape = () => ({
+      children: card(s).children.length,
+      buttons: [...s.querySelectorAll<HTMLButtonElement>('.cf-btn')]
+        .map((b) => b.textContent)
+        .filter((t) => t !== ACTION_LABELS.interact && t !== ACTION_LABELS.interactArmed),
+    });
+    const before = shape();
+    bar!.render(state({ mode: 'armed' }));
+    expect(shape()).toEqual(before);
+  });
 });
 
 /* ---------------- The seam: a press that would send ---------------- */
@@ -549,5 +860,123 @@ describe('the after-sending bar', () => {
     const done = after({ notice: 'Saved.' });
     expect(done.querySelector('.cf-rec-live')).toBeNull();
     expect(done.querySelector('.cf-rec-state')?.textContent).toContain('finished');
+  });
+});
+
+/**
+ * Which end of the page the bar is docked to, and the fact that it is a decision
+ * rather than a media query.
+ *
+ * It used to be neither: `@media (pointer: coarse)` in the stylesheet, invisible to
+ * this file and unchangeable by the user. On a mouse that put the bar at the top of
+ * the viewport, which on a job board is exactly where the nav is — and routinely
+ * where "Apply now" is, i.e. the one control the recording is about.
+ */
+describe('moving the bar out of the way', () => {
+  const place = (s: ShadowRoot) => (card(s) as HTMLElement).dataset.place;
+  const move = (s: ShadowRoot) => s.querySelector<HTMLButtonElement>('.cf-rec-place')!;
+
+  it('starts where the pointer says, and stamps it where the CSS can read it', () => {
+    expect(place(render())).toBe('top');
+  });
+
+  it('moves to the other end when the control is pressed', () => {
+    const s = render();
+    move(s).click();
+    expect(place(s)).toBe('bottom');
+    move(s).click();
+    expect(place(s)).toBe('top');
+  });
+
+  /** The name is where it is going, not where it is: the button is a move. */
+  it('names the end it will move to', () => {
+    const s = render();
+    expect(move(s).getAttribute('aria-label')).toBe(ACTION_LABELS.moveBarToBottom);
+    move(s).click();
+    expect(move(s).getAttribute('aria-label')).toBe(ACTION_LABELS.moveBarToTop);
+  });
+
+  /**
+   * The popovers open away from the edge the bar is docked to, so one already up is
+   * pointing the wrong way the instant the bar lands.
+   */
+  it('takes an open popover down with it', () => {
+    const s = render();
+    openMenu(s);
+    expect(menu(s)).not.toBeNull();
+    move(s).click();
+    expect(menu(s)).toBeNull();
+  });
+
+  /** The picker's toolbar has to dock where the bar that opened it is docked. */
+  it('reports where it is, for the picker it opens', () => {
+    const s = render();
+    expect(bar!.place()).toBe('top');
+    move(s).click();
+    expect(bar!.place()).toBe('bottom');
+  });
+
+  /**
+   * The report bar overrides the dock, and that is not taste: the review card comes
+   * back expanded on the same gesture and under 640px it is a full-width bottom
+   * sheet. Two reports over one another, and the one underneath is the one that
+   * matters.
+   */
+  it('sends a report bar to the top whatever the dock says', () => {
+    const s = render();
+    move(s).click();
+    expect(bar!.place()).toBe('bottom');
+    bar!.render(state({ phase: 'afterSend', notice: 'Saved.' }));
+    expect(bar!.place()).toBe('top');
+    expect(place(s)).toBe('top');
+  });
+
+  /**
+   * The first pass is the full toolbar and the thing in the way. The after-sending
+   * bar is one sentence and a Done, and where *it* sits is already decided for it by
+   * the card coming back underneath.
+   */
+  it('is not offered on the after-sending bar', () => {
+    expect(render(state({ phase: 'afterSend' })).querySelector('.cf-rec-place')).toBeNull();
+  });
+});
+
+/**
+ * The readout, which is the one part of the bar that reports what the extension just
+ * did — and was the one part that could not be read. A single nowrap line with
+ * `text-overflow: ellipsis` at every width, including the narrow layout where it
+ * already owns a full-width row, with no hover, no disclosure and no second line.
+ */
+describe('the readout of what just happened', () => {
+  const what = (s: ShadowRoot) => s.querySelector('.cf-rec-what')!.textContent ?? '';
+  const long = 'Submit your application for Senior Platform Engineer, Remote (EMEA) — final step';
+
+  const withLabel = (label: string) => render(state({
+    last: { id: 's1', action: 'click', leg: 'posting', at: 0, url: 'https://x.test/job', label },
+  }));
+
+  it('marks a name it had to cut, rather than stopping mid-word', () => {
+    const text = what(withLabel(long));
+    expect(text).toContain('…');
+    expect(text).not.toContain('final step');
+  });
+
+  /** Two lines' worth, not one: the CSS reserves the space, so this may use it. */
+  it('keeps enough of the name to recognise it', () => {
+    expect(what(withLabel(long))).toContain('Submit your application for Senior');
+  });
+
+  it('leaves a name that fits exactly as it is', () => {
+    expect(what(withLabel('Next'))).toBe('Clicked Next');
+  });
+
+  /**
+   * The bar's one live region is `.cf-rec-state`, which the notice is not in — so the
+   * single sentence explaining a press that was refused reached a screen reader
+   * nowhere at all.
+   */
+  it('announces a press that was held', () => {
+    const s = render(state({ notice: heldSendNotice('Submit application') }));
+    expect(s.querySelector('.cf-rec-notice')?.getAttribute('role')).toBe('alert');
   });
 });
