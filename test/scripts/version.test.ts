@@ -4,6 +4,7 @@ import {
   readManifestVersion,
   replaceManifestVersion,
   replaceListingVersion,
+  nextPatch,
 } from '../../scripts/version.mjs';
 
 describe('parseVersion', () => {
@@ -72,5 +73,21 @@ describe('replaceListingVersion', () => {
     expect(replaceListingVersion('chromium-filler-v0x1x1.zip', '0.1.1', '0.1.2')).toBe(
       'chromium-filler-v0x1x1.zip',
     );
+  });
+});
+
+describe('nextPatch', () => {
+  it('bumps the last part of a three-part version', () => {
+    expect(nextPatch('0.1.2')).toBe('0.1.3');
+    expect(nextPatch('0.1.9')).toBe('0.1.10');
+  });
+
+  it('pads a short version to three parts first', () => {
+    expect(nextPatch('1')).toBe('1.0.1');
+    expect(nextPatch('1.2')).toBe('1.2.1');
+  });
+
+  it('bumps the fourth part when there is one', () => {
+    expect(nextPatch('1.2.3.4')).toBe('1.2.3.5');
   });
 });

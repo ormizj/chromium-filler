@@ -83,3 +83,15 @@ Upload v${VERSION} to the Chrome Web Store:
 
   ${OUT} is the one for a GitHub release or "Load unpacked".
 EOF2
+
+# Said again here because the same line before the build has scrolled away by now.
+if [[ -z "${1:-}" ]]; then
+  NEXT=$(node --input-type=module -e "import { nextPatch } from './scripts/version.mjs'; console.log(nextPatch('${VERSION}'))")
+  cat <<EOF3
+
+  This packaged the CURRENT version (v${VERSION}) — the store rejects a version it
+  already has. To release a new one, pass it instead, e.g.:
+
+    npm run package -- ${NEXT}
+EOF3
+fi

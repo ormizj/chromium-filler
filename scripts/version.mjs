@@ -62,6 +62,14 @@ export function compareVersions(a, b) {
   return 0;
 }
 
+/** The version one patch above `s` — what the no-argument run suggests bumping to. */
+export function nextPatch(s) {
+  const parts = parseVersion(s);
+  while (parts.length < 3) parts.push(0);
+  parts[parts.length - 1] += 1;
+  return parts.join('.');
+}
+
 export function readManifestVersion(src) {
   const m = MANIFEST_VERSION.exec(src);
   if (!m) throw new Error("manifest.config.ts has no `version: '…'` line");
@@ -96,7 +104,14 @@ function main(requested) {
   }
   parseVersion(current);
 
-  if (!requested) return current;
+  if (!requested) {
+    console.error(
+      `Packaging the current version, v${current}. ` +
+        'The Chrome Web Store will reject an upload of a version it already has.\n' +
+        `To release a new version, pass it instead — e.g.: npm run package -- ${nextPatch(current)}`,
+    );
+    return current;
+  }
 
   parseVersion(requested);
   const order = compareVersions(requested, current);

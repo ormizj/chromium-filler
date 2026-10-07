@@ -4,3 +4,4 @@ export function compareVersions(a: string, b: string): number;
 export function readManifestVersion(src: string): string;
 export function replaceManifestVersion(src: string, version: string): string;
 export function replaceListingVersion(md: string, from: string, to: string): string;
+export function nextPatch(s: string): string;
