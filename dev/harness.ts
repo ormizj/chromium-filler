@@ -126,6 +126,18 @@ async function bootPage(name: 'popup' | 'options'): Promise<void> {
     const panel = document.getElementById('export-options') as HTMLDetailsElement | null;
     if (panel) panel.open = true;
   }
+
+  // Help → Setting up sync, reached the way a user reaches it: the Sync tab's
+  // button, pressed once options.ts has finished booting and wired it.
+  if (state === 'sync-guide') {
+    const press = () => document.getElementById('sync-guide-open')?.click();
+    if (document.body.dataset.ready) press();
+    else new MutationObserver((_, obs) => {
+      if (!document.body.dataset.ready) return;
+      obs.disconnect();
+      press();
+    }).observe(document.body, { attributes: true, attributeFilter: ['data-ready'] });
+  }
 }
 
 /* ---------------- Shadow-DOM surfaces ---------------- */

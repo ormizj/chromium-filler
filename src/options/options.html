@@ -408,6 +408,13 @@
                steps themselves come from CONCEPT_HELP.syncClient via the `?` —
                the catalog is the only place the extension explains itself. -->
           <h3 id="sync-client-heading">Google OAuth client</h3>
+          <p class="hint">
+            Not set up yet? The step-by-step guide walks you through Google Cloud
+            from scratch, with a link to every page you need.
+          </p>
+          <div class="row guide-open-row">
+            <button id="sync-guide-open" class="btn">Open the setup guide ›</button>
+          </div>
           <div class="settings-list">
             <div class="setrow stacked">
               <label class="setrow-text" for="sync-client-id">
@@ -478,6 +485,24 @@
 
           <h3>When something goes wrong</h3>
           <div id="help-trouble" class="helplist"></div>
+        </section>
+
+        <!-- Its own section, last: a ten-step errand done once per Google account,
+             followed with Google Cloud open beside it. The steps, links and errors
+             are all SYNC_SETUP_STEPS / SYNC_TROUBLESHOOTING; the Sync tab's “Setup
+             guide” button deep-links here instead of carrying a second copy. -->
+        <section id="sync-guide-section">
+          <h2 id="sync-guide-heading">Setting up sync</h2>
+          <p class="hint">
+            Sync keeps the same job list in two browsers through your own Google
+            Drive. Setting it up is free and takes about ten minutes, once. Keep this
+            page open beside Google Cloud and work down the list — each step that
+            happens on a Google page has a button that opens that page.
+          </p>
+          <ol id="sync-guide-steps" class="guide"></ol>
+
+          <h3>If Google shows an error</h3>
+          <div id="sync-guide-trouble" class="helplist"></div>
         </section>
       </div>
     </main>

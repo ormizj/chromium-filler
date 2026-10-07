@@ -2153,6 +2153,34 @@ test('Sync: the redirect URI is this browser\'s, and Connect waits for a client'
   });
 });
 
+test('Sync: the setup guide is Help\'s last section, and carries this browser\'s redirect URI', async () => {
+  await onExtensionPage(async (page) => {
+    await page.click('#tab-sync');
+    await page.click('#sync-guide-open');
+
+    // The Sync tab hands over to Help rather than carrying a second copy.
+    await expect(page.locator('#panel-help')).toBeVisible();
+    await expect(page.locator('#sync-guide-section')).toBeInViewport();
+    const last = await page.locator('#panel-help > section').last().getAttribute('id');
+    expect(last).toBe('sync-guide-section');
+
+    // The one value the user carries to Google: the same string the Sync tab
+    // shows, inside the step that tells them which box it goes in.
+    const uri = await page.locator('#sync-redirect-uri').inputValue();
+    await expect(page.locator('#sync-guide-uri')).toHaveValue(uri);
+
+    // Every step that happens on a Google page opens that page, in a new tab.
+    const links = page.locator('#sync-guide-steps a.guide-link');
+    expect(await links.count()).toBeGreaterThan(0);
+    for (const href of await links.evaluateAll((as) => as.map((a) => (a as HTMLAnchorElement).href))) {
+      expect(href).toMatch(/^https:\/\/console\.cloud\.google\.com\//);
+    }
+    await expect(links.first()).toHaveAttribute('target', '_blank');
+
+    await expect(page.locator('#sync-guide-trouble')).toContainText('request is invalid');
+  });
+});
+
 test('Sync: saving a client enables Connect, and clearing the id takes the secret with it', async () => {
   await onExtensionPage(async (page) => {
     await page.click('#tab-sync');

@@ -373,9 +373,11 @@ export interface Settings {
    * settings are device state and never leave the machine. `modalLayout` alone
    * would be reason enough: it is a rectangle measured against *this* screen.
    *
-   * Off by default, and deliberately explicit. Everything else this extension
-   * does happens on-device, so the first request it ever makes should be one the
-   * user asked for.
+   * On by default, matching `syncSiteConfigs`. That does not make a request on
+   * its own: nothing is sent until the user enters an OAuth client in Options →
+   * Sync and presses Connect, so the first request the extension ever makes is
+   * still one the user asked for. Off by default, it was the last switch of a
+   * finished setup, and the one most often missed.
    */
   syncEnabled: boolean;
   /**

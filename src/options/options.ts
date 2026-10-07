@@ -57,8 +57,8 @@ import {
 import { getCv, getDoc, setDoc, clearDoc } from '../shared/cvStore';
 import { readSyncClient } from '../shared/syncConfig';
 import {
-  CONCEPT_HELP, CONFIG_HELP, PREP_HELP, REDIRECT_HELP, SETTINGS_HELP, describeConfig,
-  type HelpEntry,
+  CONCEPT_HELP, CONFIG_HELP, PREP_HELP, REDIRECT_HELP, SETTINGS_HELP, SYNC_SETUP_STEPS,
+  SYNC_TROUBLESHOOTING, describeConfig, type GuideStep, type HelpEntry,
 } from '../shared/help';
 import { helpButton, helpPanel, richText } from '../ui/help';
 import { setLimitAttrs } from '../ui/limits';
@@ -522,6 +522,92 @@ function initHelp(): void {
     },
   ];
   $('help-trouble').replaceChildren(...trouble.map(helpPanel));
+
+  renderSyncGuide();
+}
+
+/**
+ * Copy a read-only field's value, saying so in `statusEl` either way. The
+ * clipboard refuses when the document is not focused — trivially the case with
+ * devtools open — and an unhandled rejection left the user with no message at
+ * all beside a field that had not been copied. The redirect URI is the one value
+ * sync setup cannot proceed without, so a failure has to say so and select the
+ * field for copying by hand.
+ */
+async function copyField(field: HTMLInputElement, statusEl: HTMLElement): Promise<void> {
+  try {
+    await navigator.clipboard.writeText(field.value);
+    setStatus(statusEl, 'Copied — paste it into the OAuth client in Google Cloud', 'ok');
+  } catch {
+    field.select();
+    setStatus(statusEl, 'Could not reach the clipboard — the address is selected, copy it with ⌘/Ctrl+C', 'err');
+  }
+}
+
+/**
+ * Help → Setting up sync: the numbered guide and the errors Google shows when a
+ * step went wrong. The step that creates the client carries this browser's own
+ * redirect URI, because that one value is derived from the extension ID and is
+ * the one most often pasted into the wrong box.
+ */
+function renderSyncGuide(): void {
+  $('sync-guide-steps').replaceChildren(...SYNC_SETUP_STEPS.map(guideStep));
+  $('sync-guide-trouble').replaceChildren(...SYNC_TROUBLESHOOTING.map(helpPanel));
+}
+
+function guideStep(step: GuideStep, i: number): HTMLLIElement {
+  const li = document.createElement('li');
+  li.className = 'guide-step';
+
+  const num = document.createElement('span');
+  num.className = 'guide-num';
+  num.setAttribute('aria-hidden', 'true');
+  num.textContent = String(i + 1);
+
+  const content = document.createElement('div');
+  content.className = 'guide-content';
+  const title = document.createElement('b');
+  title.className = 'guide-title';
+  title.textContent = step.title;
+  const body = document.createElement('p');
+  body.className = 'guide-body';
+  body.append(...richText(step.body));
+  content.append(title, body);
+
+  if (step.showsRedirectUri) {
+    const box = document.createElement('div');
+    box.className = 'guide-uri';
+    const field = document.createElement('input');
+    field.type = 'text';
+    field.readOnly = true;
+    field.id = 'sync-guide-uri';
+    field.value = chrome.identity.getRedirectURL();
+    field.setAttribute('aria-label', 'This browser\u2019s redirect URI');
+    const copy = document.createElement('button');
+    copy.type = 'button';
+    copy.className = 'btn';
+    copy.textContent = 'Copy';
+    const status = document.createElement('p');
+    status.className = 'status';
+    status.setAttribute('role', 'status');
+    status.setAttribute('aria-live', 'polite');
+    copy.onclick = () => copyField(field, status);
+    box.append(field, copy);
+    content.append(box, status);
+  }
+
+  if (step.link) {
+    const a = document.createElement('a');
+    a.className = 'btn guide-link';
+    a.href = step.link.href;
+    a.target = '_blank';
+    a.rel = 'noopener noreferrer';
+    a.textContent = `${step.link.label} ↗`;
+    content.append(a);
+  }
+
+  li.append(num, content);
+  return li;
 }
 
 /* ---------------- Settings ---------------- */
@@ -1722,7 +1808,7 @@ async function initSync(): Promise<void> {
     $<HTMLButtonElement>('sync-connect').disabled = s?.configured === false;
 
     if (s?.configured === false) {
-      showAccount('Sync needs a Google OAuth client — add one under “Google OAuth client” below', true);
+      showAccount('Sync needs a Google OAuth client — see “Google OAuth client” below, and its setup guide', true);
     } else if (connected) {
       const when = s.lastSyncAt ? `last synced ${fmtDate(s.lastSyncAt)}` : 'not synced yet';
       // Google did not say which account, so the honest thing is to say so
@@ -1777,29 +1863,21 @@ async function initSync(): Promise<void> {
     await renderSync(s);
   });
 
-  $('sync-redirect-copy').addEventListener('click', async () => {
-    // The clipboard refuses when the document is not focused — trivially the
-    // case with devtools open — and an unhandled rejection here left the user
-    // with no message at all beside a field that had not been copied. This is
-    // the one value setup cannot proceed without, so a failure has to say so
-    // and point at the field they can select by hand.
-    try {
-      await navigator.clipboard.writeText(redirect.value);
-      setStatus(clientStatus, 'Copied — paste it into the OAuth client in Google Cloud', 'ok');
-    } catch {
-      redirect.select();
-      setStatus(clientStatus, 'Could not reach the clipboard — the URI is selected, copy it with ⌘/Ctrl+C', 'err');
-    }
+  $('sync-redirect-copy').addEventListener('click', () => copyField(redirect, clientStatus));
+
+  // The guide is the Help tab's last section, not a second copy here.
+  $('sync-guide-open').addEventListener('click', () => {
+    selectTab('help');
+    revealSection('sync-guide-section');
   });
 
   $('sync-connect').addEventListener('click', async () => {
     setStatus(status, 'Waiting for Google…');
     const s = await sendBg<SyncState>(MSG.SYNC_CONNECT);
     if (!s || 'error' in s) return setStatus(status, String((s as { error?: string })?.error), 'err');
-    // The toggle, not the account, is what makes Sync now pressable — and it is
-    // off by default, so the account most likely to have just been connected is
-    // one that cannot sync yet. Naming the disabled button was the last step of
-    // a walkthrough that then did nothing.
+    // The toggle, not the account, is what makes Sync now pressable. It is on by
+    // default, but a user may have switched it off — and then naming the disabled
+    // button would be the last step of a walkthrough that does nothing.
     setStatus(status, toggle.checked
       ? 'Connected. Press Sync now to combine the two databases.'
       : 'Connected. Switch “Sync the job database” on above to start syncing.', 'ok');

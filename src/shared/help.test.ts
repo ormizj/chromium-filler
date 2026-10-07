@@ -4,7 +4,8 @@ import { BIND_LABELS, MARK_GROUP_TEXT } from './labels';
 import { markGroupOf, type ConfigBindKey } from './recording';
 import {
   BIND_HELP, CONCEPT_HELP, CONFIG_HELP, DOT_LEGEND, PREP_HELP, REDIRECT_HELP,
-  SETTINGS_HELP, SETUP_STEP_HELP, describeConfig, type HelpEntry,
+  SETTINGS_HELP, SETUP_STEP_HELP, SYNC_SETUP_STEPS, SYNC_TROUBLESHOOTING, describeConfig,
+  type HelpEntry,
 } from './help';
 
 /** Every catalog, flattened, so the shape rules are asserted once for all of them. */
@@ -168,6 +169,60 @@ describe('help catalog', () => {
     expect(entry).toBeTruthy();
     expect(entry.body).toMatch(/set up this site|send button/i);
     expect(entry.body).toMatch(/press|send/i);
+  });
+});
+
+describe('sync setup guide', () => {
+  it('walks every step with a title and a body', () => {
+    expect(SYNC_SETUP_STEPS.length).toBeGreaterThanOrEqual(8);
+    for (const step of SYNC_SETUP_STEPS) {
+      expect(step.title.trim()).not.toBe('');
+      expect(step.body.trim().length, step.title).toBeGreaterThan(step.title.length);
+    }
+  });
+
+  // The guide is followed by someone with a Google Cloud tab open beside it, so
+  // every link has to land on Google's own console and nowhere else.
+  it('links only to the Google Cloud console', () => {
+    const links = SYNC_SETUP_STEPS.flatMap((s) => (s.link ? [s.link] : []));
+    expect(links.length).toBeGreaterThan(0);
+    for (const link of links) {
+      expect(link.href).toMatch(/^https:\/\/console\.cloud\.google\.com\//);
+      expect(link.label.trim()).not.toBe('');
+    }
+  });
+
+  // The redirect URI is the one value that has to travel from here to Google, and
+  // getting it into the wrong box is the commonest failure — so exactly one step
+  // shows this browser's own copy of it.
+  it('shows the redirect URI in exactly one step', () => {
+    expect(SYNC_SETUP_STEPS.filter((s) => s.showsRedirectUri)).toHaveLength(1);
+  });
+
+  it('answers the error a missing redirect URI produces', () => {
+    expect(SYNC_TROUBLESHOOTING.some((e) => /request is invalid/i.test(e.title))).toBe(true);
+    for (const entry of SYNC_TROUBLESHOOTING) {
+      expect(entry.body.trim().length, entry.title).toBeGreaterThan(entry.title.length);
+    }
+  });
+
+  // richText renders backticks and nothing else; `**bold**` ships as asterisks.
+  it('uses no markup richText cannot render', () => {
+    const all = [
+      ...SYNC_SETUP_STEPS.flatMap((s) => [s.title, s.body]),
+      ...SYNC_TROUBLESHOOTING.flatMap((e) => [e.title, e.body]),
+    ];
+    for (const text of all) expect(text).not.toMatch(/\*\*|\]\(/);
+    // A title is set as plain text, so even a backtick ships literally there.
+    for (const { title } of [...SYNC_SETUP_STEPS, ...SYNC_TROUBLESHOOTING]) {
+      expect(title).not.toContain('`');
+    }
+  });
+
+  // The steps live in the guide; the concept entry says why, not how, so the two
+  // cannot drift into two different sets of instructions.
+  it('keeps the steps out of the concept entry', () => {
+    expect(CONCEPT_HELP.syncClient.body).not.toMatch(/\(1\)/);
   });
 });
 

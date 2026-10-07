@@ -1681,6 +1681,111 @@ label.fld.inline input {
   line-height: 1.55;
 }
 
+/* The Sync tab's way to the guide: it follows its own hint, and the client's
+   fields follow it, so the gap is below rather than above. */
+.row.guide-open-row {
+  margin: 0 0 var(--space-5);
+}
+
+/* Help → Setting up sync. Each step is a paper object on the section's recessed
+   body, led by its number in a disc: the guide is followed with Google Cloud open
+   in another window, so the number is what the eye comes back to find. */
+.guide {
+  list-style: none;
+  margin: 0 0 var(--space-6);
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+
+.guide-step {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-4);
+  padding: var(--space-5);
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-card);
+}
+
+.guide-num {
+  flex: none;
+  width: 28px;
+  height: 28px;
+  display: grid;
+  place-items: center;
+  border-radius: var(--radius-pill);
+  background: var(--accent-weak);
+  color: var(--accent);
+  font-size: var(--text-sm);
+  font-weight: 600;
+}
+
+.guide-content {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: var(--space-2);
+}
+
+/* Centred on the 28px disc when it is one line, without a 28px line-height
+   spreading a title that wraps at 390px across two widely spaced lines. */
+.guide-title {
+  font-size: var(--text-base);
+  line-height: 1.35;
+  padding-top: 4px;
+}
+
+.guide-body {
+  margin: 0;
+  font-size: var(--text-md);
+  line-height: 1.55;
+}
+
+.guide-link {
+  margin-top: var(--space-2);
+  text-decoration: none;
+}
+
+/* The redirect URI and its Copy button. The address is long and unbreakable, so
+   the field takes the slack and scrolls inside itself rather than widening the
+   card; under 640px the two stack. */
+.guide-uri {
+  align-self: stretch;
+  display: flex;
+  gap: var(--space-3);
+  margin-top: var(--space-2);
+}
+
+.guide-uri input {
+  flex: 1;
+  min-width: 0;
+  font-family: var(--mono);
+  font-size: var(--text-sm);
+}
+
+.guide-uri .btn {
+  flex: none;
+}
+
+.guide-content > .status:empty {
+  display: none;
+}
+
+@media (max-width: 640px) {
+  .guide-step {
+    padding: var(--space-4);
+    gap: var(--space-3);
+  }
+
+  .guide-uri {
+    flex-direction: column;
+  }
+}
+
 .helplist {
   display: flex;
   flex-direction: column;

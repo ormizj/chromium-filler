@@ -23,8 +23,10 @@ export const DEFAULT_SETTINGS: Settings = {
   modalLayout: DEFAULT_MODAL_LAYOUT,
   modalFullscreen: false,
   helpSeen: false,
-  // Off until asked for: everything else here happens on-device.
-  syncEnabled: false,
+  // On, like syncSiteConfigs below: it does nothing at all until a client is
+  // entered and an account connected, so the first request is still one the user
+  // asked for — and off, it was the step a finished setup most often missed.
+  syncEnabled: true,
   // On: once sync is, a site recorded on one computer should not need recording
   // again on the other. Only takes effect while syncEnabled is on.
   syncSiteConfigs: true,

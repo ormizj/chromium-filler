@@ -79,7 +79,8 @@ seeds an empty store — on options so the getting-started checklist is reachabl
 at all (the normal seed ticks four of its five steps off), on the popup because
 the first-run nudge and the never-configured action rows exist nowhere else; and
 options `export`, which opens the archive's
-"What to export" disclosure. A two-step posting
+"What to export" disclosure; and options `sync-guide`, which presses the Sync tab's
+"Open the setup guide" and lands on Help's last section. A two-step posting
 renders a different modal body entirely (notice + "Fill this page instead", no
 report), so it needs its own state rather than being inferred from the default
 data. Add a state here whenever a flow gains a distinct rendering — **and link it
@@ -2079,6 +2080,17 @@ thing the extension explains to the person doing it. Three rules there:
 
 Until a client is entered, Connect is disabled and says so, and the backup file
 still moves the database by hand.
+
+**The how lives in one place: Help → "Setting up sync"**, the Help tab's last
+section, rendered from `SYNC_SETUP_STEPS` and `SYNC_TROUBLESHOOTING` (`help.ts`).
+It is written for someone who has never opened Google Cloud — every step that
+happens on a Google page links to that page, the "Create the client" step draws
+this browser's live redirect URI with its own Copy, and the errors are titled in
+Google's own words ("Access blocked: This app's request is invalid" is a redirect
+URI missing from, or pasted into the wrong box of, the client). The Sync tab
+deep-links there rather than carrying a copy, and `CONCEPT_HELP.syncClient` says
+*why* and points at it — the numbered steps used to be one paragraph inside it, and
+`help.test.ts` keeps them out.
 
 ### The archive (captured postings + export)
 `extractJob` ran for the modal alone and threw its result away every re-render,

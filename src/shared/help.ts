@@ -715,6 +715,157 @@ export type ConceptKey =
   | 'apply' | 'applyUnverified' | 'alreadyApplied' | 'exportJobs' | 'syncClient' | 'coverLetter'
   | 'recording' | 'marking' | 'selectorStrength' | 'finishSetup' | 'formFactor';
 
+/**
+ * One numbered step of a guide the user follows with another site open beside it.
+ * `link` is the page that step happens on, so nobody has to find it in a menu;
+ * `showsRedirectUri` asks the surface to draw this browser's own redirect URI
+ * there, because it is derived from the extension ID and cannot be written down.
+ */
+export interface GuideStep {
+  title: string;
+  body: string;
+  link?: { label: string; href: string };
+  showsRedirectUri?: boolean;
+}
+
+/**
+ * Setting up sync, written for someone who has never opened Google Cloud. Every
+ * button is named as Google draws it, and every step that happens on a Google page
+ * links straight to that page. Rendered as the last section of the Help tab; the
+ * Sync tab links here rather than carrying a second copy.
+ */
+export const SYNC_SETUP_STEPS: GuideStep[] = [
+  {
+    title: 'Open Google Cloud',
+    body: 'Sign in with the Google account whose Drive should keep your job list. If '
+      + 'Google asks you to accept its terms of service, accept them. This is free: '
+      + 'nothing here needs a billing account or a card.',
+    link: { label: 'Open Google Cloud', href: 'https://console.cloud.google.com/' },
+  },
+  {
+    title: 'Create a project',
+    body: 'A project is just a folder for the next few settings. Give it any name — '
+      + '“Job filler sync” is fine — and press Create. When it is ready, check that its '
+      + 'name is the one shown in the project picker at the top of the page; every '
+      + 'step below happens inside it.',
+    link: { label: 'Create a project', href: 'https://console.cloud.google.com/projectcreate' },
+  },
+  {
+    title: 'Turn on the Google Drive API',
+    body: 'This lets the project store a file in your Drive. On the page that opens, '
+      + 'press Enable. If the button says Manage instead, it is already on — go to the '
+      + 'next step.',
+    link: {
+      label: 'Open the Drive API page',
+      href: 'https://console.cloud.google.com/apis/library/drive.googleapis.com',
+    },
+  },
+  {
+    title: 'Set up the sign-in screen',
+    body: 'This is the screen Google shows when you connect. Press Get started, then: '
+      + 'App name — anything, for example “Job filler”; User support email — your own; '
+      + 'Audience — External; Contact information — your own email again. Tick that '
+      + 'you agree to the policy, press Continue, then Create.',
+    link: { label: 'Open the sign-in screen settings', href: 'https://console.cloud.google.com/auth/overview' },
+  },
+  {
+    title: 'Let your own account in',
+    body: 'A new project only lets in the accounts you list. On the Audience page, '
+      + 'under Test users, press Add users and enter the email you signed in with, '
+      + 'then Save. Or press Publish app instead: you will see one “Google hasn\u2019t '
+      + 'verified this app” warning the first time you connect, but you will not have '
+      + 'to reconnect every seven days, which a test-only project requires.',
+    link: { label: 'Open the Audience page', href: 'https://console.cloud.google.com/auth/audience' },
+  },
+  {
+    title: 'Create the client',
+    body: 'Set Application type to Web application and give it any name. Then find '
+      + 'the box called Authorized redirect URIs — not the one above it called '
+      + 'Authorized JavaScript origins — press Add URI, paste the address below, and '
+      + 'press Create. It must match exactly, so use the Copy button rather than typing '
+      + 'it.',
+    link: { label: 'Create an OAuth client', href: 'https://console.cloud.google.com/auth/clients/create' },
+    showsRedirectUri: true,
+  },
+  {
+    title: 'Copy the Client ID and Client secret here',
+    body: 'Google now shows the new client\u2019s Client ID and Client secret. Copy '
+      + 'both — the secret is shown in full only this once, so download the JSON too if '
+      + 'it offers. In the Sync tab, paste them into Client ID and Client secret under '
+      + '“Google OAuth client”, and press Save client.',
+  },
+  {
+    title: 'Connect',
+    body: 'Press Connect in the Sync tab and choose the same Google account. If Google '
+      + 'says it hasn\u2019t verified this app, that is expected — the app is your own '
+      + 'project. Press Continue (or Advanced, then Go to the app\u2019s name), then '
+      + 'Continue again to allow access to the app\u2019s own data in your Drive.',
+  },
+  {
+    title: 'Sync for the first time',
+    body: 'Check that “Sync the job database” is on — it is unless you turned it off — '
+      + 'and press Sync now. The first time, it '
+      + 'stops and shows which account it is about to use and how many postings each '
+      + 'side has; press Combine if that is right.',
+  },
+  {
+    title: 'Your other browser',
+    body: 'Every browser has its own redirect address. On the second browser, open this '
+      + 'guide again and copy its address from the Create the client step. In Google '
+      + 'Cloud open the client you already made, add that address under Authorized '
+      + 'redirect URIs as a second line, and Save. Then paste the same Client ID and '
+      + 'Client secret into that browser\u2019s Sync tab, Connect with the same account, '
+      + 'and press Sync now there too. Do not create a second project.',
+    link: { label: 'Open your OAuth clients', href: 'https://console.cloud.google.com/auth/clients' },
+  },
+];
+
+/**
+ * What Google says when a step above went wrong, titled with Google's own words so
+ * the user can match the message on their screen to the fix.
+ */
+export const SYNC_TROUBLESHOOTING: HelpEntry[] = [
+  {
+    title: '“Access blocked: This app\u2019s request is invalid”',
+    body: 'Google did not recognise this browser\u2019s redirect address (its details '
+      + 'say `redirect_uri_mismatch`). Either it was never added, or it went into '
+      + 'Authorized JavaScript origins instead of Authorized redirect URIs, or a '
+      + 'character is missing. Copy it again from the Create the client step, open your '
+      + 'client in Google Cloud, put it under Authorized redirect URIs, Save, and wait a '
+      + 'few minutes before pressing Connect again — Google can take up to five to '
+      + 'pick up a change.',
+  },
+  {
+    title: '“… has not completed the Google verification process”',
+    body: 'The project is still in testing and the account you chose is not on its '
+      + 'list (`access_denied`). Add that email under Test users on the Audience page, '
+      + 'or press Publish app there — see Let your own account in.',
+  },
+  {
+    title: '“The OAuth client was not found” or “invalid_client”',
+    body: 'The Client ID or Client secret here does not match a client in Google Cloud '
+      + '— usually a missing character or a space copied with it, or the client was '
+      + 'deleted. Copy both again from your client\u2019s page and press Save client. '
+      + 'If the secret can no longer be shown, add a new secret to the same client.',
+  },
+  {
+    title: '“Google Drive API has not been used in project …”',
+    body: 'The Drive API is not turned on for this project. Do the Turn on the Google '
+      + 'Drive API step — and check the project picker at the top shows the same '
+      + 'project the client is in — then press Sync now again.',
+  },
+  {
+    title: 'It asks me to connect again every week',
+    body: 'Google ends the sign-in of a test-only project after seven days. Press '
+      + 'Publish app on the Audience page and connect once more; it then lasts.',
+  },
+  {
+    title: 'It works in one browser and is blocked in the other',
+    body: 'The second browser has its own redirect address, and only the first one is '
+      + 'on the client. Do the Your other browser step.',
+  },
+];
+
 export const CONCEPT_HELP: Record<ConceptKey, HelpEntry> = {
   formFactor: {
     title: 'Desktop and mobile setups',
@@ -995,25 +1146,21 @@ export const CONCEPT_HELP: Record<ConceptKey, HelpEntry> = {
   syncClient: {
     title: 'Your Google OAuth client',
     short: 'Sync talks to your own Google project, so you create the client once.',
+    // The why, not the how: the numbered steps are SYNC_SETUP_STEPS, rendered as
+    // their own section at the bottom of Help. Both used to live in this one
+    // paragraph, which is how a user got as far as Connect with the redirect URI
+    // pasted into the wrong box and nothing saying which box was right.
     body: 'Sync stores the job database in your own Google Drive, through a Google Cloud '
       + 'project you own — nothing passes through anyone else — so the one-time errand is '
-      + 'creating the client it signs in with. In Google Cloud: (1) enable the Google '
-      + 'Drive API; (2) create an OAuth client of type “Web application”; (3) add the '
-      + 'redirect URI shown below it to that client, exactly as written — and on your '
-      + 'second browser, add that one\'s too, since each has its own; (4) on the consent '
-      + 'screen add your own account as a user, or publish it. Then paste the client ID '
-      + 'and secret here, press Save client, press Connect — and switch “Sync the job '
-      + 'database” on, which is the step that is easy to miss: until it is on, Sync now '
-      + 'stays disabled and nothing is exchanged. The first Sync now after connecting '
-      + 'stops and asks, naming the account and how many postings are on each side; '
-      + 'nothing is combined until you press Combine. That one look is there because '
-      + 'picking the wrong account in Google\'s chooser is a single misclick, and it '
-      + 'would fold a stranger\'s job list into yours. Left in “Testing”, '
-      + 'Google expires the sign-in '
-      + 'after seven days and you reconnect weekly; publishing it costs one '
-      + '“Advanced → continue” the first time instead. The secret is not really a secret '
-      + 'in an installed extension — Google requires it here and assumes anyone with the '
-      + 'extension can read it; the redirect URI and PKCE are what actually protect it.',
+      + 'creating the client it signs in with. It is free and takes about ten minutes; '
+      + 'the step-by-step guide, with a link to each Google Cloud page and the address '
+      + 'this browser needs, is “Setting up sync” at the bottom of the Help tab. The '
+      + 'first Sync now after connecting stops and asks, naming the account and how many '
+      + 'postings are on each side; nothing is combined until you press Combine, because '
+      + 'picking the wrong account in Google\'s chooser is a single misclick. The secret '
+      + 'is not really a secret in an installed extension — Google requires it here and '
+      + 'assumes anyone with the extension can read it; the redirect URI and PKCE are '
+      + 'what actually protect it.',
     when: 'You want the two browsers to share one job database without moving a file by '
       + 'hand.',
   },
