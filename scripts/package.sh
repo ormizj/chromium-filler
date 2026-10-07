@@ -16,6 +16,12 @@
 #                                         the reviewer reads the code as authored
 #                                         (see vite.config.ts).
 #
+# Pass a version to release a new one — `npm run package -- 0.1.2` — and
+# scripts/version.mjs checks it is not a downgrade and writes it into every file
+# that carries it before anything is built. With no argument the current version
+# is packaged as before. Either way it refuses a package.json and a
+# manifest.config.ts that disagree.
+#
 # Both come from a fresh dist/, store build last — so whatever is left in dist/
 # afterwards is the readable build, the one to load unpacked while reproducing
 # anything a reviewer reports.
@@ -24,7 +30,9 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 
 NAME="chromium-filler"
-VERSION=$(node -p "require('./package.json').version")
+# The store's item id, also at the top of design/store/LISTING.md.
+ITEM_ID="ibdmodmpbhmemofnmgilhgealaeipkmd"
+VERSION=$(node scripts/version.mjs "${1:-}")
 OUT="${NAME}-v${VERSION}.zip"
 STORE_OUT="${NAME}-v${VERSION}-store.zip"
 TMP=".pkgtmp"
@@ -48,11 +56,30 @@ echo "Packaging ${STORE_OUT} (Chrome Web Store upload)..."
 ( cd dist && zip -r -X "../${STORE_OUT}" . -x '.*' '**/.*' >/dev/null )
 
 # The one mistake this script exists to prevent, asserted rather than assumed:
-# the store archive must carry manifest.json at its root.
-if ! unzip -l "${STORE_OUT}" | grep -qE ' manifest\.json$'; then
+# the store archive must carry manifest.json at its root. The listing is captured
+# first: piped straight into `grep -q`, grep exits on the first match, unzip dies
+# of SIGPIPE, and `pipefail` reports a correct archive as a failure.
+LISTING=$(unzip -l "${STORE_OUT}")
+if ! grep -qE ' manifest\.json$' <<<"${LISTING}"; then
   echo "FAILED: ${STORE_OUT} has no manifest.json at the archive root." >&2
   exit 1
 fi
 
 echo "Done."
 ls -lh "${OUT}" "${STORE_OUT}"
+
+cat <<EOF2
+
+Upload v${VERSION} to the Chrome Web Store:
+
+  https://chrome.google.com/webstore/devconsole
+
+  1. Open "Chromium Filler" (item ${ITEM_ID}).
+  2. Package -> "Upload new package" -> choose ${STORE_OUT}
+     (the -store zip; the other one is rejected for its wrapper folder).
+  3. Check Store listing / Privacy for anything this version changed
+     (paste-ready copy: design/store/LISTING.md).
+  4. "Submit for review".
+
+  ${OUT} is the one for a GitHub release or "Load unpacked".
+EOF2

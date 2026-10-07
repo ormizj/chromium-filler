@@ -81,6 +81,7 @@ npm run typecheck # tsc --noEmit
 npm run build     # typecheck + vite build -> dist/
 npm run build:store # same, unminified (vite build --mode store)
 npm run package   # build both release zips (see below)
+npm run package -- 0.1.2   # bump to a new version first, then package
 npm run screenshots # regenerate the store screenshots from the built extension
 
 # End-to-end: loads the built extension into real Chromium and drives the
@@ -94,6 +95,14 @@ success-watch → auto-close) against 13 deliberately nasty fixture pages, plus
 popup/options render and size checks. If it's green, real boards should behave.
 
 ### The two zips
+
+To release a new version pass it to the command: `npm run package -- 0.1.2`.
+`scripts/version.mjs` refuses a version lower than the current one (or one Chrome
+would not accept, such as `1.2-beta`), allows the same one with a notice, and
+writes it into all four files that carry it — `package.json`,
+`package-lock.json`, `manifest.config.ts` and `design/store/LISTING.md` — before
+anything is built. Every run also refuses a `package.json` and manifest that
+disagree. When it finishes it prints the store dashboard link and the upload steps.
 
 `npm run package` produces **two** archives, and they are not interchangeable.
 The difference that matters is where `manifest.json` sits: Chrome Web Store

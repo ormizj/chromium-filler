@@ -14,6 +14,8 @@ npm run typecheck        # tsc --noEmit
 npm run build            # tsc --noEmit && vite build -> dist/
 npm run dev              # Vite dev server + HMR
 npm run test:e2e         # Playwright; requires `npm run build` first
+npm run package          # both release zips at the current version
+npm run package -- 0.1.2 # bump every version-carrying file (no downgrades), then package
 ```
 
 ### UI validation
