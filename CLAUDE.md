@@ -92,7 +92,9 @@ otherwise reachable exactly once per profile: dismissing it persists.
 shape the count line exists for, and one `BASE_SETUP` (which finds five of six) can
 never produce. **`&saved=1`** pairs with any `home-*` state and leads the card with
 "Site setup saved", which is about the press that got there rather than about the
-site and so is unreachable without having just recorded one.
+site and so is unreachable without having just recorded one. **`&ff=mobile`**
+pairs with any setup state and labels home as the mobile half — the only place the
+panel says which of a site's two setups it is editing.
 
 **`&marks=1` is a parameter, not a state**, and draws the on-page name chips over
 `fakePosting()`. A parameter because a mark is a rendering of the *page* rather than
@@ -641,6 +643,36 @@ every fillable field (`resume` = the CV file).
 `SiteConfig` drives per-site behavior: `urlPatterns` (match-pattern or `/regex/`),
 `waitFor`, `prep`, `extract`, `fieldOverrides` (beat the heuristics), `cvUpload`,
 `submitCv`, `autoDetect`, `successSelector`.
+
+**A site has a desktop setup and a mobile setup, kept fully separate.** Boards
+often send a phone a different page, and a desktop recording replayed there clicks
+the wrong things. `StoredSiteConfig` is the stored (and synced) shape: the shell
+(`id`, `name`, `urlPatterns`, `autoDetect`) once, plus `desktop?`/`mobile?` halves
+(`SiteSetup`, each with its own `updatedAt`). `SiteConfig` is the **resolved view**
+for one form factor (`resolveSiteConfig`, `shared/siteConfigs.ts`), and it is the
+only shape anything outside storage and sync ever sees — which is why content/,
+setupSteps and the help catalog did not change. Five rules:
+
+- **The halves never fall back to each other.** An absent half resolves to an
+  unconfigured site (`extract: {}` and nothing else), so a site recorded on a
+  laptop opens on the phone at Record. That is the feature: layering one over the
+  other made every Pick and Clear on the panel ask which layer it meant.
+- **The form factor is the user agent** (`currentFormFactor`, `shared/formFactor.ts`),
+  never the viewport: the UA is what the server decides the page on, so Kiwi's
+  "Desktop site" reads as desktop, and a narrowed desktop window stays desktop.
+- **Every write goes through `mutateSiteConfig` → `writeSetup`**, which edits this
+  device's half and stamps it — and bumps the config's own `updatedAt` with it.
+  That invariant (the shell is never older than either half) is what keeps
+  `mergeSiteConfigs` associative across a deletion; do not stamp a half alone.
+  `getSiteConfigs`/`getState` return resolved views; `getStoredSiteConfigs` is for
+  storage, sync and the Options JSON editor only.
+- **Legacy flat configs are read as this device's half** (`migrateLegacy`), on
+  every read and once on update in the service worker. A consequence for E2E: the
+  fixtures are seeded flat, so a page under a mobile UA reads them as *mobile*
+  halves — the mobile spec stores them as desktop halves first.
+- **A whole-array save is stamped by content** (`stampChanges`), so editing a stamp
+  by hand cannot make a stale copy win a sync, and a removed id becomes a tombstone
+  in `deletedSiteConfigs` or the next sync brings it straight back.
 
 **Two documents, one mechanism.** `cvStore.ts` is keyed by `DocKind`
 (`resume` → `'cv'`, `coverLetter` → `'coverLetterFile'`); `getCv`/`setCv`/
@@ -1943,12 +1975,32 @@ posting by re-visiting it (it used to spell that as two inline
 `!== 'applied'` checks, which silently *did* demote a skipped one), and the sync
 merge needs a deterministic tie-break. Both now go through `promote()`.
 
-### Syncing the job database
-Two browser profiles on different Google accounts, one database. **Only the job
-database** — `jobUrls` and `jobDetails`. The profile, the CV, the site configs and
-every other setting are device state: `modalLayout` alone settles it, being a
-rectangle measured against *one* screen (`sampleScreen`), so replicating it is
-the stranding `clampLayout` exists to undo.
+### Syncing the job database and site setups
+Two browser profiles on different Google accounts, one database. **The job
+database** — `jobUrls` and `jobDetails` — **and the site configs**, the latter
+under `settings.syncSiteConfigs` (default on). The profile, the CV and every other
+setting are device state: `modalLayout` alone settles it, being a rectangle
+measured against *one* screen (`sampleScreen`), so replicating it is the stranding
+`clampLayout` exists to undo.
+
+**Site configs merge in `shared/syncConfigs.ts`**, held to the same three
+properties and asserted the same way. A config is three parts — shell, desktop
+half, mobile half — each last-writer-wins on its *own* stamp, so a phone's mobile
+setup and a laptop's desktop one never overwrite each other; ties go to the lower
+`canonical()` form. Deletion is `deletedSiteConfigs` (`id → at`, unioned by max):
+any part no newer than the tombstone is dropped, so a config re-created after a
+delete comes back without its old halves. The merge sorts by id; `applySnapshot`
+restores *local* order on disk only (`findMatchingConfig` takes the first match)
+and uploads the sorted merge, so two devices holding the same configs write the
+same file. With the setting off this device sends none and writes none, and the
+far side's configs ride through to the upload untouched — turning it off here
+must never delete them there.
+
+**`SYNC_SCHEMA` is 2 because of this, and it had to be.** A schema-1 build
+accepts extra fields but rebuilds the snapshot from the two keys it knows on
+upload, so it would have silently deleted every remote config. Bumped, it refuses
+("written by a newer version"). A schema-1 file is still read, as carrying no
+configs (`upgradeSnapshot`).
 
 `src/shared/syncJobs.ts` (pure) is the whole correctness story. Two devices write
 with nobody arbitrating, so `mergeJobs` is **commutative, associative and
@@ -2091,9 +2143,14 @@ needs no `downloads` permission, and an MV3 service worker has no
 - **Content scripts share the PAGE's origin**, not the extension's — so the CV
   is stored in `chrome.storage.local` (base64, needs `unlimitedStorage`), NOT
   extension IndexedDB. See `cvStore.ts`.
-- **Sync carries the job database and nothing else.** Never widen the snapshot to
-  the profile, the CV, the site configs or `settings` — see the sync section
-  above. `Omit`ing them is not the guard; the snapshot type simply has two fields.
+- **Sync carries the job database and the site configs, and nothing else.** Never
+  widen the snapshot to the profile, the CV or `settings` — see the sync section
+  above. `Omit`ing them is not the guard; the snapshot type simply lacks them. A new
+  synced key that an older build would *drop* on upload needs a `SYNC_SCHEMA` bump,
+  not just an addition.
+- **A site's desktop and mobile setups never stand in for each other.** Never add a
+  fallback from one half to the other in `resolveSiteConfig`, and never stamp a half
+  without the config's own `updatedAt` — the merge's associativity rests on it.
 - **Never make the sync merge depend on `now`, or on which argument came first.**
   Both break the properties two-way sync rests on. Pruning belongs at the storage
   edge, tie-breaks must be symmetric.

@@ -25,6 +25,9 @@ export const DEFAULT_SETTINGS: Settings = {
   helpSeen: false,
   // Off until asked for: everything else here happens on-device.
   syncEnabled: false,
+  // On: once sync is, a site recorded on one computer should not need recording
+  // again on the other. Only takes effect while syncEnabled is on.
+  syncSiteConfigs: true,
   // Empty means "no decisions taken yet", which resolves to every column, the
   // applied postings, as JSON — see `resolveExport`. Spelling those out here
   // instead would freeze today's schema into every fresh install.

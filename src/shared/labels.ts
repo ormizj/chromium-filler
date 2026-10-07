@@ -14,7 +14,7 @@
  * the words, not the class names.
  */
 
-import type { JobUrlStatus, MatchConfidence } from './types';
+import type { FormFactor, JobUrlStatus, MatchConfidence } from './types';
 import type { ExportField } from './jobExport';
 import type { ConfigBindKey, MarkGroupId, RecordLeg, RecordPhase } from './recording';
 import type { SelectorStrength } from './selector';
@@ -335,6 +335,18 @@ export const ACTION_LABELS: Record<ActionKey, string> = {
   resetRecordingConfirm: 'Start over',
   saveRecording: 'Save setup',
   discardRecording: 'Discard',
+};
+
+/**
+ * Which half of a site's setup a surface is showing — see `FormFactor`. Every
+ * site has a desktop setup and a mobile setup, kept fully apart, so a screen
+ * that edits one has to say which, or a user setting a site up on their phone
+ * cannot tell why the desktop setup they made yesterday is not there.
+ * `Record<FormFactor, …>`, so a third cannot ship unnamed.
+ */
+export const FORM_FACTOR_TEXT: Record<FormFactor, { setup: string; name: string }> = {
+  desktop: { setup: 'Desktop setup', name: 'Desktop' },
+  mobile: { setup: 'Mobile setup', name: 'Mobile' },
 };
 
 /* ---------------- The two ways to set a site up by doing it once ---------------- */

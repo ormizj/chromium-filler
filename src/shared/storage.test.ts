@@ -4,6 +4,7 @@ import {
   upsertSiteConfig, saveJobUrls, getJobUrls, getSiteConfigs, saveFieldOverride,
   mutateSiteConfig, saveExtractSelector, ensureConfigForUrl,
   clearExtractSelector, clearFieldOverride, getSettings, saveSettings,
+  getStoredSiteConfigs, saveSubmitSelector,
 } from './storage';
 import type { SiteConfig } from './types';
 
@@ -159,6 +160,36 @@ describe('site config upsert', () => {
     expect(got.name).toBe('newsite.co');
     const all = await getSiteConfigs();
     expect(all.map((c) => c.id)).toContain(got.id);
+  });
+});
+
+describe('site configs — one half per form factor', () => {
+  // jsdom's user agent reads as desktop.
+  it('reads a legacy flat config as this device\'s half', async () => {
+    await chrome.storage.local.set({ siteConfigs: [{ ...cfg('a'), submitSelector: '#send' }] });
+    expect((await getSiteConfigs())[0].submitSelector).toBe('#send');
+    expect((await getStoredSiteConfigs())[0].desktop?.submitSelector).toBe('#send');
+  });
+
+  it('writes this device\'s half and leaves the other alone', async () => {
+    await chrome.storage.local.set({
+      siteConfigs: [{ id: 'a', name: 'a', urlPatterns: ['*://a/*'], mobile: { extract: {}, submitSelector: '.m' } }],
+    });
+    expect((await getSiteConfigs())[0].submitSelector).toBeUndefined();
+    await saveSubmitSelector('a', '#d');
+    const [stored] = await getStoredSiteConfigs();
+    expect(stored.desktop?.submitSelector).toBe('#d');
+    expect(stored.desktop?.updatedAt).toEqual(expect.any(Number));
+    expect(stored.mobile).toEqual({ extract: {}, submitSelector: '.m' });
+  });
+
+  it('ensureConfigForUrl does not create a second config when only the other half exists', async () => {
+    await chrome.storage.local.set({
+      siteConfigs: [{ id: 'a', name: 'a', urlPatterns: ['*://a.com/*'], mobile: { extract: {}, submitSelector: '.m' } }],
+    });
+    const got = await ensureConfigForUrl('https://a.com/job/1');
+    expect(got.id).toBe('a');
+    expect(await getStoredSiteConfigs()).toHaveLength(1);
   });
 });
 

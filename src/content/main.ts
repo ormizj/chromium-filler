@@ -12,6 +12,7 @@ import type {
 } from '../shared/types';
 import { statusForUrl } from '../shared/jobUrls';
 import { findMatchingConfig } from '../shared/matcher';
+import { currentFormFactor } from '../shared/formFactor';
 import { generateSelector, pickSelector } from '../shared/selector';
 import { query } from '../shared/query';
 import { isExternalUrl } from '../shared/redirect';
@@ -1830,6 +1831,7 @@ class Controller {
       submit: submitRow,
       success: successRow,
       helpSeen: (await getSettings()).helpSeen,
+      formFactor: currentFormFactor(),
       // The review renders from these two; the panel decides whether it is showing
       // them (`showReview`), because that is a place in a task and not a fact
       // about the data — the same rule its `step` follows.

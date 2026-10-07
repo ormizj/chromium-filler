@@ -441,14 +441,27 @@ export const SETTINGS_HELP: Record<keyof Settings, HelpEntry> = {
     body: 'Keeps the job database the same in two browsers — which postings you have '
       + 'applied to, which you skipped, and the job text that was saved with them. Both '
       + 'browsers connect to the same Google account, and the data is kept in a folder '
-      + 'there that only this extension can see. Nothing else is shared: your profile, '
-      + 'your CV, your site configurations and the rest of these settings stay on this '
+      + 'there that only this extension can see. Your site setups go too, unless you turn '
+      + 'that off below; your profile, your CV and the rest of these settings stay on this '
       + 'device. Neither side overwrites the other — the two histories are combined, and '
       + 'where they disagree about a posting the most recent decision wins, whichever '
       + 'browser it was made on. It runs when you press Sync now and once when the '
       + 'browser starts, never on a timer.',
     when: 'You need this when you apply for jobs from more than one computer, and want '
       + 'to avoid applying twice to the same posting.',
+  },
+  syncSiteConfigs: {
+    title: 'Sync site setups too',
+    short: 'A site set up on one computer is set up on the other',
+    body: 'Also shares what you have taught the extension about each site — the fields, '
+      + 'the clicks before filling, the Send button and the confirmation. Every site has '
+      + 'a desktop setup and a mobile setup, kept apart because a site often shows a '
+      + 'phone a different page; each is combined on its own, so setting a site up on '
+      + 'your phone never undoes the desktop setup, or the other way round. Where both '
+      + 'browsers changed the same setup, the most recent change wins. Turning this off '
+      + 'keeps this browser\'s setups to itself without deleting the other browser\'s.',
+    when: 'Turn it off if one browser should keep setups the other does not have — for '
+      + 'example while you are trying a recording out.',
   },
   exportOptions: {
     title: 'What the archive exports',
@@ -700,9 +713,23 @@ export type ConceptKey =
   | 'dots' | 'autoVsSaved' | 'todoChip' | 'picker' | 'neverSubmits'
   | 'twoStep' | 'appLink' | 'sessions' | 'urlPattern' | 'successSelector' | 'howItWorks'
   | 'apply' | 'applyUnverified' | 'alreadyApplied' | 'exportJobs' | 'syncClient' | 'coverLetter'
-  | 'recording' | 'marking' | 'selectorStrength' | 'finishSetup';
+  | 'recording' | 'marking' | 'selectorStrength' | 'finishSetup' | 'formFactor';
 
 export const CONCEPT_HELP: Record<ConceptKey, HelpEntry> = {
+  formFactor: {
+    title: 'Desktop and mobile setups',
+    short: 'Every site is set up separately for desktop and for mobile.',
+    body: 'Many job sites show a phone a different page from a computer — a different '
+      + 'layout, a button to tap before the form opens, other names on the same boxes. '
+      + 'So every site keeps two setups, one for desktop and one for mobile, and neither '
+      + 'stands in for the other: a site you set up on your laptop is still waiting to be '
+      + 'set up on your phone. Which one a browser uses is decided by what kind of device '
+      + 'it tells websites it is, which is also what decides the page the site sends — so '
+      + 'a phone browser asking for the desktop site uses the desktop setup. With sync on, '
+      + 'both travel between your browsers, and each is combined on its own.',
+    when: 'A site that worked on one device reports itself as not set up on the other. '
+      + 'Record it there once.',
+  },
   recording: {
     title: 'Setting a site up in two passes',
     short: 'Apply to one job as normal; the extension learns the site from what you do.',

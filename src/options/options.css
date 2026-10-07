@@ -1589,6 +1589,18 @@ label.fld.inline input {
   margin-bottom: var(--space-5);
 }
 
+/* One head per half — Desktop setup, Mobile setup. The first owes the panel no
+   gap above it; the box's own padding is that gap. */
+#configs-explain > h5 {
+  margin: var(--space-3) 0 var(--space-1);
+}
+#configs-explain > h5:first-child {
+  margin-top: 0;
+}
+#configs-explain > p {
+  margin: 0;
+}
+
 /* The config chips stand on the JSON box otherwise: `.filters` has a top margin
    and no bottom one, and a `textarea` on this page has neither. Scoped to this
    row rather than added to `.filters`, whose other use — the queue's status

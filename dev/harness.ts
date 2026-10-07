@@ -526,6 +526,9 @@ function bootSetup(): void {
     // The returning user, whose legend is folded away. `state=help` is the
     // first-run view.
     helpSeen: true,
+    // `&ff=mobile` previews the mobile half's label on home — the one place the
+    // panel says which of a site's two setups it is editing.
+    formFactor: params.get('ff') === 'mobile' ? 'mobile' : 'desktop',
     // The panel shares the review modal's slot and rectangle, so it needs the
     // same default here for the same reason `BASE_MODAL` does: without it the
     // card falls back to the CSS, which is a size no real user would ever see.

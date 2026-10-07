@@ -3,17 +3,26 @@
  * The CV binary is stored separately, base64-encoded, in chrome.storage.local (see cvStore.ts).
  */
 
-import type { JobUrlEntry, Profile, Settings, SiteConfig, StoredState } from './types';
+import type {
+  JobUrlEntry, Profile, Settings, SiteConfig, StoredSiteConfig, StoredState,
+} from './types';
 import type { JobDetailsMap } from './jobDetails';
 import type { ConfigPatch } from './recording';
 import { DEFAULT_PROFILE, DEFAULT_SETTINGS } from './defaults';
 import { normalizeEntry } from './jobUrls';
 import { configTemplate } from './configTemplate';
 import { findMatchingConfig } from './matcher';
+import { currentFormFactor } from './formFactor';
+import {
+  migrateLegacy, newStoredConfig, resolveSiteConfig, writeSetup, type ConfigTombstones,
+} from './siteConfigs';
 
 const KEYS = {
   profile: 'profile',
   siteConfigs: 'siteConfigs',
+  // Ids of configs deleted here, kept so a sync does not bring them back. See
+  // syncConfigs.ts; pruned at the sync edge after the same 90 days as jobUrls'.
+  deletedSiteConfigs: 'deletedSiteConfigs',
   jobUrls: 'jobUrls',
   // Deliberately not part of `jobUrls`: that list is read and rewritten whole on
   // every status change, session tick and queue render, and the posting text is
@@ -28,7 +37,7 @@ export async function getState(): Promise<StoredState> {
   ]);
   return {
     profile: (raw[KEYS.profile] as Profile) ?? DEFAULT_PROFILE,
-    siteConfigs: (raw[KEYS.siteConfigs] as SiteConfig[]) ?? [],
+    siteConfigs: resolveAll(raw[KEYS.siteConfigs]),
     jobUrls: (raw[KEYS.jobUrls] as JobUrlEntry[]) ?? [],
     settings: { ...DEFAULT_SETTINGS, ...((raw[KEYS.settings] as Settings) ?? {}) },
   };
@@ -43,37 +52,98 @@ export async function saveProfile(profile: Profile): Promise<void> {
   await chrome.storage.local.set({ [KEYS.profile]: profile });
 }
 
-export async function getSiteConfigs(): Promise<SiteConfig[]> {
+/**
+ * Site configs are stored as a shell plus a desktop and a mobile half
+ * (`shared/siteConfigs.ts`). Everything outside storage and sync reads the flat
+ * view for *this* device, so these two are the only readers of the raw shape.
+ *
+ * Legacy flat configs are migrated on read, into this device's half — the
+ * service worker also migrates them once on update, but a reader must not
+ * depend on that having happened yet (an E2E or an import can seed the old shape).
+ */
+export async function getStoredSiteConfigs(): Promise<StoredSiteConfig[]> {
   const raw = await chrome.storage.local.get(KEYS.siteConfigs);
-  return (raw[KEYS.siteConfigs] as SiteConfig[]) ?? [];
+  return migrateAll(raw[KEYS.siteConfigs]);
 }
 
-export async function saveSiteConfigs(configs: SiteConfig[]): Promise<void> {
+export async function saveStoredSiteConfigs(configs: StoredSiteConfig[]): Promise<void> {
   await chrome.storage.local.set({ [KEYS.siteConfigs]: configs });
 }
 
-/** Upsert a single config by id, preserving order. */
-export async function upsertSiteConfig(config: SiteConfig): Promise<SiteConfig[]> {
-  const configs = await getSiteConfigs();
-  const idx = configs.findIndex((c) => c.id === config.id);
-  if (idx >= 0) configs[idx] = config;
-  else configs.push(config);
-  await saveSiteConfigs(configs);
-  return configs;
+function migrateAll(raw: unknown): StoredSiteConfig[] {
+  const ff = currentFormFactor();
+  return ((raw as StoredSiteConfig[] | undefined) ?? []).map((c) => migrateLegacy(c, ff));
 }
 
-/** Read-modify-write a single config by id (no-op if the id is unknown). */
+function resolveAll(raw: unknown): SiteConfig[] {
+  const ff = currentFormFactor();
+  return migrateAll(raw).map((c) => resolveSiteConfig(c, ff));
+}
+
+/** This device's view of every site config. */
+export async function getSiteConfigs(): Promise<SiteConfig[]> {
+  const raw = await chrome.storage.local.get(KEYS.siteConfigs);
+  return resolveAll(raw[KEYS.siteConfigs]);
+}
+
+export async function getDeletedSiteConfigs(): Promise<ConfigTombstones> {
+  const raw = await chrome.storage.local.get(KEYS.deletedSiteConfigs);
+  return (raw[KEYS.deletedSiteConfigs] as ConfigTombstones) ?? {};
+}
+
+export async function saveDeletedSiteConfigs(deleted: ConfigTombstones): Promise<void> {
+  await chrome.storage.local.set({ [KEYS.deletedSiteConfigs]: deleted });
+}
+
+/** Record deletions, keeping the latest time per id. */
+export async function addDeletedSiteConfigs(deleted: ConfigTombstones): Promise<void> {
+  if (!Object.keys(deleted).length) return;
+  const all = await getDeletedSiteConfigs();
+  for (const [id, at] of Object.entries(deleted)) all[id] = Math.max(all[id] ?? at, at);
+  await saveDeletedSiteConfigs(all);
+}
+
+/**
+ * Write a flat config as *this device's* view of it: the shell, and this
+ * device's half. The other half is left as it was.
+ */
+export async function upsertSiteConfig(config: SiteConfig): Promise<SiteConfig[]> {
+  const ff = currentFormFactor();
+  const now = Date.now();
+  const configs = await getStoredSiteConfigs();
+  const idx = configs.findIndex((c) => c.id === config.id);
+  if (idx >= 0) {
+    configs[idx] = writeSetup(configs[idx], ff, (c) => {
+      for (const k of Object.keys(c)) delete (c as unknown as Record<string, unknown>)[k];
+      Object.assign(c, structuredClone(config));
+    }, now);
+  } else {
+    configs.push(newStoredConfig(config, ff, now));
+  }
+  await saveStoredSiteConfigs(configs);
+  return configs.map((c) => resolveSiteConfig(c, ff));
+}
+
+/**
+ * Read-modify-write a single config by id (no-op if the id is unknown), through
+ * this device's flat view — so every slot writer below edits this device's half
+ * and nothing else, and stamps it for sync.
+ */
 export async function mutateSiteConfig(
   configId: string,
   fn: (config: SiteConfig) => void,
 ): Promise<SiteConfig[]> {
-  const configs = await getSiteConfigs();
-  const cfg = configs.find((c) => c.id === configId);
-  if (cfg) {
-    fn(cfg);
-    await saveSiteConfigs(configs);
+  const ff = currentFormFactor();
+  const configs = await getStoredSiteConfigs();
+  const idx = configs.findIndex((c) => c.id === configId);
+  if (idx >= 0) {
+    const next = writeSetup(configs[idx], ff, fn, Date.now());
+    if (next !== configs[idx]) {
+      configs[idx] = next;
+      await saveStoredSiteConfigs(configs);
+    }
   }
-  return configs;
+  return configs.map((c) => resolveSiteConfig(c, ff));
 }
 
 /**
@@ -233,13 +303,15 @@ function uniqueId(preferred: string, configs: SiteConfig[]): string {
 
 /** Return the config matching `url`, creating and persisting a minimal one if none exists. */
 export async function ensureConfigForUrl(url: string): Promise<SiteConfig> {
-  const configs = await getSiteConfigs();
+  const ff = currentFormFactor();
+  const stored = await getStoredSiteConfigs();
+  const configs = stored.map((c) => resolveSiteConfig(c, ff));
   const existing = findMatchingConfig(url, configs);
   if (existing) return existing;
   const template = configTemplate(url);
   const created: SiteConfig = { ...template, id: uniqueId(template.id, configs) };
-  configs.push(created);
-  await saveSiteConfigs(configs);
+  stored.push(newStoredConfig(created, ff, Date.now()));
+  await saveStoredSiteConfigs(stored);
   return created;
 }
 

@@ -11,7 +11,11 @@ import {
 import {
   getRecording, inheritRecording, popStep, pushStep, startRecording, stopRecording,
 } from './recordings';
-import { getSettings, mutateJobUrls } from '../shared/storage';
+import {
+  getSettings, getStoredSiteConfigs, mutateJobUrls, saveStoredSiteConfigs,
+} from '../shared/storage';
+import { migrateLegacy } from '../shared/siteConfigs';
+import { currentFormFactor } from '../shared/formFactor';
 import { applyStatusChain, linkRedirect } from '../shared/jobUrls';
 import { isExternalUrl } from '../shared/redirect';
 import { navigableUrl } from '../shared/appLink';
@@ -34,8 +38,18 @@ chrome.runtime.onInstalled.addListener(async (details) => {
   if (details.reason === 'install') {
     const existing = await chrome.storage.local.get('siteConfigs');
     if (!existing.siteConfigs) {
-      await chrome.storage.local.set({ ...DEFAULT_STATE });
+      // Seeded unstamped, so any real edit on either device outranks the example
+      // in a sync, and a delete of it holds.
+      await chrome.storage.local.set({
+        ...DEFAULT_STATE,
+        siteConfigs: DEFAULT_STATE.siteConfigs.map((c) => migrateLegacy(c, currentFormFactor())),
+      });
     }
+  } else if (details.reason === 'update') {
+    // Configs from before the desktop/mobile split go into this device's half —
+    // they were recorded here. Readers migrate on read as well; doing it once
+    // here is what puts the stored shape on disk before the first sync sends it.
+    await saveStoredSiteConfigs(await getStoredSiteConfigs());
   }
 });
 

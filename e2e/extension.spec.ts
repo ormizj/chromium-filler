@@ -193,8 +193,11 @@ async function teachConfirmation(url: string, selector: string): Promise<void> {
     const { siteConfigs } = await chrome.storage.local.get('siteConfigs');
     const glob = (p: string) => new RegExp(`^${p.replace(/[.+?^${}()|[\]\\]/g, '\\$&')
       .replace(/\*/g, '.*')}$`).test(u);
+    // Configs are stored in a desktop and a mobile half once the extension has
+    // written one; this browser is desktop.
+    const half = (c: Record<string, any>) => ('desktop' in c || 'mobile' in c) ? (c.desktop ??= { extract: {} }) : c;
     for (const c of siteConfigs) {
-      if (c.urlPatterns.some(glob)) c.successSelector = sel;
+      if (c.urlPatterns.some(glob)) half(c).successSelector = sel;
     }
     await chrome.storage.local.set({ siteConfigs });
   }, { u: url, sel: selector }));
@@ -220,10 +223,11 @@ async function rewindToBeforeSend(url: string, submitSelector: string): Promise<
     const { siteConfigs } = await chrome.storage.local.get('siteConfigs');
     const glob = (p: string) => new RegExp(`^${p.replace(/[.+?^${}()|[\]\\]/g, '\\$&')
       .replace(/\*/g, '.*')}$`).test(u);
+    const half = (c: Record<string, any>) => ('desktop' in c || 'mobile' in c) ? (c.desktop ??= { extract: {} }) : c;
     for (const c of siteConfigs) {
       if (!c.urlPatterns.some(glob)) continue;
-      delete c.successSelector;
-      c.submitSelector = sel;
+      delete half(c).successSelector;
+      half(c).submitSelector = sel;
     }
     await chrome.storage.local.set({ siteConfigs });
   }, { u: url, sel: submitSelector, seed: fixtures }));
@@ -283,10 +287,13 @@ test('SlowBoards: fills the late-injected form + attaches CV', async () => {
 test('SlowBoards: an unconfigured description falls back to the posting, not to the button that opens it', async () => {
   const strip = (drop: boolean) => onExtensionPage((opts) => opts.evaluate(async (dropIt) => {
     const { siteConfigs } = await chrome.storage.local.get('siteConfigs');
+    const half = (c: Record<string, any>) => ('desktop' in c || 'mobile' in c) ? (c.desktop ??= { extract: {} }) : c;
     for (const c of siteConfigs) {
       if (c.id !== 'slow-boards') continue;
-      if (dropIt) delete c.extract.jobDescription;
-      else c.extract.jobDescription = '#job-description';
+      const h = half(c);
+      h.extract ??= {};
+      if (dropIt) delete h.extract.jobDescription;
+      else h.extract.jobDescription = '#job-description';
     }
     await chrome.storage.local.set({ siteConfigs });
   }, drop));
@@ -538,7 +545,8 @@ test('QuickBoard: Apply refuses to send when the site has no confirmation config
   // Take it away, and turn off the setting that would otherwise offer to capture it.
   await onExtensionPage((opts) => opts.evaluate(async () => {
     const { siteConfigs, settings } = await chrome.storage.local.get(['siteConfigs', 'settings']);
-    for (const c of siteConfigs) if (c.id === 'quick-board') delete c.successSelector;
+    const half = (c: Record<string, any>) => ('desktop' in c || 'mobile' in c) ? (c.desktop ??= { extract: {} }) : c;
+    for (const c of siteConfigs) if (c.id === 'quick-board') delete half(c).successSelector;
     await chrome.storage.local.set({
       siteConfigs, settings: { ...settings, finishSetupOnApply: false },
     });
@@ -554,7 +562,8 @@ test('QuickBoard: Apply refuses to send when the site has no confirmation config
 
   await onExtensionPage((opts) => opts.evaluate(async () => {
     const { siteConfigs, settings } = await chrome.storage.local.get(['siteConfigs', 'settings']);
-    for (const c of siteConfigs) if (c.id === 'quick-board') c.successSelector = '#quick-success';
+    const half = (c: Record<string, any>) => ('desktop' in c || 'mobile' in c) ? (c.desktop ??= { extract: {} }) : c;
+    for (const c of siteConfigs) if (c.id === 'quick-board') half(c).successSelector = '#quick-success';
     await chrome.storage.local.set({
       siteConfigs, settings: { ...settings, finishSetupOnApply: true },
     });
@@ -1763,10 +1772,11 @@ test('Setup: a saved Send selector that stopped matching says so, and credits th
   const setSubmitSelector = (selector: string | null) =>
     onExtensionPage((opts) => opts.evaluate(async (sel) => {
       const { siteConfigs } = await chrome.storage.local.get('siteConfigs');
+      const half = (c: Record<string, any>) => ('desktop' in c || 'mobile' in c) ? (c.desktop ??= { extract: {} }) : c;
       for (const c of siteConfigs) {
         if (c.id !== 'quick-board') continue;
-        if (sel) c.submitSelector = sel;
-        else delete c.submitSelector;
+        if (sel) half(c).submitSelector = sel;
+        else delete half(c).submitSelector;
       }
       await chrome.storage.local.set({ siteConfigs });
     }, selector));
@@ -2362,6 +2372,56 @@ test('Options: a broken site config is named and refused, not saved', async () =
   });
 });
 
+/**
+ * Every site keeps a desktop and a mobile setup, and neither stands in for the
+ * other. Driven through a real mobile user agent rather than a narrow viewport,
+ * because the UA is what decides the half (`shared/formFactor.ts`) — and it is
+ * also what decides the page a real board sends.
+ */
+test('Mobile: a site set up on desktop reads as not set up on a phone', async () => {
+  // The fixtures are seeded flat, the shape from before the split, and a flat
+  // config is read as the half of whichever device reads it. Store them as the
+  // desktop halves they are — what the service worker's update migration does on
+  // a desktop install.
+  await onExtensionPage((ext) => ext.evaluate(async () => {
+    const { siteConfigs } = await chrome.storage.local.get('siteConfigs');
+    await chrome.storage.local.set({
+      siteConfigs: siteConfigs.map((c: Record<string, unknown>) => {
+        if ('desktop' in c || 'mobile' in c) return c;
+        const { id, name, urlPatterns, autoDetect, ...desktop } = c;
+        return { id, name, urlPatterns, autoDetect, desktop };
+      }),
+    });
+  }));
+
+  const page = await context.newPage();
+  try {
+    const cdp = await context.newCDPSession(page);
+    await cdp.send('Emulation.setUserAgentOverride', {
+      userAgent: 'Mozilla/5.0 (Linux; Android 14; Pixel 8) AppleWebKit/537.36 '
+        + '(KHTML, like Gecko) Chrome/129.0 Mobile Safari/537.36',
+      userAgentMetadata: {
+        mobile: true, platform: 'Android', platformVersion: '14',
+        architecture: '', model: 'Pixel 8', brands: [],
+      },
+    });
+    await page.goto(urlFor('quick-plain'));
+    await expect(page.locator('.cf-card')).toBeVisible({ timeout: 20_000 });
+
+    await page.locator('.cf-more button').first().click();
+    await page.getByRole('button', { name: 'Site setup', exact: true }).click();
+    const setup = page.locator('.cf-card[data-sheet="setup"]');
+    await expect(setup).toBeVisible({ timeout: 20_000 });
+    await expect(setup.locator('.cf-step-count').first()).toHaveText('Mobile setup');
+    await expect(setup.locator('.cf-step-title')).toHaveText('Teach the extension this site');
+
+    // And the desktop half is exactly as it was.
+    expect((await configFor(urlFor('quick-plain')))?.successSelector).toBe('#quick-success');
+  } finally {
+    await page.close();
+  }
+});
+
 /* ---------------- Recording a site by applying to one job ---------------- */
 
 /**
@@ -2374,7 +2434,9 @@ async function configFor(url: string): Promise<Record<string, unknown> | undefin
     const { siteConfigs = [] } = await chrome.storage.local.get('siteConfigs');
     const glob = (p: string) => new RegExp(`^${p.replace(/[.+?^${}()|[\]\\]/g, '\\$&')
       .replace(/\*/g, '.*')}$`).test(u);
-    return siteConfigs.find((c: { urlPatterns: string[] }) => c.urlPatterns.some(glob));
+    const c = siteConfigs.find((c: { urlPatterns: string[] }) => c.urlPatterns.some(glob));
+    // Flattened to this browser's (desktop) half, which is what a recording here wrote.
+    return c && ('desktop' in c || 'mobile' in c) ? { ...c, ...(c.desktop ?? {}) } : c;
   }, url));
 }
 

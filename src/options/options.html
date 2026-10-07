@@ -341,13 +341,14 @@
       <!-- ---------------- Sites ---------------- -->
       <div id="panel-sites" role="tabpanel" aria-labelledby="tab-sites" hidden>
         <section id="configs-section">
-          <h2>Site configurations</h2>
+          <h2 id="configs-heading">Site configurations</h2>
           <p class="hint">
-            Per-site rules as JSON (array of configs). Detection, page actions, extract
-            selectors, field overrides, CV upload selector, the CV-confirmation steps,
-            and the two keys Apply depends on — the Send button and the confirmation
-            element. Most sites are easier to set up visually — open a posting and use
-            “Set up this site”.
+            Per-site rules as JSON (array of configs). Each config names the site once
+            and keeps a separate <code>desktop</code> and <code>mobile</code> setup:
+            detection, page actions, extract selectors, field overrides, CV upload
+            selector, the CV-confirmation steps, and the two keys Apply depends on — the
+            Send button and the confirmation element. Most sites are easier to set up
+            visually — open a posting and use “Set up this site”.
           </p>
           <!-- Every key, explained. Without this the JSON below is the only
                documentation there is, and it documents nothing. -->
@@ -385,6 +386,10 @@
             <div class="setrow">
               <div class="setrow-text"><h5>Sync the job database</h5></div>
               <label class="switch"><input type="checkbox" id="sync-enabled" class="switch-input" /><span class="switch-track" aria-hidden="true"><i></i></span></label>
+            </div>
+            <div class="setrow">
+              <div class="setrow-text"><h5>Sync site setups too</h5></div>
+              <label class="switch"><input type="checkbox" id="sync-site-configs" class="switch-input" /><span class="switch-track" aria-hidden="true"><i></i></span></label>
             </div>
           </div>
           <!-- Which account this browser is pointed at is the thing that actually
@@ -437,8 +442,9 @@
 
           <h3>Backup file</h3>
           <p class="hint">
-            The same database as a file you can move yourself. Importing combines it
-            with what is here rather than replacing it, exactly as syncing does. This
+            The same database as a file you can move yourself — with your site setups
+            in it while “Sync site setups too” is on. Importing combines it with what
+            is here rather than replacing it, exactly as syncing does. This
             is not the applied-jobs export on the Queue tab, which is written for
             reading rather than for loading back in.
           </p>

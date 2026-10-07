@@ -12,8 +12,8 @@ import { beforeEach, afterEach, describe, expect, it } from 'vitest';
 import { resetChromeMock } from '../../test/setup';
 import { FakeGoogle } from '../../test/fakeGoogle';
 import { SYNC_SCHEMA, type JobSnapshot } from '../shared/syncJobs';
-import type { JobUrlEntry } from '../shared/types';
-import { getJobUrls } from '../shared/storage';
+import type { JobUrlEntry, StoredSiteConfig } from '../shared/types';
+import { getJobUrls, getSiteConfigs, getStoredSiteConfigs } from '../shared/storage';
 import {
   connectAccount, disconnectAccount, setSyncClient, syncNow, syncOnStartup, syncState,
 } from './sync';
@@ -54,7 +54,7 @@ function ancientTombstone(url: string): JobUrlEntry {
 }
 
 function snapshot(jobUrls: JobUrlEntry[]): JobSnapshot {
-  return { schema: SYNC_SCHEMA, jobUrls, jobDetails: {} };
+  return { schema: SYNC_SCHEMA, jobUrls, jobDetails: {}, siteConfigs: [], deletedSiteConfigs: {} };
 }
 
 /** What the fake now holds, parsed. */
@@ -122,7 +122,7 @@ describe('the first merge', () => {
 
     const s = await syncNow(false);
 
-    expect(s.pending).toEqual({ local: 1, remote: 2 });
+    expect(s.pending).toEqual({ local: 1, remote: 2, sites: { local: 0, remote: 0 } });
     // Nothing was written at either end.
     expect(await localUrls()).toEqual(['https://a.example/1']);
     expect(remote().jobUrls).toHaveLength(2);
@@ -378,5 +378,71 @@ describe('syncOnStartup', () => {
     await connectAccount();
     await syncOnStartup();
     expect(google.driveCalls).toHaveLength(0);
+  });
+});
+
+describe('site configs', () => {
+  beforeEach(ready);
+
+  function site(id: string, over: Partial<StoredSiteConfig> = {}): StoredSiteConfig {
+    return { id, name: id, urlPatterns: [`*://${id}/*`], updatedAt: Date.now(), ...over };
+  }
+
+  it('carries both halves each way, and keeps local list order', async () => {
+    const at = Date.now();
+    await chrome.storage.local.set({
+      siteConfigs: [
+        site('zeta', { desktop: { extract: {}, submitSelector: '#d', updatedAt: at } }),
+        site('acme', { desktop: { extract: {}, submitSelector: '#a', updatedAt: at } }),
+      ],
+    });
+    google.seed(JSON.stringify({
+      ...snapshot([]),
+      siteConfigs: [site('zeta', { updatedAt: at + 1, mobile: { extract: {}, submitSelector: '.m', updatedAt: at + 1 } })],
+    }));
+
+    await syncNow(true);
+
+    const local = await getStoredSiteConfigs();
+    expect(local.map((c) => c.id)).toEqual(['zeta', 'acme']);
+    expect(local[0].desktop?.submitSelector).toBe('#d');
+    expect(local[0].mobile?.submitSelector).toBe('.m');
+    // jsdom reads as desktop, so this device sees its own half.
+    expect((await getSiteConfigs())[0].submitSelector).toBe('#d');
+    expect(remote().siteConfigs.map((c) => c.id)).toEqual(['acme', 'zeta']);
+  });
+
+  it('applies a deletion from the other device', async () => {
+    await chrome.storage.local.set({ siteConfigs: [site('acme', { updatedAt: Date.now() - 1000 })] });
+    google.seed(JSON.stringify({ ...snapshot([]), deletedSiteConfigs: { acme: Date.now() } }));
+
+    await syncNow(true);
+
+    expect(await getStoredSiteConfigs()).toEqual([]);
+    expect(remote().deletedSiteConfigs).toHaveProperty('acme');
+  });
+
+  it('switched off, neither sends nor takes — and never deletes the far side\'s', async () => {
+    await chrome.storage.local.set({
+      settings: { syncEnabled: true, syncSiteConfigs: false },
+      siteConfigs: [site('local-only')],
+    });
+    google.seed(JSON.stringify({ ...snapshot([]), siteConfigs: [site('remote-only')] }));
+
+    await syncNow(true);
+
+    expect((await getStoredSiteConfigs()).map((c) => c.id)).toEqual(['local-only']);
+    expect(remote().siteConfigs.map((c) => c.id)).toEqual(['remote-only']);
+  });
+
+  it('reads a schema-1 file as one with no configs', async () => {
+    await chrome.storage.local.set({ siteConfigs: [site('acme')] });
+    google.seed(JSON.stringify({ schema: 1, jobUrls: [], jobDetails: {} }));
+
+    const s = await syncNow(true);
+
+    expect(s.lastError).toBeUndefined();
+    expect(remote().schema).toBe(SYNC_SCHEMA);
+    expect(remote().siteConfigs.map((c) => c.id)).toEqual(['acme']);
   });
 });

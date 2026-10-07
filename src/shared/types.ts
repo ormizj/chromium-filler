@@ -143,6 +143,44 @@ export interface SiteConfig {
   successSelector?: string;
 }
 
+/**
+ * Which half of a site's setup applies on this device. Read off the user agent
+ * (`shared/formFactor.ts`), because that is what the site's server sees when it
+ * decides which page to send — a board that serves a phone a different DOM does
+ * so on the strength of the UA, not of the window's width.
+ */
+export type FormFactor = 'desktop' | 'mobile';
+
+/** The four keys of a `SiteConfig` that say *which* site it is, not how to work it. */
+export type SiteShellKey = 'id' | 'name' | 'urlPatterns' | 'autoDetect';
+
+/**
+ * Everything a recording, a Pick or the wizard writes: a `SiteConfig` minus its
+ * shell. One per form factor, kept fully separate — a desktop recording never
+ * reads as the mobile setup, and the other way round.
+ */
+export type SiteSetup = Omit<SiteConfig, SiteShellKey> & {
+  /** When this half last changed — sync merges each half on its own stamp. */
+  updatedAt?: number;
+};
+
+/**
+ * A site config as it is *stored* (and synced): the shell once, and a setup for
+ * each form factor. Nothing outside storage and sync reads this shape — every
+ * consumer is handed `SiteConfig`, the view resolved for this device by
+ * `resolveSiteConfig` (`shared/siteConfigs.ts`).
+ */
+export interface StoredSiteConfig {
+  id: string;
+  name: string;
+  urlPatterns: string[];
+  autoDetect?: boolean;
+  /** When the shell (name, patterns, autoDetect) last changed. */
+  updatedAt?: number;
+  desktop?: SiteSetup;
+  mobile?: SiteSetup;
+}
+
 export type MatchConfidence = 'high' | 'low' | 'none';
 export type MatchSource = 'override' | 'heuristic' | 'none';
 
@@ -330,16 +368,27 @@ export interface Settings {
    * Share the job database with another browser profile through a Google Drive
    * folder only this extension can see.
    *
-   * Only the job database — the URL list and the captured postings. The profile,
-   * the CV, the site configs and the rest of these settings are device state and
-   * never leave the machine. `modalLayout` alone would be reason enough: it is a
-   * rectangle measured against *this* screen.
+   * The job database — the URL list and the captured postings — and, under
+   * `syncSiteConfigs`, the site configs. The profile, the CV and the rest of these
+   * settings are device state and never leave the machine. `modalLayout` alone
+   * would be reason enough: it is a rectangle measured against *this* screen.
    *
    * Off by default, and deliberately explicit. Everything else this extension
    * does happens on-device, so the first request it ever makes should be one the
    * user asked for.
    */
   syncEnabled: boolean;
+  /**
+   * Carry the site configs in the sync as well — both halves, desktop and mobile,
+   * each merged on its own stamp (`shared/syncConfigs.ts`), so a site recorded on
+   * one computer is set up on the other, and a phone's mobile setup and a laptop's
+   * desktop one never overwrite each other.
+   *
+   * On by default (it only matters once `syncEnabled` is). Off, this device sends
+   * none and takes none, and the far side's configs pass through untouched — so
+   * turning it off here never deletes them over there.
+   */
+  syncSiteConfigs: boolean;
   /**
    * What the Queue tab's Archive button writes out: which columns, which
    * posting statuses, and JSON or CSV. Device state, like everything else here —

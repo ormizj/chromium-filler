@@ -15,12 +15,12 @@
  * the DOM and supplies callbacks, mirroring the review modal's design.
  */
 
-import type { FieldKey, PrepAction } from '../shared/types';
+import type { FieldKey, FormFactor, PrepAction } from '../shared/types';
 import {
   RECORD_PASS_ORDER, markGroups, marksFor,
   type BindKey, type CompiledSetup, type RecordPhase, type Recording, type RecordedStep,
 } from '../shared/recording';
-import { MARK_GROUP_TEXT, SELECTOR_STRENGTH_TEXT } from '../shared/labels';
+import { FORM_FACTOR_TEXT, MARK_GROUP_TEXT, SELECTOR_STRENGTH_TEXT } from '../shared/labels';
 import { bindLabel } from './recorderBar';
 import {
   CONCEPT_HELP, DOT_LEGEND, SETUP_STEP_HELP, SETUP_STEP_TITLES,
@@ -77,6 +77,11 @@ export interface SetupData extends SheetData, SetupSnapshot {
    * into the middle of a wizard they have never seen.
    */
   helpSeen: boolean;
+  /**
+   * Which half of the site's setup this panel is editing — the device's. The two
+   * are kept fully apart (`shared/siteConfigs.ts`), so home names the one it shows.
+   */
+  formFactor: FormFactor;
 }
 
 export interface SetupCallbacks extends SheetCallbacks {
@@ -224,6 +229,8 @@ export class SetupPanel extends Sheet<SetupData> {
    * in `SetupData`.
    */
   private offerHelp = false;
+  /** Whether home's desktop/mobile `?` is open — instance state, like `offerHelp`. */
+  private formFactorHelp = false;
   /** The legend, once dismissed, stays folded for the rest of this page too. */
   private legendDismissed = false;
 
@@ -609,6 +616,19 @@ export class SetupPanel extends Sheet<SetupData> {
     const passes = passStates(data);
 
     const head = el('div', 'cf-step-head');
+    // Which half this is, on the meta line the wizard's `Step n of 6` uses — the
+    // same piece of furniture, saying where in the setup you are. A site set up on
+    // a laptop reads as untaught on a phone, and without this nothing says why.
+    const meta = el('div', 'cf-step-meta');
+    const ff = el('span', 'cf-step-count');
+    ff.textContent = FORM_FACTOR_TEXT[data.formFactor].setup;
+    meta.append(ff, helpButton(CONCEPT_HELP.formFactor.title, this.formFactorHelp, (next) => {
+      this.formFactorHelp = next;
+      this.repaint();
+    }));
+    head.append(meta);
+    if (this.formFactorHelp) head.append(helpPanel(CONCEPT_HELP.formFactor));
+
     const title = el('h2', 'cf-step-title');
     // Never "Set up this site": the card's own header already says that, and a
     // heading repeating the one directly above it is a heading saying nothing. This

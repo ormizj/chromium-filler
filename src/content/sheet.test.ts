@@ -73,6 +73,7 @@ function setupData(over: Partial<SetupData> = {}): SetupData {
     submit: { key: 'submitSelector', label: 'Send button', status: 'low', note: 'auto · Apply', hasSave: false },
     success: { key: 'successSelector', label: 'Confirmation element', status: 'high', note: 'saved · #done', hasSave: true },
     helpSeen: true,
+    formFactor: 'desktop',
     layout: DEFAULT_MODAL_LAYOUT,
     ...over,
   };

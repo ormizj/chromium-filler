@@ -158,12 +158,18 @@ export async function syncNow(confirmed = false): Promise<SyncState> {
       if (!(await getSettings()).syncEnabled) throw new Error('Sync is turned off.');
 
       if (!confirmed && (await readStatus()).awaitingConfirm) {
-        const [local, remote] = await Promise.all([buildSnapshot(), download()]);
+        const [local, remoteFile, settings] = await Promise.all([
+          buildSnapshot(), download(), getSettings(),
+        ]);
+        const remote = decode(remoteFile.text);
         return {
           ...(await syncState()),
           pending: {
             local: local.jobUrls.length,
-            remote: decode(remote.text).jobUrls.length,
+            remote: remote.jobUrls.length,
+            ...(settings.syncSiteConfigs && {
+              sites: { local: local.siteConfigs.length, remote: remote.siteConfigs.length },
+            }),
           },
         };
       }

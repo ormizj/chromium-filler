@@ -128,7 +128,12 @@ export interface SyncState {
   lastSyncAt?: number;
   lastError?: string;
   /** Postings held here and on the far side — the first-merge confirmation. */
-  pending?: { local: number; remote: number };
+  pending?: {
+    local: number;
+    remote: number;
+    /** Site configs on each side — only while `syncSiteConfigs` is on. */
+    sites?: { local: number; remote: number };
+  };
 }
 
 /** Background's answer to RECORD_GET / RECORD_STOP: the recording, if there is one. */

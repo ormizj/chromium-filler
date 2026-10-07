@@ -35,7 +35,7 @@ function logged(url: string, events: Array<[JobLogStatus, number]>): JobUrlEntry
 }
 
 function snap(jobUrls: JobUrlEntry[], jobDetails: Record<string, JobDetails> = {}): JobSnapshot {
-  return { schema: SYNC_SCHEMA, jobUrls, jobDetails };
+  return { schema: SYNC_SCHEMA, jobUrls, jobDetails, siteConfigs: [], deletedSiteConfigs: {} };
 }
 
 function details(url: string, capturedAt: number, over: Partial<JobDetails> = {}): JobDetails {

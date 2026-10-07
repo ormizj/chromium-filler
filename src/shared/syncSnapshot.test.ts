@@ -9,6 +9,16 @@ describe('parseSnapshot', () => {
     expect(parsed.jobUrls).toEqual([]);
   });
 
+  it('reads a schema-1 file as one carrying no site configs', () => {
+    const parsed = parseSnapshot(JSON.stringify({ schema: 1, jobUrls: [], jobDetails: {} }));
+    expect(parsed).toMatchObject({ schema: SYNC_SCHEMA, siteConfigs: [], deletedSiteConfigs: {} });
+  });
+
+  it('refuses a current-schema file missing its site configs', () => {
+    expect(() => parseSnapshot(JSON.stringify({ schema: SYNC_SCHEMA, jobUrls: [], jobDetails: {} })))
+      .toThrow(UnsupportedSnapshotError);
+  });
+
   it('refuses a newer schema, and says to update this device', () => {
     const future = JSON.stringify({ schema: SYNC_SCHEMA + 1, jobUrls: [], jobDetails: {} });
     expect(() => parseSnapshot(future)).toThrow(UnsupportedSnapshotError);

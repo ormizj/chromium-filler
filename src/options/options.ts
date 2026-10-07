@@ -15,7 +15,8 @@
  */
 
 import type {
-  DocKind, JobUrlEntry, JobUrlStatus, ModalLayout, Profile, RedirectTarget, SiteConfig,
+  DocKind, JobUrlEntry, JobUrlStatus, ModalLayout, Profile, RedirectTarget,
+  StoredSiteConfig,
   TextFieldKey,
 } from '../shared/types';
 import type { SessionState, SyncState } from '../shared/messages';
@@ -30,6 +31,8 @@ import {
 import { FillerModal, type ModalCallbacks, type ModalData } from '../content/modal/modal';
 import { FIELD_ORDER, FIELD_LABELS } from '../shared/fieldKeys';
 import { configTemplate } from '../shared/configTemplate';
+import { FORM_FACTORS, currentFormFactor } from '../shared/formFactor';
+import { isEmptySetup, migrateLegacy, resolveSiteConfig, stampChanges } from '../shared/siteConfigs';
 import { extractUrls } from '../shared/urlImport';
 import {
   ALL_JOB_STATUSES, addUrls, applyStatus, deleteUrl, jobUrlStats, visibleUrls,
@@ -38,7 +41,8 @@ import { hostOf } from '../shared/url';
 import { MSG } from '../shared/messages';
 import {
   getProfile, saveProfile, getSettings, saveSettings,
-  getSiteConfigs, saveSiteConfigs, getJobUrls, mutateJobUrls,
+  getSiteConfigs, getStoredSiteConfigs, saveStoredSiteConfigs, addDeletedSiteConfigs,
+  getJobUrls, mutateJobUrls,
   getJobDetails, saveJobDetails, mutateJobDetails,
 } from '../shared/storage';
 import { pruneDetails } from '../shared/jobDetails';
@@ -46,7 +50,7 @@ import {
   EXPORT_FIELD_ORDER, buildExport, exportFilename, resolveExport, toCsv,
   type ExportFormat, type ExportSelection,
 } from '../shared/jobExport';
-import { EXPORT_FIELD_LABELS, JOB_STATUS_LABELS } from '../shared/labels';
+import { EXPORT_FIELD_LABELS, FORM_FACTOR_TEXT, JOB_STATUS_LABELS } from '../shared/labels';
 import {
   buildSnapshot, mergeIntoLocal, parseSnapshot, snapshotFilename,
 } from '../shared/syncSnapshot';
@@ -903,14 +907,31 @@ function previewData(layout: ModalLayout): ModalData {
 
 /* ---------------- Site configs ---------------- */
 
-function validateConfigs(data: unknown): asserts data is SiteConfig[] {
+/**
+ * The editor holds the *stored* shape — the shell, plus a `desktop` and a
+ * `mobile` half (`shared/siteConfigs.ts`). A flat config pasted from before the
+ * split is still accepted, and becomes this device's half on save.
+ */
+function validateConfigs(data: unknown): asserts data is StoredSiteConfig[] {
   if (!Array.isArray(data)) throw new Error('Top level must be an array of configs.');
+  const ids = new Set<string>();
   data.forEach((c, i) => {
     if (typeof c?.id !== 'string' || !c.id) throw new Error(`Config #${i + 1}: missing "id".`);
+    if (ids.has(c.id)) throw new Error(`Config "${c.id}": the id is used twice.`);
+    ids.add(c.id);
     if (!Array.isArray(c?.urlPatterns) || c.urlPatterns.length === 0) {
       throw new Error(`Config "${c.id}": "urlPatterns" must be a non-empty array.`);
     }
-    if (typeof c?.extract !== 'object') throw new Error(`Config "${c.id}": missing "extract" object.`);
+    for (const ff of FORM_FACTORS) {
+      const half = c[ff];
+      if (half === undefined) continue;
+      if (!half || typeof half !== 'object' || Array.isArray(half)) {
+        throw new Error(`Config "${c.id}": "${ff}" must be an object.`);
+      }
+      if (half.extract !== undefined && typeof half.extract !== 'object') {
+        throw new Error(`Config "${c.id}": "${ff}.extract" must be an object.`);
+      }
+    }
   });
 }
 
@@ -920,9 +941,10 @@ let explainedConfig: string | undefined;
 /**
  * The saved configs as selectable chips. Picking one writes out what it will
  * actually do, in a sentence — until this existed, reading the JSON was the
- * only way to find out, and the JSON explains nothing about itself.
+ * only way to find out, and the JSON explains nothing about itself. Once per
+ * half, because the two are separate setups and either may be missing.
  */
-function renderConfigSummary(configs: SiteConfig[]): void {
+function renderConfigSummary(configs: StoredSiteConfig[]): void {
   const box = $('configs-summary');
   box.replaceChildren(...configs.map((c) => {
     const chip = document.createElement('button');
@@ -941,23 +963,43 @@ function renderConfigSummary(configs: SiteConfig[]): void {
   const explain = $('configs-explain');
   const chosen = configs.find((c) => c.id === explainedConfig);
   explain.hidden = !chosen;
-  if (chosen) explain.replaceChildren(...richText(describeConfig(chosen)));
+  if (!chosen) return;
+  explain.replaceChildren(...FORM_FACTORS.flatMap((ff) => {
+    const head = document.createElement('h5');
+    head.textContent = FORM_FACTOR_TEXT[ff].setup;
+    const p = document.createElement('p');
+    if (isEmptySetup(chosen[ff])) p.textContent = 'Not set up yet — record a posting on this site from a '
+      + `${FORM_FACTOR_TEXT[ff].name.toLowerCase()} browser.`;
+    else p.append(...richText(describeConfig(resolveSiteConfig(chosen, ff))));
+    return [head, p];
+  }));
 }
 
 async function initConfigs(): Promise<void> {
   const ta = $<HTMLTextAreaElement>('configs-json');
-  const configs = await getSiteConfigs();
+  const configs = await getStoredSiteConfigs();
   ta.value = JSON.stringify(configs, null, 2);
   renderConfigSummary(configs);
   renderReference($('configs-reference-body'));
+  attachHelp($('configs-heading'), CONCEPT_HELP.formFactor);
 
   $('save-configs').addEventListener('click', async () => {
     try {
       const parsed = JSON.parse(ta.value);
       validateConfigs(parsed);
-      await saveSiteConfigs(parsed);
-      ta.value = JSON.stringify(parsed, null, 2);
-      renderConfigSummary(parsed);
+      const ff = currentFormFactor();
+      // Stamped on content, so only what really changed outranks the other
+      // device in a sync; a removed config is tombstoned, or the next sync would
+      // bring it straight back.
+      const { configs: next, deleted } = stampChanges(
+        await getStoredSiteConfigs(),
+        parsed.map((c) => migrateLegacy(c, ff)),
+        Date.now(),
+      );
+      await saveStoredSiteConfigs(next);
+      await addDeletedSiteConfigs(deleted);
+      ta.value = JSON.stringify(next, null, 2);
+      renderConfigSummary(next);
       setStatus($('configs-status'), 'Saved', 'ok');
     } catch (e) {
       setStatus($('configs-status'), (e as Error).message, 'err');
@@ -968,9 +1010,9 @@ async function initConfigs(): Promise<void> {
 }
 
 function appendTemplate(ta: HTMLTextAreaElement, url?: string): void {
-  let arr: SiteConfig[] = [];
+  let arr: StoredSiteConfig[] = [];
   try { arr = JSON.parse(ta.value); if (!Array.isArray(arr)) arr = []; } catch { arr = []; }
-  arr.push(configTemplate(url));
+  arr.push(migrateLegacy(configTemplate(url), currentFormFactor()));
   ta.value = JSON.stringify(arr, null, 2);
   revealSection('configs-section', '#configs-json');
 }
@@ -1638,8 +1680,16 @@ async function initSync(): Promise<void> {
   toggle.checked = (await getSettings()).syncEnabled;
   toggle.addEventListener('change', async () => {
     await saveSettings({ ...(await getSettings()), syncEnabled: toggle.checked });
-    setStatus(status, toggle.checked ? 'Sync on' : 'Sync off', 'ok');
+    setStatus(status, `Job database sync ${toggle.checked ? 'on' : 'off'}`, 'ok');
     await renderSync();
+  });
+
+  const sitesToggle = $<HTMLInputElement>('sync-site-configs');
+  attachRowHelp(sitesToggle, SETTINGS_HELP.syncSiteConfigs);
+  sitesToggle.checked = (await getSettings()).syncSiteConfigs;
+  sitesToggle.addEventListener('change', async () => {
+    await saveSettings({ ...(await getSettings()), syncSiteConfigs: sitesToggle.checked });
+    setStatus(status, `Site setup sync ${sitesToggle.checked ? 'on' : 'off'}`, 'ok');
   });
 
   /**
@@ -1779,8 +1829,12 @@ async function initSync(): Promise<void> {
     if (s.pending) {
       // The one check before the first merge: connecting the wrong account would
       // fold a stranger's job list into this one, and only the counts show it.
+      const sites = s.pending.sites
+        ? ` and ${s.pending.sites.remote} site setup(s) with ${s.pending.sites.local}`
+        : '';
       showToast(
-        `Combine ${s.pending.remote} posting(s) from ${s.account} with ${s.pending.local} here?`,
+        `Combine ${s.pending.remote} posting(s) from ${s.account} with ${s.pending.local} here`
+          + `${sites}?`,
         'Combine',
         () => void runSync(true),
       );
