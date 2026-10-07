@@ -7,9 +7,9 @@ Everything the dashboard asks for, in dashboard order. Item ID
 
 ## Package
 
-Upload `chromium-filler-v0.1.2-store.zip`.
+Upload `chromium-filler-v0.1.3-store.zip`.
 
-**Not** `chromium-filler-v0.1.2.zip` — that one nests everything under a
+**Not** `chromium-filler-v0.1.3.zip` — that one nests everything under a
 `chromium-filler/` folder for GitHub / "Load unpacked", and the store does not
 descend into a wrapper. `npm run package` now builds both, and fails loudly if
 the store archive has no `manifest.json` at its root.
