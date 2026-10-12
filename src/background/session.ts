@@ -22,6 +22,7 @@ import { getJobUrls, getSettings, mutateJobUrls } from '../shared/storage';
 import { applyStatus, recordStatus } from '../shared/jobUrls';
 import { nextBatch, queueProgress } from '../shared/queue';
 import { navigableUrl } from '../shared/appLink';
+import { DEFAULT_SETTINGS } from '../shared/defaults';
 
 const LOG = '[chromium-filler:session]';
 
@@ -37,7 +38,7 @@ interface SessionRecord {
   startedAt: number;
 }
 
-const NO_SESSION: SessionRecord = { active: false, batchSize: 5, startedAt: 0 };
+const NO_SESSION: SessionRecord = { active: false, batchSize: DEFAULT_SETTINGS.sessionBatchSize, startedAt: 0 };
 
 async function getRecord(): Promise<SessionRecord> {
   const raw = await chrome.storage.local.get(SESSION_KEY);

@@ -30,14 +30,14 @@ describe('settings', () => {
     // or the session would open zero tabs.
     await chrome.storage.local.set({ settings: { autoRunOnLoad: false } });
     const settings = await getSettings();
-    expect(settings.sessionBatchSize).toBe(5);
+    expect(settings.sessionBatchSize).toBe(2);
     expect(settings.autoRunOnLoad).toBe(false);
   });
 
   it('keeps a stored batch size over the default', async () => {
     const current = await getSettings();
-    await saveSettings({ ...current, sessionBatchSize: 2 });
-    expect((await getSettings()).sessionBatchSize).toBe(2);
+    await saveSettings({ ...current, sessionBatchSize: 4 });
+    expect((await getSettings()).sessionBatchSize).toBe(4);
   });
 });
 

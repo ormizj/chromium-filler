@@ -401,7 +401,7 @@ export const SETTINGS_HELP: Record<keyof Settings, HelpEntry> = {
     title: 'Tabs at once',
     body: 'How many job tabs a queue session keeps open. Finishing one — apply, skip '
       + 'or close — opens the next, so 60 imported links never become 60 tabs.',
-    when: 'Drop it to 1–2 on a phone, where five job pages will not fit in memory.',
+    when: 'Keep it at 1–2 on a phone, where more job pages will not fit in memory.',
   },
   modalLayout: {
     title: 'Panel size & position',

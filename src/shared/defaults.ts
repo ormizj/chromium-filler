@@ -19,7 +19,9 @@ export const DEFAULT_SETTINGS: Settings = {
   // On: filling and recording are both impossible inside a phone app, so this is
   // the only setting under which the extension can finish what it starts.
   keepInBrowser: true,
-  sessionBatchSize: 5,
+  // Two: a phone cannot hold more job pages in memory, and on a laptop two tabs
+  // is still one to work in and one loading behind it.
+  sessionBatchSize: 2,
   modalLayout: DEFAULT_MODAL_LAYOUT,
   modalFullscreen: false,
   helpSeen: false,
