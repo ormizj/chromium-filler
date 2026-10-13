@@ -23,7 +23,6 @@
           <button class="tab" role="tab" id="tab-queue" aria-controls="panel-queue" aria-selected="true">Queue</button>
           <button class="tab" role="tab" id="tab-profile" aria-controls="panel-profile" aria-selected="false">Profile</button>
           <button class="tab" role="tab" id="tab-settings" aria-controls="panel-settings" aria-selected="false">Settings</button>
-          <button class="tab" role="tab" id="tab-sites" aria-controls="panel-sites" aria-selected="false">Sites</button>
           <button class="tab" role="tab" id="tab-sync" aria-controls="panel-sync" aria-selected="false">Sync</button>
           <button class="tab" role="tab" id="tab-help" aria-controls="panel-help" aria-selected="false">Help</button>
         </div>
@@ -139,14 +138,35 @@
       <!-- ---------------- Profile ---------------- -->
       <div id="panel-profile" role="tabpanel" aria-labelledby="tab-profile" hidden>
         <section id="profile-section">
-          <h2>Your profile</h2>
-          <p class="hint">Values used to auto-fill forms. Leave blank to skip a field.</p>
+          <h2>Your details</h2>
+          <p class="hint">What the extension fills in for you. Leave a field blank to skip it.</p>
           <div id="profile-fields" class="grid"></div>
           <div id="profile-savebar" class="savebar" hidden>
             <span class="label">Unsaved changes</span>
             <button id="save-profile" class="primary">Save profile</button>
           </div>
           <p id="profile-status" class="status" role="status" aria-live="polite"></p>
+          <!-- Behind a disclosure: the built-ins already know the common wordings,
+               and sixteen chip editors in the open would bury the form above. -->
+          <details id="wordings" class="reference">
+            <summary><span>Other ways sites ask for these</span></summary>
+            <p class="hint">Add a wording a site uses for one of your details, and that question is filled with it from then on.</p>
+            <div id="wordings-body" class="wordings"></div>
+            <p id="wordings-status" class="status" role="status" aria-live="polite"></p>
+          </details>
+        </section>
+
+        <!-- The questions the built-in fields do not cover. Each is a card: its
+             name, its answer, and the ways sites word the question. -->
+        <section id="custom-section">
+          <h2 id="custom-heading">Your own fields</h2>
+          <p class="hint">For the questions you get asked a lot — years of experience, notice period, sponsorship. These save as you change them.</p>
+          <div id="custom-fields" class="custom-list"></div>
+          <p id="custom-empty" class="hint empty-note">No fields of your own yet. Add one here, or press Teach → New field on a question the review card did not recognise.</p>
+          <div class="row">
+            <button id="custom-add" class="btn">+ Add a field</button>
+            <span id="custom-status" class="status" role="status" aria-live="polite"></span>
+          </div>
         </section>
 
         <section id="cv-section">
@@ -193,6 +213,16 @@
             <p id="cover-current" class="doc-current" role="status" aria-live="polite"></p>
           </div>
         </section>
+
+        <!-- Everything the user taught the extension on a page, under the field it
+             answers. Last on the tab: it is a record to check and correct, not a
+             form to fill in. -->
+        <section id="learned-section">
+          <h2 id="learned-heading">What it has learned</h2>
+          <p class="hint">Every question you have taught, by the field it fills. Forget a lesson and that question is asked again.</p>
+          <div id="learned-list" class="learned"></div>
+          <p id="learned-empty" class="hint empty-note">Nothing taught yet. When the review card lists a question it did not recognise, press Teach on it.</p>
+        </section>
       </div>
 
       <!-- ---------------- Settings ---------------- -->
@@ -206,16 +236,8 @@
                something slightly different from the `?` beside them. -->
           <div class="settings-list">
             <div class="setrow">
-              <div class="setrow-text"><h5>Auto-run when a matching page loads</h5></div>
-              <label class="switch"><input type="checkbox" id="auto-run" class="switch-input" /><span class="switch-track" aria-hidden="true"><i></i></span></label>
-            </div>
-            <div class="setrow">
-              <div class="setrow-text"><h5>Auto-close the tab after I apply</h5></div>
-              <label class="switch"><input type="checkbox" id="close-on-submit" class="switch-input" /><span class="switch-track" aria-hidden="true"><i></i></span></label>
-            </div>
-            <div class="setrow">
-              <div class="setrow-text"><h5>Finish setup when you apply</h5></div>
-              <label class="switch"><input type="checkbox" id="finish-setup" class="switch-input" /><span class="switch-track" aria-hidden="true"><i></i></span></label>
+              <div class="setrow-text"><h5>Fill automatically</h5></div>
+              <label class="switch"><input type="checkbox" id="fill-auto" class="switch-input" /><span class="switch-track" aria-hidden="true"><i></i></span></label>
             </div>
             <div class="setrow">
               <div class="setrow-text"><h5>Auto-close the tab after I skip</h5></div>
@@ -235,46 +257,29 @@
           </div>
           <p id="settings-status" class="status" role="status" aria-live="polite"></p>
 
-          <h3 id="twostep-heading">Two-step applications</h3>
-          <!-- Filled from CONCEPT_HELP.twoStep by options.ts. -->
-          <p id="twostep-hint" class="hint"></p>
-          <!-- The same size of card as Behavior's, sitting beside its neighbour
-               in the same grid column — it was `stacked span`, which forced its
-               own full-width row and left a hole beside the switch card. Two
-               sections of settings whose rows are different shapes and sizes read
-               as two different kinds of thing.
-               Still `stacked`: this is the one control here too wide to sit beside
-               its own label in half a settings grid, and squeezed in beside it the
-               title wrapped to three lines and pushed its `?` onto a fourth. -->
+          <h3 id="queue-settings-heading">Queue tabs</h3>
           <div class="settings-list">
             <div class="setrow">
-              <div class="setrow-text"><h5>Keep links in the browser</h5></div>
-              <label class="switch"><input type="checkbox" id="keep-in-browser" class="switch-input" /><span class="switch-track" aria-hidden="true"><i></i></span></label>
+              <div class="setrow-text"><h5>Closing a queue tab finishes it</h5></div>
+              <label class="switch"><input type="checkbox" id="mark-done-on-close" class="switch-input" /><span class="switch-track" aria-hidden="true"><i></i></span></label>
             </div>
-            <div class="setrow stacked">
-              <label class="setrow-text" for="redirect-target">
-                <span class="setrow-title" id="redirect-target-label">When following an external application</span>
-              </label>
-              <!-- Labels, not sentences: the full wording of each is behind the
-                   row's `?`, and a select is read at a glance. -->
-              <select id="redirect-target">
-                <option value="newTabCloseSource">New tab, close posting</option>
-                <option value="newTab">New tab, keep posting</option>
-                <option value="sameTab">Same tab</option>
-              </select>
+            <div class="setrow">
+              <div class="setrow-text"><h5>Open the review on queue tabs</h5></div>
+              <label class="switch"><input type="checkbox" id="open-card-queue" class="switch-input" /><span class="switch-track" aria-hidden="true"><i></i></span></label>
+            </div>
+            <div class="setrow">
+              <div class="setrow-text"><h5>Keep queued links in the browser</h5></div>
+              <label class="switch"><input type="checkbox" id="keep-in-browser" class="switch-input" /><span class="switch-track" aria-hidden="true"><i></i></span></label>
             </div>
           </div>
 
-          <!-- "Panels", not "the review modal": one stored rectangle places both
-               on-page sheets, and naming only one of them is why the setup panel
-               reads as unconfigurable. Same for the row and the labels below. -->
-          <h3 id="panels-heading">On-page panels — size &amp; position</h3>
+          <h3 id="panels-heading">Review card — size &amp; position</h3>
           <!-- Above the simulator, because it overrides it: reading the drag
                instructions first and only then learning the card is fullscreen
                anyway is the wrong order. Caption comes from SETTINGS_HELP. -->
           <div class="settings-list">
             <div class="setrow">
-              <div class="setrow-text"><h5>Fullscreen panels</h5></div>
+              <div class="setrow-text"><h5>Fullscreen card</h5></div>
               <label class="switch"><input type="checkbox" id="modal-fullscreen" class="switch-input" /><span class="switch-track" aria-hidden="true"><i></i></span></label>
             </div>
           </div>
@@ -291,7 +296,7 @@
             browser's own tab strip, address bar and bookmarks bar take, measured when
             this page loaded — so what you set here is what a panel gets on a real
             posting. Resizing this window does not change it. This applies on desktop
-            only: at 640px wide and under, a panel is always a full-width bottom sheet,
+            only: at 640px wide and under, the card is always a full-width bottom sheet,
             so on a phone the frame stands in for a desktop screen rather than for this
             one.
           </p>
@@ -344,37 +349,6 @@
         </section>
       </div>
 
-      <!-- ---------------- Sites ---------------- -->
-      <div id="panel-sites" role="tabpanel" aria-labelledby="tab-sites" hidden>
-        <section id="configs-section">
-          <h2 id="configs-heading">Site configurations</h2>
-          <p class="hint">
-            Per-site rules as JSON (array of configs). Each config names the site once
-            and keeps a separate <code>desktop</code> and <code>mobile</code> setup:
-            detection, page actions, extract selectors, field overrides, CV upload
-            selector, the CV-confirmation steps, and the two keys Apply depends on — the
-            Send button and the confirmation element. Most sites are easier to set up
-            visually — open a posting and use “Set up this site”.
-          </p>
-          <!-- Every key, explained. Without this the JSON below is the only
-               documentation there is, and it documents nothing. -->
-          <details id="configs-reference" class="reference">
-            <summary>What every setting means</summary>
-            <div id="configs-reference-body" class="reference-body"></div>
-          </details>
-
-          <p class="hint" style="margin: 0 0 8px;">Pick a site to see what it will do:</p>
-          <div id="configs-summary" class="filters" role="group" aria-label="Saved site configurations"></div>
-          <div id="configs-explain" class="cf-help" hidden></div>
-
-          <textarea id="configs-json" spellcheck="false" rows="18"></textarea>
-          <div class="row">
-            <button id="save-configs" class="primary">Save configs</button>
-            <button id="add-template">Add template</button>
-            <span id="configs-status" class="status" role="status" aria-live="polite"></span>
-          </div>
-        </section>
-      </div>
       <!-- ---------------- Sync ---------------- -->
       <!-- Its own tab rather than a section under Settings: it is a once-per-device
            setup with its own connected state, and below the layout simulator it sat
@@ -392,10 +366,6 @@
             <div class="setrow">
               <div class="setrow-text"><h5>Sync the job database</h5></div>
               <label class="switch"><input type="checkbox" id="sync-enabled" class="switch-input" /><span class="switch-track" aria-hidden="true"><i></i></span></label>
-            </div>
-            <div class="setrow">
-              <div class="setrow-text"><h5>Sync site setups too</h5></div>
-              <label class="switch"><input type="checkbox" id="sync-site-configs" class="switch-input" /><span class="switch-track" aria-hidden="true"><i></i></span></label>
             </div>
           </div>
           <!-- Which account this browser is pointed at is the thing that actually
@@ -476,8 +446,8 @@
           <h2>How this works</h2>
           <p class="hint">
             Everything here is also available where you need it — the
-            <code>?</code> buttons in this page and in the on-page “Set up this
-            site” panel show the same explanations in place.
+            <code>?</code> buttons on this page and on the review card show the
+            same explanations in place.
           </p>
 
           <h3>The flow</h3>
@@ -486,8 +456,6 @@
           <h3>Terms you will see</h3>
           <div id="help-concepts" class="helplist"></div>
 
-          <h3>Site config reference</h3>
-          <div id="help-reference" class="reference-body"></div>
 
           <h3>When something goes wrong</h3>
           <div id="help-trouble" class="helplist"></div>

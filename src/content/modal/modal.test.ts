@@ -1,64 +1,81 @@
 /**
- * Render-logic tests for the review modal. The modal is the extension's entire
+ * Render-logic tests for the review card. The card is the extension's entire
  * promise — "filling is automatic but never silent" — so what a row *claims*
- * about a field has to match what actually happened to it.
- *
- * The report now sits behind the Fields tab, which puts that promise under
- * pressure: hiding the report must not hide a problem. Hence the tab-dot tests.
+ * about an input has to match what actually happened to it, and every question
+ * the extension did not recognise has to be there with a way to teach it.
  */
 import { describe, it, expect, afterEach, vi } from 'vitest';
 import { FillerModal, type ModalCallbacks, type ModalData } from './modal';
 import type { FieldMatch } from '../../shared/types';
 import type { ModalLayout } from '../../shared/modalLayout';
 import { ACTION_LABELS } from '../../shared/labels';
+import type { FieldChoice } from '../../shared/profileFields';
 
 const noop = () => {};
 
 function callbacks(over: Partial<ModalCallbacks> = {}): ModalCallbacks {
   return {
-    onRerun: noop, onApply: noop, onConfirm: noop, onPick: noop,
-    onFollow: noop, onFillAnyway: noop, onSkip: noop, onClose: noop,
-    onSendMyself: noop,
-    onOpenSetup: noop, onOpenOptions: noop,
+    onRerun: noop, onConfirm: noop, onTeach: noop, onPoint: noop,
+    onSkip: noop, onClose: noop, onOpenOptions: noop,
     ...over,
   };
 }
 
+let nextId = 1;
 const match = (over: Partial<FieldMatch> = {}): FieldMatch => ({
+  id: `r${nextId++}`,
+  question: 'Email',
+  kind: 'email',
   field: 'email',
+  fieldLabel: 'Email',
   source: 'heuristic',
   confidence: 'high',
+  valueToFill: 'ada@example.test',
   filled: true,
   required: false,
   ...over,
 });
 
+const unknown = (question: string, over: Partial<FieldMatch> = {}): FieldMatch => match({
+  question, kind: 'text', field: undefined, fieldLabel: undefined, valueToFill: undefined,
+  source: 'none', confidence: 'none', filled: false, ...over,
+});
+
+const CHOICES: FieldChoice[] = [
+  { id: 'email', label: 'Email', group: 'builtIn' },
+  { id: 'firstName', label: 'First name', group: 'builtIn' },
+  { id: 'c_exp', label: 'Years of experience', group: 'custom' },
+];
+
 const data = (matches: FieldMatch[], over: Partial<ModalData> = {}): ModalData => ({
-  siteName: 'Test site',
+  siteName: 'jobs.example',
   matches,
-  applyState: 'ready',
+  choices: CHOICES,
   ...over,
 });
+
+const QUEUE = {
+  active: true, batchSize: 2,
+  progress: { total: 12, queued: 7, inFlight: 2, applied: 1, skipped: 1, markedDone: 1, done: 3, ratio: 0.25 },
+};
 
 let modal: FillerModal | undefined;
 
 const ORIG_VW = window.innerWidth;
 const ORIG_VH = window.innerHeight;
 
-/** Resize the (jsdom) viewport and fire the resize the modal listens for. */
 function setViewport(w: number, h: number): void {
   Object.defineProperty(window, 'innerWidth', { value: w, configurable: true });
   Object.defineProperty(window, 'innerHeight', { value: h, configurable: true });
   window.dispatchEvent(new Event('resize'));
 }
 
-/** One footer button by its visible label. */
 function footerBtn(shadow: ShadowRoot, label: string): HTMLButtonElement {
   return [...shadow.querySelectorAll('.cf-footer button.cf-btn')]
     .find((b) => b.textContent?.trim() === label) as HTMLButtonElement;
 }
 
-/** Render, then switch to the report — most of these tests are about the rows. */
+/** Render on the report — most of these tests are about the rows. */
 function render(d: ModalData, cb = callbacks()): ShadowRoot {
   modal = new FillerModal(cb);
   modal.render(d);
@@ -70,23 +87,27 @@ function shadow(): ShadowRoot {
   return (document.getElementById('chromium-filler-modal-host') as HTMLElement).shadowRoot!;
 }
 
-/** The Job/Fields tab buttons, by their label. */
 function tab(root: ShadowRoot, label: 'Job' | 'Fields'): HTMLButtonElement {
   return Array.from(root.querySelectorAll<HTMLButtonElement>('.cf-view'))
     .find((b) => b.textContent?.includes(label))!;
 }
 
-/** The rows, in render order, as `[field, dot class, aria-label, button labels]`. */
 function rows(shadow: ShadowRoot) {
   return Array.from(shadow.querySelectorAll('.cf-row')).map((row) => {
     const dot = row.querySelector('.cf-dot')!;
     return {
-      field: row.querySelector('.cf-field b')!.textContent,
+      question: row.querySelector('.cf-field b')!.textContent,
+      detail: row.querySelector('.cf-field small')!.textContent,
       dot: dot.className,
-      label: dot.getAttribute('aria-label'),
+      tag: row.querySelector('.cf-tag')!.textContent,
       buttons: Array.from(row.querySelectorAll('button')).map((b) => b.textContent),
     };
   });
+}
+
+function rowButton(root: ShadowRoot, index: number, label: string): HTMLButtonElement {
+  return [...root.querySelectorAll('.cf-row')[index].querySelectorAll('button')]
+    .find((b) => b.textContent === label) as HTMLButtonElement;
 }
 
 afterEach(() => {
@@ -96,899 +117,351 @@ afterEach(() => {
   setViewport(ORIG_VW, ORIG_VH);
 });
 
-describe('FillerModal — the report tells the truth about each field', () => {
-  it('shows a filled field as filled', () => {
-    const shadow = render(data([match({ field: 'email', filled: true })]));
-    expect(rows(shadow)[0].dot).toContain('high');
-    expect(rows(shadow)[0].label).toBe('filled');
+describe('FillerModal — each row tells the truth about its input', () => {
+  it('names the question, and what went in', () => {
+    const r = rows(render(data([match({ question: 'Your email *' })])))[0];
+    expect(r.question).toBe('Your email *');
+    // The question already says "email", so the detail is just the answer.
+    expect(r.detail).toBe('ada@example.test');
+    expect(r.dot).toContain('high');
+    expect(r.tag).toBe('filled');
   });
 
-  it('does not claim "filled" for a high-confidence field that did not fill', () => {
-    // Every failure path in Controller.applyFill lands here: a <select> with no
-    // matching option, or a saved override (always high confidence) pointing at
-    // a wrapper div rather than a control.
-    const shadow = render(data([match({ field: 'country', confidence: 'high', filled: false })]));
-    const row = rows(shadow)[0];
-    expect(row.label).not.toBe('filled');
-    expect(row.dot).not.toContain('high');
+  it('does not claim "filled" for a confident match that did not take', () => {
+    const r = rows(render(data([match({ filled: false })])))[0];
+    expect(r.dot).toContain('low');
+    expect(r.detail).toMatch(/would not take/i);
   });
 
-  it('offers Confirm on a high-confidence field that did not fill', () => {
-    const shadow = render(data([match({ field: 'country', confidence: 'high', filled: false })]));
-    expect(rows(shadow)[0].buttons).toContain('Confirm');
+  it('a kept answer is done, and says so', () => {
+    const r = rows(render(data([match({ filled: false, kept: true })])))[0];
+    expect(r.dot).toContain('high');
+    expect(r.detail).toMatch(/kept the answer already there/i);
   });
 
-  it('agrees with its own summary line', () => {
-    const shadow = render(data([
-      match({ field: 'email', filled: true }),
-      match({ field: 'country', confidence: 'high', filled: false }),
-      match({ field: 'city', confidence: 'none', filled: false }),
-    ]));
-    const summary = shadow.querySelector('.cf-summary')!.textContent!;
-    expect(summary).toContain('1 filled');
-    const green = rows(shadow).filter((r) => r.label === 'filled');
-    expect(green).toHaveLength(1);
+  it('names the field when the question words it differently', () => {
+    const r = rows(render(data([match({ question: 'Where are you based?', field: 'city', fieldLabel: 'City', valueToFill: 'London' })])))[0];
+    expect(r.detail).toBe('City · London');
   });
 
-  it('keeps low-confidence and unmatched rows as they were', () => {
-    const shadow = render(data([
-      match({ field: 'phone', confidence: 'low', filled: false }),
-      match({ field: 'city', confidence: 'none', filled: false }),
-    ]));
-    // The fill decided this order (`orderReport`, in `detectAndFill`); the card
-    // renders what it was handed.
-    const [low, none] = rows(shadow);
-    expect(low.label).toBe('needs review');
-    expect(low.buttons).toContain('Confirm');
-    expect(none.label).toBe('not found');
-    expect(none.buttons).not.toContain('Confirm');
+  it('a recognised question with nothing in the profile says where the gap is', () => {
+    const r = rows(render(data([match({ field: 'phone', fieldLabel: 'Phone', valueToFill: undefined, filled: false })])))[0];
+    expect(r.detail).toBe('Phone · nothing in your profile for this');
   });
 
-  it('treats a low-confidence field the user confirmed as filled', () => {
-    const shadow = render(data([match({ field: 'phone', confidence: 'low', filled: true })]));
-    expect(rows(shadow)[0].label).toBe('filled');
-    expect(rows(shadow)[0].buttons).not.toContain('Confirm');
+  it('an unrecognised question is a row to teach — plain, not a failure', () => {
+    const r = rows(render(data([unknown('How did you hear about us?', { required: true })])))[0];
+    expect(r.dot).toContain('none');
+    expect(r.tag).toBe('to teach');
+    expect(r.detail).toBe('Not recognised · required');
+    expect(r.buttons).toEqual([ACTION_LABELS.teach]);
+    const tag = shadow().querySelector('.cf-tag')!;
+    expect(tag.className).not.toMatch(/\berr\b/);
   });
 
-  it('Confirm and Pick call back with the field', () => {
-    const onConfirm = vi.fn();
-    const onPick = vi.fn();
-    const shadow = render(
-      data([match({ field: 'country', confidence: 'high', filled: false })]),
-      callbacks({ onConfirm, onPick }),
-    );
-    const buttons = Array.from(shadow.querySelectorAll('.cf-row button')) as HTMLButtonElement[];
-    buttons.find((b) => b.textContent === 'Confirm')!.click();
-    buttons.find((b) => b.textContent === 'Pick')!.click();
-    expect(onConfirm).toHaveBeenCalledWith('country');
-    expect(onPick).toHaveBeenCalledWith('country');
+  it('a question the page did not word still gets a name', () => {
+    expect(rows(render(data([unknown('', { kind: 'select' })])))[0].question).toBe('Unlabelled drop-down');
   });
 
-  /**
-   * The design system has exactly one primary fill, and in this card it is Apply.
-   * Confirm shipped as a primary once: a report of sixteen rows then drew sixteen
-   * coral buttons around the one control that actually sends something, which is
-   * the opposite of what the fill is for. Asserted on the whole card, so a future
-   * row action cannot quietly claim it either.
-   */
-  it('spends the primary fill on the footer, not on a row', () => {
-    const shadow = render(data([
-      match({ field: 'email', filled: true }),
-      match({ field: 'country', confidence: 'high', filled: false }),
-      match({ field: 'phone', confidence: 'low', filled: false }),
-    ]));
-    expect(shadow.querySelectorAll('.cf-row button.primary')).toHaveLength(0);
-    expect(shadow.querySelectorAll('button.cf-btn.primary')).toHaveLength(1);
-    expect(footerBtn(shadow, 'Apply').classList.contains('primary')).toBe(true);
-  });
-});
-
-describe('FillerModal — the minimized pill', () => {
-  it('does not read as all-green when nothing filled', () => {
-    const shadow = render(data([
-      match({ field: 'email', confidence: 'high', filled: false }),
-      match({ field: 'city', confidence: 'none', filled: false }),
-    ]));
-    modal!.minimize();
-    const pill = shadow.querySelector('.cf-pill')!;
-    expect(pill.textContent).toContain('0/2 filled');
-    expect(pill.querySelector('.cf-dot')!.className).not.toContain('high');
-  });
-
-  it('is green once every field is filled', () => {
-    const shadow = render(data([match({ field: 'email', filled: true })]));
-    modal!.minimize();
-    expect(shadow.querySelector('.cf-pill .cf-dot')!.className).toContain('high');
-  });
-
-  it('minimizing keeps the report, so restoring shows it again', () => {
-    const shadow = render(data([match({ field: 'email', filled: true })]));
-    modal!.minimize();
-    expect(shadow.querySelector('.cf-card')).toBeNull();
-    modal!.restore();
-    expect(rows(shadow)).toHaveLength(1);
-  });
-});
-
-describe('FillerModal — the posting comes first', () => {
-  const posting = (over: Partial<ModalData> = {}) =>
-    data([match({ field: 'email', filled: true })], {
-      jobTitle: 'Staff Platform Engineer',
-      jobDescription: [
-        { kind: 'para', text: 'Acme is hiring.' },
-        { kind: 'heading', text: 'What you will do' },
-        { kind: 'list', items: ['Own the pipeline', 'Mentor'] },
-      ],
-      ...over,
-    });
-
-  it('opens on the job, not on the field report', () => {
-    modal = new FillerModal(callbacks());
-    modal.render(posting());
-    const root = shadow();
-    expect(root.querySelector('.cf-title')!.textContent).toBe('Staff Platform Engineer');
-    expect(root.querySelectorAll('.cf-row')).toHaveLength(0);
-  });
-
-  // The tile's number is coloured by status, and colour alone is not a status
-  // anywhere else in the card — the rows and the report's key both carry a dot.
-  it('gives each summary tile the dot its number is coloured by', () => {
-    modal = new FillerModal(callbacks());
-    modal.render(posting());
-    const tiles = Array.from(shadow().querySelectorAll('.cf-stat'));
-    expect(tiles).toHaveLength(3);
-    for (const tile of tiles) {
-      expect(tile.querySelector('.cf-stat-k .cf-dot')).not.toBeNull();
-    }
-  });
-
-  it('renders the description as prose, not as one welded string', () => {
-    modal = new FillerModal(callbacks());
-    modal.render(posting());
-    const prose = shadow().querySelector('.cf-prose')!;
-    expect(prose.querySelectorAll('p')).toHaveLength(1);
-    expect(prose.querySelector('h4')!.textContent).toBe('What you will do');
-    expect(Array.from(prose.querySelectorAll('li'), (li) => li.textContent))
-      .toEqual(['Own the pipeline', 'Mentor']);
-  });
-
-  it('keeps requirements as their own section', () => {
-    modal = new FillerModal(callbacks());
-    modal.render(posting({ jobRequirements: [{ kind: 'list', items: ['8+ years'] }] }));
-    const root = shadow();
-    expect(root.querySelector('.cf-section')!.textContent).toBe('Requirements');
-    expect(root.querySelectorAll('.cf-prose')).toHaveLength(2);
-  });
-
-  it('says so when the page had no description, rather than showing a blank body', () => {
-    modal = new FillerModal(callbacks());
-    modal.render(posting({ jobDescription: [], jobRequirements: [] }));
-    expect(shadow().querySelector('.cf-empty')).not.toBeNull();
-  });
-
-  it('shows the report once Fields is tapped, and goes back on Job', () => {
-    modal = new FillerModal(callbacks());
-    modal.render(posting());
-    const root = shadow();
-    tab(root, 'Fields').click();
-    expect(root.querySelectorAll('.cf-row')).toHaveLength(1);
-    tab(root, 'Job').click();
-    expect(root.querySelectorAll('.cf-row')).toHaveLength(0);
-    expect(root.querySelector('.cf-title')).not.toBeNull();
-  });
-
-  it('stays on Fields across a re-render, so confirming a field does not eject you', () => {
-    modal = new FillerModal(callbacks());
-    const d = posting();
-    modal.render(d);
-    tab(shadow(), 'Fields').click();
-    modal.render(d); // what Controller.confirmField does
-    expect(shadow().querySelectorAll('.cf-row')).toHaveLength(1);
-  });
-});
-
-/**
- * Three colours and a row of buttons explain nothing on their own, and the one
- * fact a user most needs at that moment — that nothing has gone anywhere yet,
- * whatever the report says — appeared nowhere they would actually read it.
- */
-/**
- * The report is the record of one fill, and it holds still. `orderReport` decides
- * the reading order — unmatched, then to check, then filled — but it runs once, in
- * `Controller.detectAndFill`, and the modal renders what it was handed. Sorting
- * per render meant a row you confirmed dropped out from under your finger and
- * moved every row below it; the ordering rule itself is covered in
- * `fieldStatus.test.ts`, and what belongs here is that this surface adds nothing.
- */
-describe('FillerModal — the report holds the order the fill gave it', () => {
-  it('renders the matches in the order it was handed', () => {
-    const shadow = render(data([
-      match({ field: 'city', confidence: 'none', filled: false }),
-      match({ field: 'phone', confidence: 'low', filled: false }),
-      match({ field: 'email', filled: true }),
-    ]));
-    expect(rows(shadow).map((r) => r.label)).toEqual(['not found', 'needs review', 'filled']);
-  });
-
-  // The one that proves there is no sort left in the card: this order is wrong by
-  // every rule the extension has, and it still comes out untouched.
-  it('does not re-sort an order that disagrees with the statuses', () => {
-    const shadow = render(data([
-      match({ field: 'email', filled: true }),
-      match({ field: 'resume', confidence: 'none', filled: false }),
-      match({ field: 'phone', confidence: 'low', filled: false }),
-    ]));
-    expect(rows(shadow).map((r) => r.field)).toEqual(['Email', 'Résumé / CV', 'Phone']);
-  });
-
-  // What `Controller.confirmField` no longer does. Even if a row's `filled` were
-  // rewritten under the card, nothing about the report may move — this is the
-  // regression the whole change exists to prevent.
-  it('leaves the rows where they are when a row changes status', () => {
-    const d = data([
-      match({ field: 'phone', confidence: 'low', filled: false }),
-      match({ field: 'email', filled: true }),
+  it('offers Confirm on a guess with something to fill, and Not this on every match', () => {
+    const shadow = render(data([match({ confidence: 'low', filled: false }), match()]));
+    expect(rows(shadow).map((r) => r.buttons)).toEqual([
+      [ACTION_LABELS.confirm, ACTION_LABELS.notThis],
+      [ACTION_LABELS.notThis],
     ]);
-    const shadow = render(d);
-    expect(rows(shadow).map((r) => r.field)).toEqual(['Phone', 'Email']);
+  });
 
-    d.matches[0].filled = true;
-    modal!.render(d);
-    expect(rows(shadow).map((r) => r.field)).toEqual(['Phone', 'Email']);
+  it('a confirmed row retires its button without touching its dot', () => {
+    const m = match({ confidence: 'low', filled: false });
+    const r = rows(render(data([m], { confirmed: [m.id] })))[0];
+    expect(r.buttons).toContain(ACTION_LABELS.confirmed);
+    expect(r.dot).toContain('low');
+  });
+
+  it('a taught row retires to "Taught ✓"', () => {
+    expect(rows(render(data([match({ taught: true, source: 'lesson' })])))[0].buttons).toEqual([ACTION_LABELS.taught]);
+  });
+
+  it('an ignored row stays in place, needs nothing, and can be undone', () => {
+    const r = rows(render(data([unknown('Middle name', { ignored: true })])))[0];
+    expect(r.tag).toBe(ACTION_LABELS.ignored);
+    expect(r.buttons).toEqual([ACTION_LABELS.notThis]);
+  });
+
+  it('never spends a primary fill — the one thing left is the site\'s own button', () => {
+    const shadow = render(data([match(), unknown('Q')]));
+    expect(shadow.querySelectorAll('.primary')).toHaveLength(0);
   });
 });
 
-/**
- * Confirm fills the control on the page, and the report — being the record of the
- * *fill* — deliberately does not re-colour for it. That would leave the one
- * control on the row with no visible effect in the surface it was pressed in, so
- * the button retires in place instead: same convention as the footer's
- * `Applied ✓`, and nothing else on the row moves.
- */
-describe('FillerModal — a confirmed row says so without changing status', () => {
-  const confirmable = () => data([
-    match({ field: 'phone', confidence: 'low', filled: false }),
-    match({ field: 'email', filled: true }),
-  ]);
-
-  /** Everything about the report except the row's own buttons. */
-  const overview = (root: ShadowRoot) => ({
-    rows: rows(root).map(({ field, dot, label }) => ({ field, dot, label })),
-    summary: root.querySelector('.cf-summary')!.textContent,
-    tab: tab(root, 'Fields').querySelector('.cf-dot')?.className,
+describe('FillerModal — the report holds still', () => {
+  it('renders rows in the order it was handed', () => {
+    const shadow = render(data([match({ question: 'B' }), unknown('A'), match({ question: 'C', confidence: 'low', filled: false })]));
+    expect(rows(shadow).map((r) => r.question)).toEqual(['B', 'A', 'C']);
   });
 
-  it('retires that row’s Confirm without touching its dot, tag or the counts', () => {
-    const before = overview(render(confirmable()));
-    modal!.render({ ...confirmable(), confirmed: ['phone'] });
-    const after = shadow();
-
-    expect(overview(after)).toEqual(before);
-    expect(rows(after)[0].buttons).toContain('Confirmed ✓');
-    expect(rows(after)[0].buttons).not.toContain('Confirm');
-  });
-
-  // `aria-disabled`, never the `disabled` property — the card's one convention for
-  // a control out of service, so it still reads as a button rather than a gap.
-  it('marks it aria-disabled and gives it nothing to call', () => {
-    const onConfirm = vi.fn();
-    const shadow = render(
-      { ...confirmable(), confirmed: ['phone'] },
-      callbacks({ onConfirm }),
-    );
-    const done = [...shadow.querySelectorAll('.cf-row button')]
-      .find((b) => b.textContent === 'Confirmed ✓') as HTMLButtonElement;
-    expect(done.getAttribute('aria-disabled')).toBe('true');
-    expect(done.hasAttribute('disabled')).toBe(false);
-    done.click();
-    expect(onConfirm).not.toHaveBeenCalled();
-  });
-
-  // Pick is how a row is re-aimed at a different control, and confirming the value
-  // that went in says nothing about whether it went to the right place.
-  it('leaves Pick alone', () => {
-    const shadow = render({ ...confirmable(), confirmed: ['phone'] });
-    expect(rows(shadow)[0].buttons).toContain('Pick');
+  it('puts the inputs that appeared later under their own head, at the end', () => {
+    const shadow = render(data([match({ question: 'Email' }), unknown('Visa?', { later: true }), match({ question: 'City', later: true })]));
+    const report = shadow.querySelector('.cf-report')!;
+    expect([...report.children].map((c) => c.className.split(' ')[0])).toEqual(['cf-row', 'cf-later', 'cf-row', 'cf-row']);
   });
 });
 
-describe('FillerModal — the report says what it means', () => {
-  it('keys the three dot colours in the count line above the rows', () => {
-    const key = render(data([match()])).querySelector('.cf-summary')!;
-    expect(key.textContent).toContain('filled');
-    expect(key.textContent).toContain('to check');
-    expect(key.textContent).toContain('unmatched');
-    // A colour alone is not a key; each count gets the dot it is counting.
-    expect(key.querySelectorAll('.cf-dot').length).toBe(3);
+describe('FillerModal — teaching a row', () => {
+  it('opens a chooser inside the list, under the row', () => {
+    const shadow = render(data([unknown('Given name'), match()]));
+    rowButton(shadow, 0, ACTION_LABELS.teach).click();
+    const report = shadow.querySelector('.cf-report')!;
+    expect(report.children[1].className).toBe('cf-teach');
+    const select = shadow.querySelector('.cf-teach select') as HTMLSelectElement;
+    expect([...select.querySelectorAll('optgroup')].map((g) => g.label)).toEqual(['Your details', 'Your own fields', 'Something else']);
   });
 
-  // The key was under the rows, i.e. read after the colours it explains — and on
-  // a sixteen-field report, a scroll past everything it was meant to help with.
-  it('puts the key ahead of the rows it explains', () => {
-    const body = render(data([match()])).querySelector('.cf-body')!;
-    const kids = [...body.children];
-    expect(kids.findIndex((k) => k.classList.contains('cf-summary')))
-      .toBeLessThan(kids.findIndex((k) => k.classList.contains('cf-report')));
+  it('teaches a row as a field', () => {
+    const onTeach = vi.fn();
+    const m = unknown('Given name');
+    const shadow = render(data([m]), callbacks({ onTeach }));
+    modal!.openTeach(m.id);
+    const select = shadow.querySelector('.cf-teach select') as HTMLSelectElement;
+    select.value = 'firstName';
+    select.dispatchEvent(new Event('change'));
+    const save = [...shadow.querySelectorAll('.cf-teach button')].find((b) => b.textContent === ACTION_LABELS.save) as HTMLButtonElement;
+    save.click();
+    expect(onTeach).toHaveBeenCalledWith(m.id, { field: 'firstName' });
+    expect(shadow.querySelector('.cf-teach')).toBeNull();
   });
 
-  // Said once, in the footer, beside the button that would change it — rather
-  // than under the report, which is where the user is not looking when they ask.
-  it('says that nothing has been sent yet, next to the button that sends', () => {
-    const footer = render(data([match()])).querySelector('.cf-footer')!;
-    expect(footer.querySelector('.cf-flow')!.textContent).toMatch(/nothing has been sent/i);
+  it('makes a new field on the spot, named after the question', () => {
+    const onTeach = vi.fn();
+    const m = unknown('Notice period');
+    const shadow = render(data([m]), callbacks({ onTeach }));
+    modal!.openTeach(m.id, { newField: true });
+    const [name, value] = [...shadow.querySelectorAll('.cf-teach input')] as HTMLInputElement[];
+    expect(name.value).toBe('Notice period');
+    value.value = '1 month';
+    value.dispatchEvent(new Event('input'));
+    ([...shadow.querySelectorAll('.cf-teach button')].find((b) => b.textContent === ACTION_LABELS.save) as HTMLButtonElement).click();
+    expect(onTeach).toHaveBeenCalledWith(m.id, { newField: { label: 'Notice period', value: '1 month' } });
   });
 
-  // The two-step body has no report at all, so a report key there would be a lie.
-  it('leaves the key off a posting that hands off elsewhere', () => {
-    const shadow = render(data([], {
-      redirect: { host: 'jobs.acme.com', reason: 'apply link is cross-origin', followed: false },
-    }));
-    expect(shadow.querySelector('.cf-summary')).toBeNull();
+  it('can set a question aside', () => {
+    const onTeach = vi.fn();
+    const m = unknown('Middle name');
+    const shadow = render(data([m]), callbacks({ onTeach }));
+    modal!.openTeach(m.id);
+    const select = shadow.querySelector('.cf-teach select') as HTMLSelectElement;
+    select.value = '__ignore';
+    select.dispatchEvent(new Event('change'));
+    ([...shadow.querySelectorAll('.cf-teach button')].find((b) => b.textContent === ACTION_LABELS.save) as HTMLButtonElement).click();
+    expect(onTeach).toHaveBeenCalledWith(m.id, { ignore: true });
+  });
+
+  it('will not save without an answer, and says so by being unavailable', () => {
+    const onTeach = vi.fn();
+    const m = unknown('Given name');
+    const shadow = render(data([m]), callbacks({ onTeach }));
+    modal!.openTeach(m.id);
+    const save = [...shadow.querySelectorAll('.cf-teach button')].find((b) => b.textContent === ACTION_LABELS.save) as HTMLButtonElement;
+    expect(save.getAttribute('aria-disabled')).toBe('true');
+    save.click();
+    expect(onTeach).not.toHaveBeenCalled();
+  });
+
+  it('survives a re-render — the engine repaints as fields appear', () => {
+    const m = unknown('Given name');
+    const shadow = render(data([m]));
+    modal!.openTeach(m.id);
+    modal!.render(data([m, unknown('Later', { later: true })]));
+    expect(shadow.querySelector('.cf-teach')).not.toBeNull();
+  });
+
+  it('"Not this" on a match opens the same chooser, on the field it was taken for', () => {
+    const m = match();
+    const shadow = render(data([m]));
+    rowButton(shadow, 0, ACTION_LABELS.notThis).click();
+    expect((shadow.querySelector('.cf-teach select') as HTMLSelectElement).value).toBe('email');
+  });
+
+  it('opening a chooser from the picker switches to the report and unfolds the card', () => {
+    const m = unknown('Given name');
+    modal = new FillerModal(callbacks());
+    modal.render(data([m]));
+    modal.setView('job');
+    modal.minimize();
+    modal.openTeach(m.id);
+    expect(modal.isMinimized).toBe(false);
+    expect(shadow().querySelector('.cf-teach')).not.toBeNull();
   });
 });
 
-/**
- * The footer is where the user decides. Everything that acts on the *posting* —
- * send it, or move on — has to be reachable without opening anything, and
- * everything that acts on the *extension* has to be out of the way: at 390px a
- * row of five buttons makes the two that matter no easier to hit.
- */
-describe('FillerModal — the footer offers Apply and Skip', () => {
-  const labels = (shadow: ShadowRoot) =>
-    [...shadow.querySelectorAll('.cf-footer-actions > button.cf-btn')]
-      .map((b) => b.textContent?.trim());
-  const menu = (shadow: ShadowRoot) =>
-    [...shadow.querySelectorAll('.cf-more-menu button')].map((b) => b.textContent?.trim());
+describe('FillerModal — the count line and the banner', () => {
+  it('keys filled, to check and to teach above the rows', () => {
+    const shadow = render(data([match(), match({ confidence: 'low', filled: false }), unknown('Q')]));
+    const summary = shadow.querySelector('.cf-summary')!.textContent!;
+    expect(summary).toMatch(/1\s*filled/);
+    expect(summary).toMatch(/1\s*to check/);
+    expect(summary).toMatch(/1\s*to teach/);
+  });
 
-  // The two that are on every branch: the card must not be a dead end. Before
-  // them, a posting whose fields came out wrong could only be fixed by closing
-  // the modal and finding Site setup in the toolbar popup.
-  //
-  // They lead the menu rather than trailing it because the popover opens
-  // *upward* — the last item in DOM order is the one under the thumb that has
-  // just pressed the `⋯`, and that place belongs to the item most likely to be
-  // wanted, not to the one that leaves the page.
-  const WAYS_OUT = ['Options', 'Site setup'];
+  it('ignored rows count nowhere', () => {
+    const shadow = render(data([match(), unknown('Q', { ignored: true })]));
+    expect(shadow.querySelector('.cf-summary')!.textContent).toMatch(/0\s*to teach/);
+  });
 
-  it('shows exactly Apply and Skip, with the rest behind the overflow', () => {
+  it('rests on "submit on the site", beside the footer', () => {
     const shadow = render(data([match()]));
-    expect(labels(shadow)).toEqual(['Apply', 'Skip']);
-    expect(menu(shadow)).toEqual([...WAYS_OUT, 'Re-run']);
+    expect(shadow.querySelector('.cf-footer .cf-flow')!.textContent).toMatch(/submit on the site/i);
   });
 
-  /**
-   * Reset blanked every field the extension had just filled and destroyed the
-   * card with the report on it — an unconfirmed, unundoable wipe one tap from
-   * Site setup, on the one surface whose whole job is showing what was filled.
-   * The popup's "Reset" still reaches `Controller.reset()`, from a surface
-   * where wiping the page is the point of pressing the button.
-   */
-  it('does not offer Reset', () => {
-    expect(menu(render(data([match()])))).not.toContain('Reset');
-    expect(menu(render(data([match()], { applied: true })))).not.toContain('Reset');
+  it('a page of new questions is an invitation to teach', () => {
+    const shadow = render(data([unknown('A'), unknown('B')]));
+    expect(shadow.querySelector('.cf-flow-title')!.textContent).toBe('Nothing recognised yet');
   });
 
-  /**
-   * The menu is about the posting on screen and the site it is on. Queueing up
-   * more postings is neither, and the popup's Queue button reaches the importer
-   * from a surface that does not need a job page open at all.
-   */
-  it('does not offer the URL importer', () => {
-    expect(menu(render(data([match()])))).not.toContain('Add links');
+  it('blames an empty profile, not the page', () => {
+    const shadow = render(data([unknown('A')], { profileEmpty: true }));
+    expect(shadow.querySelector('.cf-flow-title')!.textContent).toBe('Nothing to fill with yet');
   });
+});
 
-  it('reaches the setup wizard and the options page from the menu', () => {
-    const onOpenSetup = vi.fn();
-    const onOpenOptions = vi.fn();
-    const shadow = render(data([match()]), callbacks({ onOpenSetup, onOpenOptions }));
-    const item = (label: string) => [...shadow.querySelectorAll<HTMLButtonElement>('.cf-more-menu button')]
-      .find((b) => b.textContent?.trim() === label)!;
-    item('Site setup').click();
-    item('Options').click();
-    expect(onOpenSetup).toHaveBeenCalledOnce();
-    expect(onOpenOptions).toHaveBeenCalledOnce();
-  });
-
-  // Re-run rebuilds the whole card, so the menu went with it and this never
-  // showed. Both ways out open another tab and leave this one untouched —
-  // and a popover still hanging over the report when the user comes back has
-  // outlived the choice it was opened to make.
-  it('closes the menu when an item is chosen', () => {
+describe('FillerModal — the footer', () => {
+  it('is Fill again and the overflow, off the queue', () => {
     const shadow = render(data([match()]));
-    const toggle = shadow.querySelector<HTMLButtonElement>('.cf-more > .cf-btn')!;
-    const menu = shadow.querySelector<HTMLElement>('.cf-more-menu')!;
-    toggle.click();
-    expect(menu.hidden).toBe(false);
-    expect(toggle.getAttribute('aria-expanded')).toBe('true');
-
-    [...menu.querySelectorAll('button')].find((b) => b.textContent === 'Options')!.click();
-    expect(menu.hidden).toBe(true);
-    expect(toggle.getAttribute('aria-expanded')).toBe('false');
+    const labels = [...shadow.querySelectorAll('.cf-footer-actions > button.cf-btn')].map((b) => b.textContent);
+    expect(labels).toEqual([ACTION_LABELS.fillAgain]);
+    expect(footerBtn(shadow, ACTION_LABELS.skipNext)).toBeUndefined();
   });
 
-  // A posting already sent still needs them — that is when "the CV went to the
-  // wrong field, let me fix this site" is most likely to be the next thought.
-  it('keeps them on an applied posting, where Apply itself has retired', () => {
-    const shadow = render(data([match()], { applied: true }));
-    expect(menu(shadow)).toEqual([...WAYS_OUT, 'Re-run']);
-  });
-
-  /**
-   * The situational item sits between them, so the two fixed rules hold on every
-   * branch: Options on top, Re-run nearest the `⋯`.
-   */
-  it('slots Open application between the ways out and Re-run', () => {
-    const shadow = render(data([match()], {
-      applied: true,
-      redirect: { host: 'jobs.acme.com', reason: 'apply link is cross-origin', followed: false },
-    }));
-    expect(menu(shadow)).toEqual([...WAYS_OUT, 'Open application', 'Re-run']);
-  });
-
-  it('presses the site’s Send button through onApply', () => {
-    const onApply = vi.fn();
-    const shadow = render(data([match()]), callbacks({ onApply }));
-    footerBtn(shadow, 'Apply').click();
-    expect(onApply).toHaveBeenCalledOnce();
-  });
-
-  it('reports the skip through onSkip', () => {
+  it('adds Skip → next on a queue tab', () => {
     const onSkip = vi.fn();
-    const shadow = render(data([match()]), callbacks({ onSkip }));
-    footerBtn(shadow, 'Skip').click();
-    expect(onSkip).toHaveBeenCalledOnce();
+    const shadow = render(data([match()], { queue: QUEUE }), callbacks({ onSkip }));
+    footerBtn(shadow, ACTION_LABELS.skipNext).click();
+    expect(onSkip).toHaveBeenCalled();
   });
 
-  // Skip used to render only during a session, so a posting opened by hand
-  // could be closed but never recorded as one the user had decided against.
-  it('offers Skip outside a session too', () => {
-    expect(labels(render(data([match()])))).toContain('Skip');
-  });
-
-  it('names the consequence during a session, where skipping also opens the next', () => {
-    const shadow = render(data([match()], {
-      session: {
-        active: true,
-        batchSize: 5,
-        progress: { total: 4, queued: 2, inFlight: 1, applied: 1, skipped: 0, markedDone: 0, done: 1, ratio: 0.25 },
-      },
-    }));
-    expect(labels(shadow)).toEqual(['Apply', 'Skip → next']);
-  });
-
-  /**
-   * A two-step posting has no form to apply to, but wanting nothing to do with
-   * it is exactly as likely — more so, since following it costs a page load. It
-   * keeps the same shape as the quick-apply footer: the primary action, Skip,
-   * and the overflow. Three visible buttons clipped the primary one off the
-   * right edge at 390px, which is how this was found.
-   */
-  it('offers Skip on a posting that hands off elsewhere, without a third button', () => {
-    const shadow = render(data([], {
-      redirect: { host: 'jobs.acme.com', reason: 'apply link is cross-origin', followed: false },
-    }));
-    expect(labels(shadow)).toEqual(['Open application', 'Skip']);
-    expect(menu(shadow)).toEqual([...WAYS_OUT, 'Fill this page instead']);
-  });
-});
-
-/**
- * Apply greys out when no Send button could be found. A greyed control that
- * cannot say why it is grey is how a user concludes the extension is broken —
- * which is exactly what happened to the button this one replaced.
- *
- * The reason now sits in the flow banner at the top of the body, stated at rest
- * rather than only after a press: a card whose sole clue was a dead-looking
- * button is what "the flow is hard to find" meant in practice.
- */
-describe('FillerModal — the greyed Apply button explains itself', () => {
-  it('stays pressable when there is nothing to press, so the press can answer', () => {
-    const button = footerBtn(render(data([match()], { applyState: 'noButton' })), 'Apply');
-    expect(button.getAttribute('aria-disabled')).toBe('true');
-    // `disabled` would swallow the click and leave the question unanswered.
-    expect(button.hasAttribute('disabled')).toBe(false);
-  });
-
-  it('states the reason without being asked', () => {
-    const banner = render(data([match()], { applyState: 'noButton' }))
-      .querySelector('.cf-flow.warn')!;
-    expect(banner).not.toBeNull();
-    expect(banner.textContent).toMatch(/send button/i);
-    // Only the long form is behind the disclosure.
-    expect(banner.querySelector('.cf-help')).toBeNull();
-    expect(banner.querySelector('.cf-help-btn')).not.toBeNull();
-  });
-
-  it('opens a note saying what Apply does and how to point it at the button', () => {
-    const shadow = render(data([match()], { applyState: 'noButton' }));
-    expect(shadow.querySelector('.cf-flow .cf-help')).toBeNull();
-
-    footerBtn(shadow, 'Apply').click();
-    const note = shadow.querySelector('.cf-flow .cf-help')!;
-    expect(note).not.toBeNull();
-    expect(note.textContent).toMatch(/set up this site|send button/i);
-    // Pressing again puts it away.
-    footerBtn(shadow, 'Apply').click();
-    expect(shadow.querySelector('.cf-flow .cf-help')).toBeNull();
-  });
-
-  // The banner's own `?` and the blocked Apply drive the same disclosure — two
-  // controls for one panel, which must not get out of step with each other.
-  it('opens the same note from the banner’s own help button', () => {
-    const shadow = render(data([match()], { applyState: 'noButton' }));
-    const ask = shadow.querySelector<HTMLButtonElement>('.cf-flow .cf-help-btn')!;
-    ask.click();
-    expect(shadow.querySelector('.cf-flow .cf-help')).not.toBeNull();
-    expect(shadow.querySelector('.cf-flow .cf-help-btn')!.getAttribute('aria-expanded')).toBe('true');
-  });
-
-  it('does not fire onApply while it is grey', () => {
-    const onApply = vi.fn();
-    const shadow = render(data([match()], { applyState: 'noButton' }), callbacks({ onApply }));
-    footerBtn(shadow, 'Apply').click();
-    expect(onApply).not.toHaveBeenCalled();
-  });
-
-  it('never opens the note on a page with a Send button', () => {
-    const onApply = vi.fn();
-    const shadow = render(data([match()], { applyState: 'ready' }), callbacks({ onApply }));
-    const button = footerBtn(shadow, 'Apply');
-    expect(button.getAttribute('aria-disabled')).toBeNull();
-
-    button.click();
-    expect(onApply).toHaveBeenCalledOnce();
-    expect(shadow.querySelector('.cf-flow .cf-help')).toBeNull();
-  });
-
-  /**
-   * The other reason Apply is grey, and the one nobody would guess: no
-   * confirmation element is configured, so a submission's outcome could not be
-   * read back. The user's next action is completely different from "find the
-   * button", so the note must be too.
-   */
-  it('says the confirmation is missing, not that the button is', () => {
-    const shadow = render(data([match()], { applyState: 'noConfirmation' }));
-    const apply = footerBtn(shadow, 'Apply');
-    expect(apply.getAttribute('aria-disabled')).toBe('true');
-    expect(apply.getAttribute('aria-label')).toMatch(/confirmation/i);
-    // Stated up front, in the banner, as well as in the note behind it.
-    expect(shadow.querySelector('.cf-flow.warn')!.textContent).toMatch(/confirmation element/i);
-
-    apply.click();
-    const note = shadow.querySelector('.cf-flow .cf-help')!;
-    expect(note.textContent).toMatch(/confirmation element/i);
-    // It must not send the user hunting for a button that was already found.
-    expect(note.textContent).not.toMatch(/no such button could be found/i);
-  });
-
-  // Picking the Send button mid-session flips Apply live; a note about a button
-  // that now works is just wrong text left on screen.
-  it('drops an open note once the page gains a Send button', () => {
-    modal = new FillerModal(callbacks());
-    modal.render(data([match()], { applyState: 'noButton' }));
-    modal.setApplyHelp(true);
-    expect(shadow().querySelector('.cf-flow .cf-help')).not.toBeNull();
-
-    modal.render(data([match()], { applyState: 'ready' }));
-    expect(shadow().querySelector('.cf-flow .cf-help')).toBeNull();
-    expect(shadow().querySelector('.cf-flow.warn')).toBeNull();
-  });
-});
-
-/**
- * The resting state — the one the modal used to say nothing about. A filled
- * posting waiting on the user is by far the commonest thing on screen, and the
- * card showed a job advert and a coral button with no statement connecting them.
- */
-describe('FillerModal — it says where the posting is in the flow', () => {
-  it('reports the fill and that nothing has gone anywhere yet', () => {
-    const banner = render(data([
-      match({ field: 'email', filled: true }),
-      match({ field: 'phone', confidence: 'low', filled: false }),
-    ])).querySelector('.cf-flow.quiet')!;
-    expect(banner.textContent).toMatch(/nothing has been sent/i);
-    expect(banner.textContent).toContain('1 of 2');
-  });
-
-  it('says the same thing in both views', () => {
-    modal = new FillerModal(callbacks());
-    modal.render(data([match()], { jobTitle: 'A job' }));
-    expect(shadow().querySelector('.cf-flow')).not.toBeNull();
-    modal.setView('fields');
-    expect(shadow().querySelector('.cf-flow')).not.toBeNull();
-  });
-
-  // A page with a Send button but no fields the extension recognised. It is not
-  // "ready to review" — there is nothing to review — and it is not blocked either.
-  it('reports an unrecognised form as empty rather than as ready', () => {
-    const banner = render(data([], { applyState: 'ready' })).querySelector('.cf-flow')!;
-    expect(banner.className).toContain('quiet');
-    expect(banner.textContent).toMatch(/nothing to fill/i);
-  });
-
-  // A listing page has neither fields nor a Send button, and the question its
-  // greyed Apply provokes is still "why can't I apply?".
-  it('still explains a blocked Apply on a page with no fields', () => {
-    const banner = render(data([], { applyState: 'noButton' })).querySelector('.cf-flow')!;
-    expect(banner.className).toContain('warn');
-    expect(banner.textContent).toMatch(/send button/i);
-  });
-});
-
-/**
- * The one unambiguous good-news state. The site's own confirmation is routinely
- * below the fold or hidden behind this very card, so "did that actually go
- * through?" was a question the user answered by scrolling around the page they
- * had just submitted.
- */
-describe('FillerModal — it says when the application went through', () => {
-  const sent = (over: Partial<ModalData> = {}) =>
-    data([match()], { jobTitle: 'A job', applied: true, ...over });
-
-  it('shows a confirmation banner on the posting', () => {
-    modal = new FillerModal(callbacks());
-    modal.render(sent());
-    const banner = shadow().querySelector('.cf-applied')!;
-    expect(banner).not.toBeNull();
-    expect(banner.textContent).toMatch(/sent/i);
-    // Live region, because it appears without the user having moved focus.
-    expect(banner.getAttribute('role')).toBe('status');
-    // Named as what the site said, not as what the extension did: the claim is
-    // only as good as the confirmation element that produced it.
-    expect(banner.textContent).toContain('Test site');
-  });
-
-  /**
-   * The confirmation lost to the posting on every axis that decides what gets
-   * read first — 13px against 24px, a strip against a headline. It was "really
-   * hard to find" for exactly that reason, so the hierarchy is now asserted.
-   */
-  it('outranks the job title rather than sitting under it', () => {
-    modal = new FillerModal(callbacks());
-    modal.render(sent());
-    const root = shadow();
-    const banner = root.querySelector('.cf-applied')!;
-    const title = root.querySelector('.cf-title')!;
-    // The banner comes first in the body…
-    expect(banner.compareDocumentPosition(title) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
-    // …and the title steps down to make room for it.
-    expect(title.className).toContain('cf-title-sub');
-    // Nothing left to do here, said in words.
-    expect(root.textContent).toMatch(/safe to close this tab/i);
-  });
-
-  // The body scrolls; on a long posting the banner scrolls away with it, and the
-  // header is the one strip of the card that is always on screen.
-  it('marks the header too, which never scrolls away', () => {
-    modal = new FillerModal(callbacks());
-    modal.render(sent());
-    const chip = shadow().querySelector('.cf-header .cf-sent-chip')!;
-    expect(chip).not.toBeNull();
-    expect(chip.textContent).toMatch(/sent/i);
-  });
-
-  it('shows it on the report too, where the legend would otherwise deny it', () => {
-    const shadow = render(sent());
-    expect(shadow.querySelector('.cf-applied')).not.toBeNull();
-    // The report is a record now, not a plan — and the footer's "nothing sent
-    // yet" line is gone, rather than contradicting the banner above it.
-    expect(shadow.querySelector('.cf-legend-send')!.textContent).toMatch(/already sent/i);
-    expect(shadow.textContent).not.toMatch(/nothing has been sent/i);
-  });
-
-  // Pressing Apply twice would send a second application to the same posting.
-  it('retires Apply rather than leaving it live', () => {
-    const onApply = vi.fn();
-    const shadow = render(sent(), callbacks({ onApply }));
-    expect(footerBtn(shadow, 'Apply')).toBeUndefined();
-    const done = footerBtn(shadow, 'Applied ✓');
-    expect(done.getAttribute('aria-disabled')).toBe('true');
-    done.click();
-    expect(onApply).not.toHaveBeenCalled();
-  });
-
-  // Collapsed, the pill is the only thing left on screen; a fill count there
-  // reads as unfinished work on a posting that is already done.
-  it('says so on the minimized pill', () => {
-    const shadow = render(sent());
-    modal!.minimize();
-    expect(shadow.querySelector('.cf-pill')!.textContent).toMatch(/sent/i);
-    expect(shadow.querySelector('.cf-pill .cf-dot')!.className).toContain('ok');
-  });
-
-  it('stays quiet until the confirmation actually appeared', () => {
-    const shadow = render(data([match()], { jobTitle: 'A job' }));
-    expect(shadow.querySelector('.cf-applied')).toBeNull();
-    expect(footerBtn(shadow, 'Apply')).toBeDefined();
-  });
-
-  /**
-   * Skip writes a status, and `recordStatus` is a blunt overwrite rather than a
-   * promote — so a skip here files "skipped" over "applied" and loses the record
-   * of an application that really was sent. `main.ts` refuses the message as well;
-   * this is the half that stops the user asking for it.
-   */
-  it('retires Skip beside it, rather than leaving a way to unfile the application', () => {
+  it('retires Skip on an applied posting, without removing it', () => {
     const onSkip = vi.fn();
-    const shadow = render(sent(), callbacks({ onSkip }));
-    const skip = footerBtn(shadow, 'Skip');
+    const shadow = render(data([match()], { queue: QUEUE, alreadyApplied: true }), callbacks({ onSkip }));
+    const skip = footerBtn(shadow, ACTION_LABELS.skipNext);
     expect(skip.getAttribute('aria-disabled')).toBe('true');
-    // Never `disabled`: it has to keep taking the press that asks why it is grey.
-    expect(skip.hasAttribute('disabled')).toBe(false);
     skip.click();
     expect(onSkip).not.toHaveBeenCalled();
   });
 
-  it('answers the press with the note instead of the action', () => {
-    const shadow = render(sent());
-    expect(shadow.querySelector('.cf-flow .cf-help')).toBeNull();
-    footerBtn(shadow, 'Skip').click();
-    expect(shadow.querySelector('.cf-flow .cf-help')!.textContent).toMatch(/already applied|second application/i);
+  it('Fill again calls back, and the overflow reaches Options and pointing', () => {
+    const onRerun = vi.fn();
+    const onPoint = vi.fn();
+    const onOpenOptions = vi.fn();
+    const shadow = render(data([match()]), callbacks({ onRerun, onPoint, onOpenOptions }));
+    footerBtn(shadow, ACTION_LABELS.fillAgain).click();
+    expect(onRerun).toHaveBeenCalled();
+    const menu = shadow.querySelector('.cf-more-menu') as HTMLElement;
+    const items = [...menu.querySelectorAll('button')];
+    expect(items.map((b) => b.textContent)).toEqual([ACTION_LABELS.openOptions, 'Point at a field']);
+    items[1].click();
+    expect(onPoint).toHaveBeenCalled();
+    expect(menu.hidden).toBe(true);
   });
 
-  /**
-   * `applyState` is `ready` on an applied posting — the page still has a Send
-   * button, it is just not ours to press any more — so the "the button went live,
-   * drop the note" rule would have closed this the moment anything re-rendered.
-   */
-  it('keeps that note open across a re-render', () => {
-    const shadow = render(sent());
-    footerBtn(shadow, 'Skip').click();
-    modal!.render(sent());
-    expect(shadow.querySelector('.cf-flow .cf-help')).not.toBeNull();
+  it('does not offer Reset', () => {
+    const shadow = render(data([match()]));
+    expect(shadow.textContent).not.toMatch(/Reset/);
   });
 });
 
-/**
- * The same posting, opened again later. Nothing happens on the page — the record
- * is simply read back — but the two decisions are as spent as they are on a fresh
- * confirmation, so the card is the same receipt with different sentences.
- */
-describe('FillerModal — a posting applied to on an earlier visit', () => {
-  const seen = (over: Partial<ModalData> = {}) =>
-    data([match()], { jobTitle: 'A job', alreadyApplied: true, ...over });
+describe('FillerModal — the queue', () => {
+  it('shows the queue strip only on a queue tab', () => {
+    expect(render(data([match()])).querySelector('.cf-session')).toBeNull();
+    modal?.destroy();
+    document.getElementById('chromium-filler-modal-host')?.remove();
+    const shadow = render(data([match()], { queue: QUEUE }));
+    expect(shadow.querySelector('.cf-session')!.textContent).toContain('3/12 done');
+  });
+});
 
-  /** The Job view, which is the default — `render` above opens the report. */
-  const renderJob = (d: ModalData, cb = callbacks()): ShadowRoot => {
-    modal = new FillerModal(cb);
-    modal.render(d);
-    return shadow();
-  };
-
-  it('leads with the record rather than with the posting', () => {
-    const root = renderJob(seen());
-    const banner = root.querySelector('.cf-applied')!;
-    expect(banner).not.toBeNull();
-    expect(banner.textContent).toMatch(/already applied/i);
-    expect(root.querySelector('.cf-title')!.className).toContain('cf-title-sub');
-    expect(root.querySelector('.cf-header .cf-sent-chip')).not.toBeNull();
+describe('FillerModal — an applied posting', () => {
+  it('leads with the record and marks the header', () => {
+    modal = new FillerModal(callbacks());
+    modal.render(data([match()], { alreadyApplied: true, jobTitle: 'Engineer' }));
+    modal.setView('job');
+    const root = shadow();
+    expect(root.querySelector('.cf-flow.ok .cf-flow-title')!.textContent).toBe('Already applied');
+    expect(root.querySelector('.cf-header .cf-sent-chip')!.textContent).toBe('Applied');
   });
 
-  /**
-   * No live region. `role="status"` announces something that has just arrived, and
-   * on this state the record was already there when the page opened — there is
-   * nothing to announce, and announcing it on every posting you revisit is noise.
-   */
-  it('does not announce itself the way a fresh confirmation does', () => {
-    expect(renderJob(seen()).querySelector('.cf-applied')!.getAttribute('role')).toBeNull();
+  it('says so on the pill', () => {
+    modal = new FillerModal(callbacks());
+    modal.render(data([match()], { alreadyApplied: true }));
+    modal.minimize();
+    expect(shadow().querySelector('.cf-pill')!.textContent).toBe('Already applied');
+  });
+});
+
+describe('FillerModal — the pill', () => {
+  it('counts what was filled and what is left to teach', () => {
+    modal = new FillerModal(callbacks());
+    modal.render(data([match(), unknown('Q')]));
+    modal.minimize();
+    const pill = shadow().querySelector('.cf-pill')!;
+    expect(pill.textContent).toBe('1 filled · 1 to teach');
+    expect(pill.querySelector('.cf-dot')!.className).toContain('none');
   });
 
-  it('leaves the announcement to a confirmation that just arrived', () => {
-    expect(renderJob(data([match()], { applied: true })).querySelector('.cf-applied')!
-      .getAttribute('role')).toBe('status');
+  it('is green once everything is answered', () => {
+    modal = new FillerModal(callbacks());
+    modal.render(data([match()]));
+    modal.minimize();
+    expect(shadow().querySelector('.cf-pill .cf-dot')!.className).toContain('high');
   });
 
-  it('retires both decisions', () => {
-    const onApply = vi.fn();
-    const onSkip = vi.fn();
-    const shadow = render(seen(), callbacks({ onApply, onSkip }));
-    expect(footerBtn(shadow, 'Apply')).toBeUndefined();
-    footerBtn(shadow, 'Applied ✓').click();
-    footerBtn(shadow, 'Skip').click();
-    expect(onApply).not.toHaveBeenCalled();
-    expect(onSkip).not.toHaveBeenCalled();
-  });
-
-  /**
-   * The report is a *fresh* fill of the same form, not the application that went
-   * in — the extension keeps no copy of that. Saying otherwise would invent a
-   * record it does not have.
-   */
-  it('does not claim the report is what was submitted', () => {
-    const legend = render(seen()).querySelector('.cf-legend-send')!;
-    expect(legend.textContent).toMatch(/fresh fill/i);
-    expect(legend.textContent).not.toMatch(/what went in/i);
-  });
-
-  it('points at where the record can be corrected', () => {
-    expect(renderJob(seen()).textContent).toMatch(/Options → Queue/);
-  });
-
-  it('says so on the minimized pill', () => {
-    const shadow = render(seen());
-    modal!.minimize();
-    expect(shadow.querySelector('.cf-pill')!.textContent).toMatch(/already applied/i);
-    expect(shadow.querySelector('.cf-pill .cf-dot')!.className).toContain('ok');
-  });
-
-  /**
-   * The controller declines to follow a handoff on an applied posting, so a
-   * two-step posting revisited arrives with both flags set. With the redirect
-   * branch first this footer led with a live "Open application" primary on a job
-   * already applied for — `flowState.classify` orders the two the other way, and
-   * the footer now agrees with it.
-   */
-  it('beats the redirect branch, and demotes its action into the menu', () => {
-    const shadow = render(seen({
-      redirect: { host: 'ats.test', reason: 'Apply leaves for ats.test', followed: false },
-    }));
-    const labels = [...shadow.querySelectorAll('.cf-footer-actions > button.cf-btn')]
-      .map((b) => b.textContent?.trim());
-    expect(labels).toEqual(['Applied ✓', 'Skip']);
-    expect([...shadow.querySelectorAll('.cf-more-menu button')].map((b) => b.textContent?.trim()))
-      .toContain('Open application');
-  });
-
-  // A quick-apply posting has no external application, and a menu item that opens
-  // nothing is worse than no item.
-  it('offers no such item when there was never a handoff', () => {
-    const shadow = render(seen());
-    expect([...shadow.querySelectorAll('.cf-more-menu button')].map((b) => b.textContent?.trim()))
-      .not.toContain('Open application');
-  });
-
-  // The coral belongs to the one live thing a surface is for, and here there is
-  // none — the green receipt is the only filled button on the card.
-  it('still spends the primary fill exactly once', () => {
-    const shadow = render(seen());
-    expect(shadow.querySelectorAll('button.cf-btn.primary')).toHaveLength(1);
-    expect(footerBtn(shadow, 'Applied ✓').classList.contains('cf-applied-btn')).toBe(true);
+  it('minimizing keeps the report, so restoring shows it again', () => {
+    modal = new FillerModal(callbacks());
+    modal.render(data([match(), unknown('Q')]));
+    modal.setView('fields');
+    modal.minimize();
+    modal.restore();
+    expect(rows(shadow())).toHaveLength(2);
   });
 });
 
 describe('FillerModal — the Fields tab advertises what it is hiding', () => {
-  const withMatches = (matches: FieldMatch[]) => {
+  const dotOn = (matches: FieldMatch[]) => {
     modal = new FillerModal(callbacks());
-    modal.render(data(matches, { jobTitle: 'A job' }));
+    modal.render(data(matches));
+    modal.setView('job');
     return tab(shadow(), 'Fields').querySelector('.cf-dot')!.className;
   };
+  it('grey while a question is left to teach', () => expect(dotOn([match(), unknown('Q')])).toContain('none'));
+  it('amber while a row needs a look', () => expect(dotOn([match({ filled: false })])).toContain('low'));
+  it('green when every row is answered', () => expect(dotOn([match(), unknown('Q', { ignored: true })])).toContain('high'));
+});
 
-  it('is red while any field was never found', () => {
-    expect(withMatches([
-      match({ field: 'email', filled: true }),
-      match({ field: 'city', confidence: 'none', filled: false }),
-    ])).toContain('none');
-  });
-
-  it('is amber while a field needs review', () => {
-    expect(withMatches([
-      match({ field: 'email', filled: true }),
-      match({ field: 'phone', confidence: 'low', filled: false }),
-    ])).toContain('low');
-  });
-
-  it('is amber for a high-confidence field that did not actually fill', () => {
-    // Same rule as the row dot: "high confidence" is not "it worked".
-    expect(withMatches([match({ field: 'country', confidence: 'high', filled: false })]))
-      .toContain('low');
-  });
-
-  it('is green only when every field took its value', () => {
-    expect(withMatches([
-      match({ field: 'email', filled: true }),
-      match({ field: 'phone', confidence: 'low', filled: true }),
-    ])).toContain('high');
-  });
-
-  it('is not offered at all for a two-step posting, which has no form here', () => {
+describe('FillerModal — the Job view', () => {
+  it('renders the posting as prose, with its requirements apart', () => {
     modal = new FillerModal(callbacks());
-    modal.render(data([], {
-      jobTitle: 'A job',
-      redirect: { host: 'ats.acme.test', reason: 'configured external apply link', followed: false },
+    modal.render(data([match()], {
+      jobTitle: 'Engineer',
+      jobDescription: [{ kind: 'para', text: 'We build things.' }, { kind: 'list', items: ['TS', 'CSS'] }],
+      jobRequirements: [{ kind: 'para', text: 'Five years.' }],
     }));
+    modal.setView('job');
     const root = shadow();
-    expect(root.querySelector('.cf-views')).toBeNull();
-    expect(root.querySelector('.cf-flow.accent')!.textContent).toContain('ats.acme.test');
+    expect(root.querySelector('.cf-title')!.textContent).toBe('Engineer');
+    expect(root.querySelectorAll('.cf-prose li')).toHaveLength(2);
+    expect(root.querySelector('.cf-section')!.textContent).toBe('Requirements');
+  });
+
+  it('says so when the page had no description', () => {
+    modal = new FillerModal(callbacks());
+    modal.render(data([match()]));
+    modal.setView('job');
+    expect(shadow().querySelector('.cf-empty')!.textContent).toMatch(/no description/i);
+  });
+
+  it('stays on the chosen view across a re-render', () => {
+    const shadow = render(data([match()]));
+    modal!.render(data([match(), unknown('Q', { later: true })]));
+    expect(tab(shadow, 'Fields').getAttribute('aria-selected')).toBe('true');
   });
 });
 
@@ -1126,16 +599,14 @@ describe('FillerModal — fullscreen', () => {
     return { top: limitTop, right: limitRight, bottom: limitBottom, left: limitLeft };
   };
 
-  it('offers the toggle without spending the primary fill on it', () => {
-    // The coral belongs to Apply. A header control that took it would make a
-    // window decoration look like the decision the modal exists for.
+  it('offers the toggle without spending a primary fill on it', () => {
     setViewport(1440, 900);
     modal = new FillerModal(callbacks());
     modal.render(laid());
     expect(toggle().getAttribute('aria-pressed')).toBe('false');
     expect(toggle().getAttribute('aria-label')).toBe('Fullscreen');
     expect(toggle().classList.contains('primary')).toBe(false);
-    expect(shadow().querySelectorAll('button.cf-btn.primary')).toHaveLength(1);
+    expect(shadow().querySelectorAll('button.cf-btn.primary')).toHaveLength(0);
   });
 
   it('fills the viewport when pressed, and says so', () => {
@@ -1230,23 +701,8 @@ describe('FillerModal — fullscreen', () => {
     expect(card().style.width).toBe('');
     expect(card().style.maxHeight).toBe('');
   });
-
-  it('is offered on a two-step posting too, which has no view toggle', () => {
-    // That page is nothing but a notice to read, so the room is worth more there
-    // than anywhere — and the header builds a different set of controls.
-    setViewport(1440, 900);
-    modal = new FillerModal(callbacks());
-    modal.render(laid({ redirect: { host: 'ats.example', reason: 'external', followed: false } }));
-    expect(shadow().querySelector('.cf-views')).toBeNull();
-    expect(toggle()).not.toBeNull();
-  });
 });
 
-/**
- * The Options simulator draws the same card at 1/3 scale, and the two are bound
- * both ways: the frame drives the preview, and dragging or closing the preview
- * drives the frame. These are the modal's half of that contract.
- */
 describe('FillerModal — two views of one layout', () => {
   const laid = (over = {}) => data([match()], {
     jobTitle: 'A job',
@@ -1313,70 +769,3 @@ describe('FillerModal — two views of one layout', () => {
  * only thing missing is the reply — which cannot exist until an application has gone
  * in. So the press has to work, and it has to say what else it is about to start.
  */
-describe('Apply while the setup is unfinished', () => {
-  const finishing = () => render(data([match()], { applyState: 'finishSetup' }));
-
-  it('stays live, and names the second half', () => {
-    const shadow = finishing();
-    const button = footerBtn(shadow, ACTION_LABELS.applyFinishSetup);
-    expect(button).toBeTruthy();
-    expect(button!.getAttribute('aria-disabled')).toBeNull();
-  });
-
-  it('runs onApply when pressed', () => {
-    let applied = 0;
-    const shadow = render(
-      data([match()], { applyState: 'finishSetup' }),
-      callbacks({ onApply: () => { applied += 1; } }),
-    );
-    footerBtn(shadow, ACTION_LABELS.applyFinishSetup)!.click();
-    expect(applied).toBe(1);
-  });
-
-  /** One coral per card, as ever — the label changed, not the rank. */
-  it('is still the only primary', () => {
-    expect(finishing().querySelectorAll('.cf-btn.primary')).toHaveLength(1);
-  });
-
-  /**
-   * Both answers on screen, and still only two buttons plus the `⋯`.
-   *
-   * The user who would rather press the site's own Send button has to be able to see
-   * that doing so finishes the setup too — behind the overflow it is a route nobody
-   * discovers. Skip is the control that is not an answer to this question, so Skip is
-   * the one that moves.
-   */
-  it('offers the other answer beside it, and moves Skip into the overflow', () => {
-    const shadow = finishing();
-    const visible = [...shadow.querySelectorAll('.cf-footer-actions > .cf-btn')]
-      .map((b) => b.textContent?.trim());
-    expect(visible).toEqual([ACTION_LABELS.applyFinishSetup, ACTION_LABELS.sendItMyself]);
-    expect(shadow.querySelectorAll('.cf-footer-actions > .cf-more')).toHaveLength(1);
-
-    const menu = [...shadow.querySelectorAll('.cf-more-menu button')]
-      .map((b) => b.textContent?.trim());
-    expect(menu).toContain(ACTION_LABELS.skip);
-  });
-
-  it('runs onSendMyself when the other answer is pressed', () => {
-    const onSendMyself = vi.fn();
-    const shadow = render(
-      data([match()], { applyState: 'finishSetup' }),
-      callbacks({ onSendMyself }),
-    );
-    footerBtn(shadow, ACTION_LABELS.sendItMyself)!.click();
-    expect(onSendMyself).toHaveBeenCalledOnce();
-  });
-
-  /**
-   * The report of a save that just happened, which is the one moment the card can
-   * lead with the press rather than with the site. Same footer either way: the
-   * question and its two answers do not change, only the sentence above them.
-   */
-  it('leads with the save when a first pass has just been written', () => {
-    const shadow = render(data([match()], { applyState: 'finishSetup', setupSaved: true }));
-    expect(shadow.querySelector('.cf-flow')!.textContent).toMatch(/saved/i);
-    expect(footerBtn(shadow, ACTION_LABELS.applyFinishSetup)).toBeTruthy();
-    expect(footerBtn(shadow, ACTION_LABELS.sendItMyself)).toBeTruthy();
-  });
-});

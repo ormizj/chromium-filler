@@ -16,6 +16,11 @@
       </header>
 
       <p id="detail" class="detail">Checking this page…</p>
+      <!-- Reset stays here and nowhere else: it empties every field the extension
+           filled and throws the report away, and the card's whole job is showing
+           what was filled. A quiet text button, shown only once there is something
+           to reset. -->
+      <button id="reset" class="reset-link" type="button" hidden>Reset this page</button>
 
       <!-- First-run nudge: with no profile and no CV there is nothing to fill
            with, and reporting "no config matches this page" sends a new user
@@ -33,14 +38,10 @@
       </div>
 
       <!-- Two rows, in fixed proportions, and every control in them is always
-           present. They used to appear and disappear with the page's state — Site
-           setup only on a configured site, Queue only when something was waiting —
-           so the popup was a different shape every time it opened and the one
-           control that never moved, Options, was left as a small button adrift
-           under a full-width Fill. Where a thing is is half of knowing it exists.
+           present. Where a thing is is half of knowing it exists.
 
-           The one thing this popup does to the page in front of you gets a row to
-           itself; the three that open another surface share the one below it. -->
+           Fill — the one thing this popup does to the whole page in front of you —
+           gets a row to itself; Teach, Queue and Options share the one below it. -->
       <div class="actions">
         <button id="primary" class="btn btn-primary" disabled>Fill</button>
       </div>
@@ -51,7 +52,7 @@
              line in a 360px popup and left the row ragged — which matters more now
              that there are three of them sharing 336px.
              The arrow stays on `.nudge`, which is a prompt rather than a button. -->
-        <a id="reconfigure" href="#">Site setup</a>
+        <a id="teach" href="#">Teach</a>
         <a id="open-queue" href="#">Queue</a>
         <a id="open-options" href="#">Options</a>
       </div>

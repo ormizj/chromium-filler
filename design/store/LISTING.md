@@ -7,9 +7,9 @@ Everything the dashboard asks for, in dashboard order. Item ID
 
 ## Package
 
-Upload `chromium-filler-v0.1.4-store.zip`.
+Upload `../../.archive/chromium-filler-v0.1.4-store.zip`.
 
-**Not** `chromium-filler-v0.1.4.zip` — that one nests everything under a
+**Not** `../../.archive/chromium-filler-v0.1.4.zip` — that one nests everything under a
 `chromium-filler/` folder for GitHub / "Load unpacked", and the store does not
 descend into a wrapper. `npm run package` now builds both, and fails loudly if
 the store archive has no `manifest.json` at its root.
@@ -34,77 +34,68 @@ extension already asks for `<all_urls>`. The reviewer gets the code as authored.
 ### Description
 
 ```
-Chromium Filler fills in job application forms for you — and then stops, and
-shows you what it did, and waits.
+Chromium Filler fills in job application forms for you — and then stops, shows
+you what it did, and leaves the submitting to you.
 
-Nothing is ever submitted automatically. There is no timer and no "that looked
-complete" heuristic that can press Send. The extension fills, reports, and hands
-the decision back to you.
+Nothing is ever submitted. The extension never presses a site's Submit button,
+under any circumstances. It fills, reports, and you press the site's own button
+when you are ready.
 
 HOW IT WORKS
 
-1. You save your details and your CV once, in Options.
-2. You open a job posting.
-3. On a site you have configured, the extension waits for the form to appear,
-   runs any page actions that site needs (expand the description, open the Apply
-   modal), and reads the posting's own title and description.
-4. It fills every field it is confident about, CV upload included.
-5. It shows you a review: every field marked filled, to check, or unmatched.
-6. You fix anything it flagged and press Apply — which presses that site's own
-   Send button for you. Or you press Skip.
+1. You save your details and your CV once, in Options — plus answers to the
+   questions you get asked a lot: years of experience, notice period, whether you
+   need sponsorship.
+2. You open a job posting, on any site. There is nothing to set up per site.
+3. Every field the extension recognises is filled, CV upload included. When more
+   fields appear — a form opening behind "Apply now", the next page of a
+   multi-step form — they are filled as they appear.
+4. A small card lists what was filled, what is worth a look, and any question it
+   did not recognise.
+5. You check it over and submit on the site yourself.
 
-THE REVIEW REPORT
+TEACH IT ONCE
 
-The modal opens on the job itself — title, company, location, contract type, and
-the full description, so you can read the posting without leaving the form. A
-toggle switches to the field report: every field the extension looked for, what
-it put there, and which selector it used.
+When a question is not recognised, press Teach and say what it is — one of your
+details, one of your own answers, or "ignore this question". It is filled at
+once, and remembered by its wording, so the next site that asks the same question
+is filled without asking you. A lesson names exactly one box: "Name" under
+"Reference 1" will never be confused with "Name" under "Reference 2". Everything
+it has learned is listed in Options, where any of it can be undone.
 
-Three counts sit under the description — filled, to check, unmatched — so a
-posting that half-matched is obvious before you press anything.
+IT KNOWS WHAT TO LEAVE ALONE
 
-FIX A WRONG MATCH BY CLICKING THE REAL FIELD
-
-When the extension misses a field, press Pick and then click the actual input on
-the page. The selector is saved into that site's configuration, so the next
-posting on that site gets it right. No CSS, no DevTools.
+Login and sign-up forms, search boxes, card numbers and one-time codes are never
+filled, on any site. Nor is a box that already has something in it, or one you
+have typed in.
 
 A QUEUE, NOT SIXTY TABS
 
 Paste a messy block of text and every URL in it is extracted, normalised and
-de-duplicated. A session then keeps a fixed number of job tabs open — five by
-default — and opens the next posting the moment you apply, skip or close one. It
-survives a browser restart. Every posting keeps a timestamped history: new,
-opened, redirected, applied, skipped.
-
-Once a posting is recorded as applied, re-opening it retires both Apply and Skip.
-You cannot accidentally apply twice.
-
-TWO-STEP APPLICATIONS
-
-Plenty of boards hand you off to the employer's own system. The extension follows
-that handoff when the posting really is external, declines to follow it when the
-page is merely ambiguous, and picks the fill back up at the destination.
+de-duplicated. A session then keeps a fixed number of job tabs open and opens the
+next posting the moment you close or skip one — closing a tab marks the posting
+done. Tabs the queue opened carry a small "Queue" chip, so you always know which
+is which. Every posting keeps a timestamped history.
 
 AN ARCHIVE OF WHAT YOU READ
 
-Every posting's title, description and requirements are captured as you go, and
-exportable as JSON or CSV with the columns and statuses you choose.
+The title, description and requirements of every posting from your queue are
+captured as you go, and exportable as JSON or CSV with the columns and statuses
+you choose.
 
 OPTIONAL SYNC
 
 The job database — and only the job database, never your profile or your CV —
 can sync between two browsers through a Google Drive app folder, using an OAuth
-client you create yourself. It is off until you set it up, and it runs when you
-press Sync now, never on a timer.
+client you create yourself. Nothing is sent until you set it up, and it runs when
+you press Sync now, never on a timer.
 
 YOUR DATA STAYS ON YOUR MACHINE
 
-Your name, email, phone, address and CV are stored on your own device in
+Your name, email, phone, address, answers and CV are stored on your own device in
 chrome.storage.local. There is no account, no server, and no analytics. The
-extension sends nothing anywhere except the two things you ask for: the job
-application you press Apply on, which goes to that site, and the job database, if
-you turn on your own Drive sync.
+extension sends nothing anywhere except the job database, if you turn on your own
+Drive sync. What it types into a form stays in that form until you submit it.
 
 Open source: https://github.com/ormizj/chromium-filler
 ```
@@ -113,14 +104,13 @@ Open source: https://github.com/ormizj/chromium-filler
 
 In this folder, in listing order:
 
-1. `screenshot-1-review-job.png` — the review modal on a posting, Apply and Skip
-2. `screenshot-2-review-fields.png` — the per-field report, with Pick
+1. `screenshot-1-review-job.png` — the review card on a posting
+2. `screenshot-2-review-fields.png` — the per-question report, with Teach
 3. `screenshot-3-queue.png` — the queue, stat cards and posting statuses
 4. `screenshot-4-profile.png` — the profile and CV, stored on-device
-5. `screenshot-6-help.png` — the built-in Help
+5. `screenshot-5-own-fields.png` — your own fields, and the wordings they answer
 
-`screenshot-5-sites.png` is deliberately not in the five: it is the raw JSON
-config editor, which reads as forbidding out of context.
+`screenshot-6-help.png` is the built-in Help, kept as a spare.
 
 Regenerate them all with `npm run screenshots` — they are produced by driving the
 *built* extension in real Chromium against the fixture sites, so they cannot
@@ -133,13 +123,12 @@ drift from the UI.
 ### Single purpose
 
 ```
-Chromium Filler fills in job application forms on job sites, using details the
-user has saved, and shows the user a review of what it filled before anything is
-submitted. Every other feature exists to serve that one purpose: the queue
-decides which posting to fill next, the per-site configuration is how the
-extension knows where the fields are on a given site, the archive is a record of
-the postings it filled, and the optional sync carries that record to the user's
-second browser.
+Chromium Filler fills in job application forms, using details the user has saved,
+and shows the user a review of what it filled. It never submits anything. Every
+other feature serves that one purpose: what the user teaches it is how it
+recognises questions it did not know, the queue decides which posting to fill
+next, the archive is a record of the postings it filled, and the optional sync
+carries that record to the user's second browser.
 ```
 
 ### Permission justifications
@@ -147,10 +136,11 @@ second browser.
 **storage**
 
 ```
-Stores the user's own data on their device: the profile values used to fill
-forms, the CV and cover-letter files, the per-site field configurations, the job
-queue and the archive of postings. This is the extension's entire state. Nothing
-is stored on a server; there is no account.
+Stores the user's own data on their device: the profile values and answers used
+to fill forms, the CV and cover-letter files, what the user has taught the
+extension about questions it did not recognise, the job queue and the archive of
+postings. This is the extension's entire state. Nothing is stored on a server;
+there is no account.
 ```
 
 **unlimitedStorage**
@@ -165,29 +155,28 @@ the default limit is reached in ordinary use.
 **tabs**
 
 ```
-A queue session keeps a fixed number of job postings open at once (five by
-default) and opens the next one when the user applies to, skips or closes one.
-That requires opening tabs, knowing when one closes, and closing a tab after a
-submission is confirmed. It is also how a two-step application follows a posting
-from the job board to the employer's own site. The extension does not read
-browsing history or the contents of tabs it did not open for this purpose.
+A queue session keeps a fixed number of job postings open at once and opens the
+next one when the user skips or closes one. That requires opening tabs, knowing
+when one closes (which is how the user marks a posting done), and knowing which
+tabs the queue opened so they can be marked as such. The extension does not read
+browsing history or the contents of tabs for this purpose.
 ```
 
 **scripting**
 
 ```
-Injects the fill-and-review logic into a job posting page when the user opens
-one, so the extension can find the form fields, fill them, attach the CV, and
-render the review report. Also used by the click-to-pick feature, where the user
-clicks a real input on the page to teach the extension which field it is.
+Runs the fill-and-review logic in the page, so the extension can find the form
+fields, fill them, attach the CV, and render the review card. Also used by the
+point-at-a-field feature, where the user clicks a real input on the page to teach
+the extension what it is.
 ```
 
 **activeTab**
 
 ```
-Used for the actions the user starts from the toolbar popup — re-running a fill
-or opening the setup panel — so those act on the posting the user is currently
-looking at.
+Used for the actions the user starts from the toolbar popup — filling the page,
+resetting it, or pointing at a field to teach — so those act on the tab the user
+is currently looking at.
 ```
 
 **identity**
@@ -211,13 +200,12 @@ domains, and a job board routinely hands the applicant off to an employer domain
 that is not known until the moment the link is followed. The extension therefore
 cannot ship a match-pattern list that would cover its users' applications.
 
-What it actually does on a page is narrow. On load it compares the URL against
-the per-site configurations the user has created. If none matches, it does
-nothing at all: no fill, no capture, no report. Only on a site the user has
-configured does it read the form and the posting text.
-
-It does not read or transmit page content on unmatched sites, does not inject
-anything into search, banking or webmail pages, and sends no page data anywhere.
+What it does on a page is narrow. It looks at the page's form inputs and fills
+the ones it recognises from the user's own saved details. It never fills a form
+that has a password field (logins, sign-ups), a search box, payment card fields
+or one-time codes. It never submits a form. It only reads the posting's text
+(title and description) on pages from the user's own job queue, and it sends no
+page data anywhere.
 ```
 
 ### Are you using remote code?
@@ -229,8 +217,9 @@ anything into search, banking or webmail pages, and sends no page data anywhere.
 - **Personally identifiable information** — the profile the user saves (name,
   email, phone, address) and the CV / cover letter, used to fill forms.
 - **Website content** — the job posting's own title, description and
-  requirements, read from the page so the review can show the user what they are
-  applying to, and kept in the archive.
+  requirements, read from postings in the user's queue so the review can show the
+  user what they are applying to, and kept in the archive; and the wording of a
+  form question the user chooses to teach, kept so it can be recognised again.
 - **Web history** — the queue stores the URLs of job postings the user imported
   or opened, with the timestamps of their status changes.
 - **Authentication information** — only if the user turns on sync: the OAuth
@@ -249,8 +238,9 @@ location, user activity.
 - I do not use or transfer user data to determine creditworthiness or for lending
   purposes
 
-All three are true: nothing leaves the device except the application the user
-presses Apply on, and the job database if the user configures their own sync.
+All three are true: nothing leaves the device except the job database, if the
+user configures their own sync. Filled forms are submitted by the user, on the
+site, never by the extension.
 
 ### Privacy policy URL
 

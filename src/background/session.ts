@@ -7,19 +7,21 @@
  * was no way to tell where you were or to stop half-way.
  *
  * A session is a sliding window instead: at most `batchSize` job tabs exist at
- * any moment, and *finishing one is what opens the next* — submitting, skipping,
- * or simply closing the tab. The queue itself is derived from the job-URL
- * database (see `src/shared/queue.ts`), so nothing here duplicates that state.
+ * any moment, and *finishing one is what opens the next* — skipping it, or simply
+ * closing the tab, which (under `markDoneOnClose`) also marks the posting done:
+ * the user submits on the site by hand, so closing the tab is the one "done" the
+ * extension ever hears. The queue itself is derived from the job-URL database
+ * (see `src/shared/queue.ts`), so nothing here duplicates that state.
  *
- * State is split by lifetime, mirroring the redirect watches in
- * `service_worker.ts`: the session's existence lives in `chrome.storage.local`
- * so it survives a browser restart and can be resumed, while the tab↔URL map
- * lives in `chrome.storage.session` because tab ids mean nothing across restarts.
+ * State is split by lifetime: the session's existence lives in
+ * `chrome.storage.local` so it survives a browser restart and can be resumed,
+ * while the tab↔URL maps live in `chrome.storage.session` because tab ids mean
+ * nothing across restarts.
  */
 
-import type { SessionState } from '../shared/messages';
+import type { QueueTabState, SessionState } from '../shared/messages';
 import { getJobUrls, getSettings, mutateJobUrls } from '../shared/storage';
-import { applyStatus, recordStatus } from '../shared/jobUrls';
+import { applyStatus, finishOnClose, recordStatus } from '../shared/jobUrls';
 import { nextBatch, queueProgress } from '../shared/queue';
 import { navigableUrl } from '../shared/appLink';
 import { DEFAULT_SETTINGS } from '../shared/defaults';
@@ -31,6 +33,13 @@ const STAGGER_MS = 250;
 
 const SESSION_KEY = 'queueSession';
 const TABS_KEY = 'queueTabs';
+/**
+ * Tabs opened *from* a queue tab — the employer's form behind "Apply on company
+ * website" — mapped to the queue tab they came from. They belong to the posting
+ * (the chip, the card's queue strip) but are not slots: closing one finishes
+ * nothing, and they never count against `batchSize`.
+ */
+const CHILDREN_KEY = 'queueChildTabs';
 
 interface SessionRecord {
   active: boolean;
@@ -59,9 +68,34 @@ async function setTabs(tabs: Record<string, string>): Promise<void> {
   await chrome.storage.session.set({ [TABS_KEY]: tabs });
 }
 
+/** Child tab id -> the queue tab it was opened from. */
+async function getChildren(): Promise<Record<string, string>> {
+  const raw = await chrome.storage.session.get(CHILDREN_KEY);
+  return (raw[CHILDREN_KEY] as Record<string, string>) ?? {};
+}
+
+async function setChildren(children: Record<string, string>): Promise<void> {
+  await chrome.storage.session.set({ [CHILDREN_KEY]: children });
+}
+
+/**
+ * The user closed a queue tab, so they are done with its posting — record that,
+ * if `markDoneOnClose` says to. `finishOnClose` only ever moves `opened`, so a
+ * posting already skipped (Skip removes the tab from the map first, so this never
+ * even runs for it) or set by hand keeps its answer.
+ */
+async function finishPostings(urls: string[]): Promise<void> {
+  if (!urls.length) return;
+  const { markDoneOnClose } = await getSettings();
+  if (!markDoneOnClose) return;
+  const now = Date.now();
+  await mutateJobUrls((list) => urls.reduce((acc, url) => finishOnClose(acc, url, now), list));
+}
+
 /**
  * Drop tabs the user closed while the worker was asleep. Without this a dead
- * tab keeps occupying a slot forever and the session quietly stalls.
+ * tab keeps occupying a slot forever and the session quietly stalls — and its
+ * posting is finished exactly as `onTabClosed` would have finished it.
  */
 async function liveTabs(): Promise<Record<string, string>> {
   const tabs = await getTabs();
@@ -73,7 +107,10 @@ async function liveTabs(): Promise<Record<string, string>> {
     const tab = await chrome.tabs.get(Number(id)).catch(() => undefined);
     if (tab) live[id] = tabs[id];
   }));
-  if (Object.keys(live).length !== ids.length) await setTabs(live);
+  if (Object.keys(live).length !== ids.length) {
+    await setTabs(live);
+    await finishPostings(ids.filter((id) => !(id in live)).map((id) => tabs[id]));
+  }
   return live;
 }
 
@@ -138,6 +175,10 @@ async function topUp(): Promise<void> {
     if (tab?.id != null) {
       next[String(tab.id)] = url;
       opened.push(url);
+      // Recorded per tab, the moment it exists — not once the whole batch has
+      // opened. The page asks "did the queue open me?" as soon as it loads, and a
+      // map written after the stagger would answer no to every tab but the last.
+      await setTabs(next);
     }
     await delay(STAGGER_MS);
   }
@@ -179,9 +220,10 @@ export async function skipUrl(url: string, senderTabId?: number): Promise<Sessio
   await mutateJobUrls((list) => recordStatus(list, url, 'skipped'));
 
   const tabs = await getTabs();
-  const tabId = senderTabId ?? Number(
-    Object.keys(tabs).find((id) => tabs[id] === url) ?? NaN,
-  );
+  // Skipped from the employer's form in a child tab: the slot is its parent's.
+  const children = await getChildren();
+  const sender = senderTabId != null ? (children[String(senderTabId)] ?? String(senderTabId)) : undefined;
+  const tabId = Number(sender ?? Object.keys(tabs).find((id) => tabs[id] === url) ?? NaN);
   if (Number.isFinite(tabId)) {
     delete tabs[String(tabId)];
     await setTabs(tabs);
@@ -199,32 +241,66 @@ export async function skipUrl(url: string, senderTabId?: number): Promise<Sessio
   return sessionState();
 }
 
-/** A session tab closed (submitted, skipped, or dismissed): open the next. */
-export async function onTabClosed(tabId: number): Promise<void> {
-  const tabs = await getTabs();
-  if (!(String(tabId) in tabs)) return;
-  delete tabs[String(tabId)];
-  await setTabs(tabs);
-  await serialize(topUp);
-}
-
 /**
- * A submission was recorded. The tab may or may not close itself (that is the
- * `closeTabOnSubmit` setting), so free its slot either way — the posting is
- * finished regardless of whether its tab lingers.
+ * A tab closed. A queue tab finishes its posting (under `markDoneOnClose`) and
+ * frees its slot for the next; a child tab just stops being one.
  */
-export async function onSubmitted(tabId: number | undefined): Promise<void> {
-  if (tabId == null) return;
+export async function onTabClosed(tabId: number): Promise<void> {
+  const key = String(tabId);
+  const children = await getChildren();
+  if (key in children) {
+    delete children[key];
+    await setChildren(children);
+    return;
+  }
   const tabs = await getTabs();
-  if (!(String(tabId) in tabs)) return;
-  delete tabs[String(tabId)];
+  if (!(key in tabs)) return;
+  const url = tabs[key];
+  delete tabs[key];
   await setTabs(tabs);
+  // Its children outlive it as ordinary tabs: the posting they belonged to is done.
+  for (const [child, parent] of Object.entries(children)) if (parent === key) delete children[child];
+  await setChildren(children);
+  await finishPostings([url]);
   await serialize(topUp);
 }
 
 /** Whether a tab belongs to the current session (used to attribute a skip). */
 export async function urlForTab(tabId: number): Promise<string | undefined> {
   return (await getTabs())[String(tabId)];
+}
+
+/**
+ * A tab was opened from another. If that one is a queue tab (or one of its
+ * children), the new tab belongs to the same posting — always recorded against the
+ * queue tab itself, so a chain of handoffs still points at the slot.
+ */
+export async function adoptChildTab(tabId: number, openerTabId: number): Promise<void> {
+  const [tabs, children] = await Promise.all([getTabs(), getChildren()]);
+  const opener = String(openerTabId);
+  const root = opener in tabs ? opener : children[opener];
+  if (!root) return;
+  children[String(tabId)] = root;
+  await setChildren(children);
+}
+
+/**
+ * The page's question: did the queue open me? Answered for the sender's own tab
+ * only, with the posting it belongs to and the queue's progress for the chip.
+ */
+export async function queueTab(tabId: number | undefined): Promise<QueueTabState> {
+  if (tabId == null) return { inQueue: false };
+  const [tabs, children, list] = await Promise.all([getTabs(), getChildren(), getJobUrls()]);
+  const key = String(tabId);
+  const root = key in tabs ? key : children[key];
+  const url = root ? tabs[root] : undefined;
+  if (!url) return { inQueue: false };
+  return {
+    inQueue: true,
+    child: root !== key,
+    url,
+    progress: queueProgress(list, Object.values(tabs)),
+  };
 }
 
 /**

@@ -10,7 +10,6 @@
 import { describe, it, expect, afterEach } from 'vitest';
 import { tagElement, retintTag, clearTags } from './fieldTags';
 import { isExtensionUi, TAG_ATTR } from './extensionUi';
-import { SETUP_STATUS_TEXT } from '../shared/labels';
 
 const tags = () => [...document.querySelectorAll(`[${TAG_ATTR}]`)];
 
@@ -95,16 +94,6 @@ describe('naming a mark on the page', () => {
   it('is not read out, being a sighted shortcut to rows that are', () => {
     tagElement(input(), 'Email', 'high');
     expect(tags()[0].getAttribute('aria-hidden')).toBe('true');
-  });
-
-  /**
-   * Status is never colour alone. `high` says it by being there at all; `low` — found
-   * but not to be relied on — is the one that needs a word, and the word comes from
-   * the catalog rather than from a literal here.
-   */
-  it('has a word for the outcome that is not self-evident', () => {
-    expect(SETUP_STATUS_TEXT.low.chip.trim()).not.toBe('');
-    expect(SETUP_STATUS_TEXT.high.chip).toBe('');
   });
 });
 

@@ -1,0 +1,31 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Sign in — SomeShop</title>
+    <style>
+      body { font: 15px/1.6 system-ui, sans-serif; max-width: 420px; margin: 40px auto; padding: 0 16px; }
+      label { display: block; margin: 12px 0 4px; font-weight: 600; }
+      input { width: 100%; padding: 8px; box-sizing: border-box; font: inherit; }
+    </style>
+  </head>
+  <body>
+    <!--
+      A page that has nothing to do with jobs. The engine runs on every site, so this
+      is what it must leave alone: a login form (it has a password box), a search box,
+      and a card number. Nothing here may ever be filled.
+    -->
+    <form role="search"><label for="s-q">Search</label><input id="s-q" /></form>
+    <form id="login">
+      <label for="l-email">Email</label>
+      <input id="l-email" type="email" autocomplete="email" />
+      <label for="l-pass">Password</label>
+      <input id="l-pass" type="password" />
+    </form>
+    <form id="pay">
+      <label for="cc">Card number</label>
+      <input id="cc" autocomplete="cc-number" />
+    </form>
+  </body>
+</html>

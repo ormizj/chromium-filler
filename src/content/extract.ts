@@ -1,20 +1,29 @@
 /**
- * Pulls the job title and description out of the page for the modal, using the
- * site config selectors with generic fallbacks. `previewContainer` exposes the
- * same resolution (with its source) so the Setup panel can show what each
- * container selector currently matches — including auto-detected fallbacks.
+ * Pulls the job title and description out of the page for the review card's Job
+ * view, from generic containers. There are no per-site selectors any more — the
+ * `extract` argument survives for tests and for a caller that has a better idea
+ * than the fallbacks, and is empty in production.
  *
  * The container's *text* is never taken raw: shared/jobText.ts walks it into
  * blocks, so the modal can render prose as prose and so the broad fallbacks below
  * do not drag the application form and the sidebar in with the posting.
  */
 
-import type { SiteConfig } from '../shared/types';
 import { blocksToText, extractBlocks, isContentElement, type JobBlock } from '../shared/jobText';
 import { readJobMeta, type JobMeta } from '../shared/jobMeta';
 import { queryAll } from '../shared/query';
 
 export type ContainerKey = 'jobTitle' | 'jobDescription' | 'jobRequirements';
+
+/** Explicit container selectors, each optional — the generic fallbacks fill in. */
+export interface ExtractSelectors {
+  jobTitle?: string;
+  jobDescription?: string;
+  jobRequirements?: string;
+  company?: string;
+  location?: string;
+  employmentType?: string;
+}
 
 const TITLE_FALLBACKS = ['h1', '[class*="job-title" i]', '[class*="posting-headline" i]', 'title'];
 const DESCRIPTION_FALLBACKS = [
@@ -55,14 +64,14 @@ function firstMatch(selectors: string[]): HTMLElement | null {
   return null;
 }
 
-/** How a container's text was resolved, for the Setup panel's status dot. */
+/** How a container's text was resolved. */
 export type ContainerSource = 'override' | 'override-miss' | 'auto' | 'none';
 
 export interface ContainerPreview {
   el: HTMLElement | null;
   /** The container's readable structure — what the modal renders. */
   blocks: JobBlock[];
-  /** The same content as plain text, one line per block (Setup panel snippets). */
+  /** The same content as plain text, one line per block. */
   text?: string;
   source: ContainerSource;
 }
@@ -75,8 +84,8 @@ function resolved(el: HTMLElement, source: ContainerSource): ContainerPreview {
 const MISSING = (source: ContainerSource): ContainerPreview => ({ el: null, blocks: [], source });
 
 /** Resolve one job-info container: explicit selector first, then generic fallbacks. */
-export function previewContainer(config: SiteConfig, key: ContainerKey): ContainerPreview {
-  const selector = config.extract[key];
+export function previewContainer(extract: ExtractSelectors, key: ContainerKey): ContainerPreview {
+  const selector = extract[key];
   if (selector) {
     const el = elFor(selector);
     return el ? resolved(el, 'override') : MISSING('override-miss');
@@ -93,16 +102,16 @@ export interface ExtractedJob {
   meta: JobMeta;
 }
 
-export function extractJob(config: SiteConfig): ExtractedJob {
-  const title = previewContainer(config, 'jobTitle');
+export function extractJob(extract: ExtractSelectors = {}): ExtractedJob {
+  const title = previewContainer(extract, 'jobTitle');
   return {
     // A title is one line, so it stays a string — but a normalized one: an <h1>
     // wrapped across three source lines used to arrive with its indentation.
     title: (title.text || document.title).replace(/\s+/g, ' ').trim(),
-    description: previewContainer(config, 'jobDescription').blocks,
-    requirements: previewContainer(config, 'jobRequirements').blocks,
+    description: previewContainer(extract, 'jobDescription').blocks,
+    requirements: previewContainer(extract, 'jobRequirements').blocks,
     // Not a container walk: these three are single facts, read from the posting's
     // structured data rather than from its prose. See shared/jobMeta.ts.
-    meta: readJobMeta(document, config.extract),
+    meta: readJobMeta(document, extract),
   };
 }

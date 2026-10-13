@@ -74,116 +74,52 @@
       <div class="panel phone">
         <h2>Options · phone (390px)</h2>
         <div class="states">
+          <a href="./frame.html?page=options&amp;state=profile">profile</a>
+          <a href="./frame.html?page=options&amp;state=custom-fields">your own fields</a>
+          <!-- Behind a closed disclosure on a real page. -->
+          <a href="./frame.html?page=options&amp;state=wordings">other wordings for your details</a>
+          <a href="./frame.html?page=options&amp;state=learned">what it has learned</a>
           <a href="./frame.html?page=options&amp;state=export">archive: what to export</a>
           <a href="./frame.html?page=options&amp;state=sync-guide">help: setting up sync</a>
         </div>
         <iframe src="./frame.html?page=options" title="Options harness, phone width"></iframe>
       </div>
       <div class="panel phone">
-        <h2>Review modal · phone <small>(<a href="./frame.html?page=modal">no session</a> · <a href="./frame.html?page=modal&amp;session=1">session</a>)</small></h2>
-        <!-- One link per flow: a two-step posting renders a different body
-             entirely (notice + Fill this page instead), and it is otherwise only
-             reachable by driving a real board with the extension installed. -->
+        <h2>Review card · phone <small>(<a href="./frame.html?page=modal">any page</a> · <a href="./frame.html?page=modal&amp;queue=1">queue tab</a>)</small></h2>
+        <!-- One link per rendering. Most are reachable on a real page only by
+             pressing something — Teach, a row's Confirm — or by a form arriving
+             late, none of which a screenshot can do. -->
         <div class="states">
-          <a href="./frame.html?page=modal&amp;session=1">filled</a>
-          <a href="./frame.html?page=modal&amp;state=long">long posting</a>
-          <a href="./frame.html?page=modal&amp;state=long&amp;view=fields">fields view</a>
-          <!-- The report never re-colours itself when a row is confirmed, so the
-               retired button is the only difference from the fields view above —
-               open both to check that nothing else moved. -->
-          <a href="./frame.html?page=modal&amp;state=confirmed&amp;view=fields">fields view (row confirmed)</a>
-          <a href="./frame.html?page=modal&amp;state=redirect">hands off</a>
-          <a href="./frame.html?page=modal&amp;state=redirect-followed">handing off</a>
-          <!-- An apply link that opens a phone app, which is the one handoff the
-               extension refuses: no tab, no report to follow, and the banner is
-               the only thing that says why the button was left alone. -->
-          <a href="./frame.html?page=modal&amp;state=app-link">applies in an app</a>
-          <a href="./frame.html?page=modal&amp;state=landed">landed (via)</a>
-          <!-- Two different things, and they were one link reaching only the
-               second. `empty` is an empty *profile* — the report has no rows,
-               which is the only way that banner can fire — and `listing` is a
-               results page whose fields all went unrecognised, which is where
-               the blocked Apply really shows up. -->
-          <a href="./frame.html?page=modal&amp;state=empty">nothing to fill with</a>
-          <a href="./frame.html?page=modal&amp;state=listing">listing page</a>
-          <!-- The three flow-banner states. Each is a distinct rendering of the
-               card and none of them was reachable from here, which is most of why
-               the confirmed state went unlooked-at for so long. -->
-          <a href="./frame.html?page=modal&amp;state=applied">sent &amp; confirmed</a>
-          <!-- The other half of "applied": the record read back on a later visit,
-               where Apply and Skip are both retired. The redirect variant is what
-               proves the footer's applied branch outranks its redirect branch. -->
-          <a href="./frame.html?page=modal&amp;state=already-applied">already applied</a>
-          <a href="./frame.html?page=modal&amp;state=already-applied&amp;note=apply">already applied (note open)</a>
-          <a href="./frame.html?page=modal&amp;state=already-applied-redirect">already applied (two-step)</a>
-          <a href="./frame.html?page=modal&amp;state=apply-unset">apply blocked (no button)</a>
-          <a href="./frame.html?page=modal&amp;state=apply-unverified&amp;note=apply">apply blocked (note open)</a>
-          <a href="./frame.html?page=modal&amp;state=finish-setup">apply finishes the setup</a>
-          <a href="./frame.html?page=modal&amp;state=finish-setup-saved">…the same offer, right after a first pass is saved</a>
+          <a href="./frame.html?page=modal">filled, two to teach</a>
+          <a href="./frame.html?page=modal&amp;teach=1">teaching a row</a>
+          <a href="./frame.html?page=modal&amp;teach=2&amp;new=1">teaching: a new field on the spot</a>
+          <a href="./frame.html?page=modal&amp;teach=4">Not this, on a filled row</a>
+          <a href="./frame.html?page=modal&amp;state=taught">taught &amp; ignored rows</a>
+          <a href="./frame.html?page=modal&amp;state=confirmed">a guess, confirmed</a>
+          <a href="./frame.html?page=modal&amp;state=appeared-later">fields that appeared later</a>
+          <a href="./frame.html?page=modal&amp;state=failed-fill">matches that would not take</a>
+          <a href="./frame.html?page=modal&amp;state=nothing">nothing recognised yet</a>
+          <a href="./frame.html?page=modal&amp;state=empty">nothing to fill with (empty profile)</a>
+          <a href="./frame.html?page=modal&amp;state=bare">no inputs yet</a>
+          <a href="./frame.html?page=modal&amp;state=already-applied&amp;queue=1&amp;view=job">already applied (queue tab)</a>
+          <a href="./frame.html?page=modal&amp;queue=1&amp;view=job">queue tab: the posting</a>
+          <a href="./frame.html?page=modal&amp;state=long&amp;view=job">long posting</a>
+          <a href="./frame.html?page=modal&amp;state=pill-only">folded to its pill</a>
           <a href="./frame.html?page=modal&amp;state=fullscreen">fullscreen</a>
           <!-- Open this one in a wide tab: it is a desktop-only rendering. -->
           <a href="./frame.html?page=modal&amp;state=flush">flush to the edge</a>
         </div>
-        <iframe src="./frame.html?page=modal&amp;session=1" title="Review modal harness, phone width"></iframe>
+        <iframe src="./frame.html?page=modal" title="Review card harness, phone width"></iframe>
       </div>
       <div class="panel phone">
-        <h2>Setup wizard · phone <small>(<a href="./frame.html?page=setup">open alone</a>)</small></h2>
-        <!-- Six steps, one on screen at a time, so five of them are otherwise
-             reachable only by pressing Next — which a screenshot cannot do.
-             `&step=` opens each directly. -->
+        <h2>Queue chip · phone</h2>
+        <!-- The chip in its corner and the card's pill in the other — the two marks
+             the extension leaves on a page the queue opened. -->
         <div class="states">
-          <a href="./frame.html?page=setup&amp;step=site">1 · Site</a>
-          <a href="./frame.html?page=setup&amp;step=prep">2 · Page actions</a>
-          <a href="./frame.html?page=setup&amp;step=kind">3 · Application type</a>
-          <a href="./frame.html?page=setup&amp;step=info">4 · Job info</a>
-          <a href="./frame.html?page=setup&amp;step=fields">5 · Form fields</a>
-          <a href="./frame.html?page=setup&amp;step=send">6 · Sending</a>
+          <a href="./frame.html?page=chip">chip + folded card</a>
+          <a href="./frame.html?page=chip&amp;open=1">chip with the card open (hidden on a phone)</a>
         </div>
-        <!-- The panel shares the review modal's slot, so it has the modal's
-             geometry states too — and `pills` is the arrangement neither surface
-             can show alone: both folded, stacked in the rail. -->
-        <!-- Recording is the front door, and every one of these states is
-             reachable on a real page only by applying to a job — so without a link
-             here nobody looks at them. -->
-        <div class="states">
-          <a href="./frame.html?page=setup&amp;state=home-fresh">home: a new site (pass 1 is coral)</a>
-          <a href="./frame.html?page=setup&amp;state=home-empty">home: nothing found on the page</a>
-          <a href="./frame.html?page=setup&amp;state=home-fresh&amp;marks=1">home, with the page marked up</a>
-          <a href="./frame.html?page=setup&amp;state=home-fresh&amp;ff=mobile">home, on a phone (the mobile half)</a>
-          <a href="./frame.html?page=setup&amp;state=recording">recording (bar + pill)</a>
-          <a href="./frame.html?page=setup&amp;state=recording-armed">recording, armed (the page is live)</a>
-          <a href="./frame.html?page=setup&amp;state=recording-reset">recording, resetting (the warning behind Reset)</a>
-          <a href="./frame.html?page=setup&amp;state=recording-held">recording, a send held (marked, not pressed)</a>
-          <a href="./frame.html?page=setup&amp;state=recording-declare">recording, the Declare menu open</a>
-          <a href="./frame.html?page=setup&amp;state=recording-declare-external">recording, Declare on a two-step board</a>
-          <a href="./frame.html?page=setup&amp;state=recording-long">recording, a long step label (the readout's second line)</a>
-          <a href="./frame.html?page=setup&amp;state=recording-bottom">recording, the bar moved to the bottom</a>
-          <a href="./frame.html?page=setup&amp;state=after-send">after sending: point at the confirmation</a>
-          <a href="./frame.html?page=setup&amp;state=after-send-unsent">after sending: reached by hand, nothing sent yet</a>
-          <a href="./frame.html?page=setup&amp;state=after-send-saved">after sending: saved</a>
-          <a href="./frame.html?page=setup&amp;state=review">review a recording</a>
-          <a href="./frame.html?page=setup&amp;state=review-external">review a two-step recording</a>
-          <a href="./frame.html?page=setup&amp;state=home-before-send">home: pass 1 in, pass 2 outstanding (coral moves)</a>
-          <a href="./frame.html?page=setup&amp;state=home-complete">home: both passes in (Done is coral)</a>
-          <a href="./frame.html?page=setup&amp;state=home-before-send&amp;saved=1">home, as a recording lands on it</a>
-        </div>
-        <div class="states">
-          <a href="./frame.html?page=setup&amp;step=site">the wizard, reached from a configured home</a>
-          <a href="./frame.html?page=setup&amp;state=help">first run (legend)</a>
-          <a href="./frame.html?page=setup&amp;state=external&amp;step=kind">external posting</a>
-          <a href="./frame.html?page=setup&amp;state=cv-steps&amp;step=prep">CV needs confirming</a>
-          <a href="./frame.html?page=setup&amp;state=submit-unset&amp;step=send">no Send button</a>
-          <a href="./frame.html?page=setup&amp;state=success-unset&amp;step=send">no confirmation</a>
-          <a href="./frame.html?page=setup&amp;state=fullscreen">fullscreen</a>
-          <!-- Open this one in a wide tab: it is a desktop-only rendering. -->
-          <a href="./frame.html?page=setup&amp;state=flush">flush to the edge</a>
-          <a href="./frame.html?page=setup&amp;pills=1">both folded (pills)</a>
-          <!-- The marks are on the HOST page's light DOM, so nothing that inspects
-               the panel can see them — and `marks` is a parameter rather than a
-               state so it pairs with any of the above. -->
-          <a href="./frame.html?page=setup&amp;marks=1">field marks on the page</a>
-        </div>
-        <iframe src="./frame.html?page=setup" title="Setup panel harness, phone width"></iframe>
+        <iframe src="./frame.html?page=chip" title="Queue chip harness, phone width"></iframe>
       </div>
       <div class="panel phone picker">
         <h2>Picker · phone</h2>
@@ -195,7 +131,7 @@
              subject of the two-row bar. -->
         <div class="states">
           <a href="./frame.html?page=picker">pick the description</a>
-          <a href="./frame.html?page=picker&amp;label=Send%20button">pick the Send button</a>
+          <a href="./frame.html?page=picker&amp;label=field%20to%20teach">pick a field to teach</a>
           <a href="./frame.html?page=picker&amp;state=long">pick a full-length description</a>
         </div>
         <iframe src="./frame.html?page=picker" title="Element picker harness, phone width"></iframe>
@@ -221,7 +157,7 @@
       <div class="panel fixtures">
         <h2>Fixture scenarios <small>(<a href="http://localhost:5199/" target="_blank">open at :5199</a>)</small></h2>
         <p class="note">
-          Every application flow as a real page, each with its own URL. Needs
+          Every fill scenario as a real page, each with its own URL. Needs
           <code>npm run dev:all</code> (this panel stays blank under a plain
           <code>npm run dev</code>) and the extension loaded unpacked from <code>dist/</code>.
         </p>

@@ -1,20 +1,20 @@
 /**
- * Popup: shows whether the current page matches a site config, offers a
- * state-aware Fill / Show report / Reset button, and reports where you
- * are in a running queue session.
+ * Popup: what the extension did on this page, a Fill button that works on any
+ * page, Teach (point at a field the card did not list), and where you are in a
+ * running queue session.
  */
 
 import { MSG, type SessionState, type StatusResponse } from '../shared/messages';
 import { ACTION_LABELS } from '../shared/labels';
 import { BUILD_ID, BUILD_LABEL } from '../shared/buildId';
-import { hostOf } from '../shared/url';
 import { getProfile } from '../shared/storage';
 import { getCv } from '../shared/cvStore';
 
 const badge = document.getElementById('site-status')!;
 const detail = document.getElementById('detail')!;
 const primary = document.getElementById('primary') as HTMLButtonElement;
-const reconfigure = document.getElementById('reconfigure') as HTMLAnchorElement;
+const teachLink = document.getElementById('teach') as HTMLAnchorElement;
+const resetBtn = document.getElementById('reset') as HTMLButtonElement;
 const openOptions = document.getElementById('open-options') as HTMLAnchorElement;
 const openQueue = document.getElementById('open-queue') as HTMLAnchorElement;
 const sessionBox = document.getElementById('session')!;
@@ -70,33 +70,22 @@ function renderNoContentScript(): void {
 function render(): void {
   renderSession();
   if (!status) return renderNoContentScript();
-  if (status.siteMatched) {
-    badge.textContent = 'matched';
-    badge.className = 'chip ok';
-    const via = status.landedFrom ? ` (via ${hostOf(status.landedFrom)})` : '';
-    detail.textContent = status.postingKind === 'redirect'
-      ? `${status.siteName}: applies on ${status.redirectHref ? hostOf(status.redirectHref) : 'the employer’s site'} — external application.`
-      : status.hasRun
-        ? `${status.siteName}${via}: ${status.filledCount}/${status.reportedCount} fields filled.`
-        : `${status.siteName}${via}: ready to fill.`;
-    primary.disabled = false;
-    // With the report collapsed, the useful action is to bring it back — not to
-    // wipe every field that was just filled, which is what resetting does.
-    //
-    // "Reset" and not "Reset & Re-run": the press only resets. It blanks the
-    // fields, throws the report away and puts this button back to Fill — and
-    // that second press is deliberately the user's (see the click handler). A
-    // label has to say what one press does.
-    primary.textContent = status.hasRun
-      ? (status.modalMinimized ? 'Show report' : 'Reset')
-      : 'Fill';
+  const { filledCount, toTeach, hasRun, inQueue } = status;
+  badge.textContent = inQueue ? 'queue' : hasRun && filledCount ? 'filled' : 'ready';
+  badge.className = inQueue ? 'chip accent' : hasRun && filledCount ? 'chip ok' : 'chip';
+  if (!hasRun) {
+    detail.textContent = 'Nothing filled on this page yet.';
+  } else if (filledCount || toTeach) {
+    const teach = toTeach ? ` · ${toTeach} to teach` : '';
+    detail.textContent = `${filledCount} filled${teach} on this page. Submit on the site when you are ready.`;
   } else {
-    badge.textContent = 'no config';
-    badge.className = 'chip warn';
-    detail.textContent = 'No site config matches this URL. Set it up visually to enable filling here.';
-    primary.disabled = false;
-    primary.textContent = 'Set up this site';
+    detail.textContent = 'No fields for the extension on this page.';
   }
+  primary.disabled = false;
+  // With the card folded, bringing it back is the useful press; "Fill" also
+  // brings it back, but after sweeping the page again.
+  primary.textContent = status.modalMinimized ? 'Show report' : 'Fill';
+  resetBtn.hidden = !(hasRun && filledCount > 0);
 }
 
 function renderSession(): void {
@@ -118,8 +107,9 @@ function renderSession(): void {
   sessionDetail.textContent = 'postings done in the queue';
   sessionBar.style.width = `${Math.round(p.ratio * 100)}%`;
   renderSessionChips(p.applied, p.skipped, p.queued);
-  // Only offer Skip for a page that is actually one of the session's postings.
-  sessionSkip.disabled = !tabUrl;
+  // Only offer Skip on a page that is one of the session's postings — the
+  // background answers that from the tab, and the content script passes it on.
+  sessionSkip.disabled = !status?.inQueue;
 }
 
 /**
@@ -142,9 +132,9 @@ function renderSessionChips(applied: number, skipped: number, queued: number): v
   );
 }
 
-/** Open the on-page visual Setup panel in the active tab, then close the popup. */
-async function enterSetup(): Promise<void> {
-  await send(MSG.SETUP);
+/** Point at a field on the page to teach it, then close the popup. */
+async function enterTeach(): Promise<void> {
+  await send(MSG.TEACH);
   window.close();
 }
 
@@ -162,8 +152,8 @@ async function refresh(): Promise<void> {
 
 /**
  * The first thing still missing, named. A brand-new install has no profile and
- * no CV, so every page it opens reports "no site config matches this URL" —
- * true, and useless: the work to do is in the options page, not on this page.
+ * no CV, so there is nothing to fill any page with — and the work to do is in the
+ * options page, not on this page.
  */
 async function renderNudge(): Promise<void> {
   const [profile, cv] = await Promise.all([getProfile(), getCv()]);
@@ -177,40 +167,37 @@ async function renderNudge(): Promise<void> {
 
 primary.addEventListener('click', async () => {
   if (!status) return;
-  if (!status.siteMatched) {
-    await enterSetup();
-    return;
-  }
   primary.disabled = true;
-  if (status.hasRun && status.modalMinimized) {
+  if (status.modalMinimized) {
     await send(MSG.SHOW_REPORT);
     window.close();
     return;
   }
-  if (status.hasRun) {
-    // Reset leaves the popup open: it puts the button back to Fill, and the press
-    // that follows is the point of having pressed this one.
-    await send(MSG.RESET);
-    status = await send<StatusResponse>(MSG.STATUS);
-    render();
-    return;
-  }
-  // Filling moves the work to the page. The review modal reports it in full, and
-  // the popup was left on top of that repeating a one-line summary of it.
+  // Filling moves the work to the page, where the card reports it in full.
   await send(MSG.RUN);
   window.close();
 });
 
+resetBtn.addEventListener('click', async () => {
+  // Reset leaves the popup open on Fill: the press that follows is the point of
+  // having pressed this one.
+  resetBtn.disabled = true;
+  await send(MSG.RESET);
+  status = await send<StatusResponse>(MSG.STATUS);
+  resetBtn.disabled = false;
+  render();
+});
+
 sessionSkip.addEventListener('click', async () => {
-  if (!tabUrl) return;
+  if (!tabUrl || !status?.inQueue) return;
   sessionSkip.disabled = true;
   await sendBg(MSG.SESSION_SKIP, { url: tabUrl });
   window.close();
 });
 
-reconfigure.addEventListener('click', async (e) => {
+teachLink.addEventListener('click', async (e) => {
   e.preventDefault();
-  await enterSetup();
+  await enterTeach();
 });
 
 // The queue *is* the links, so this lands on the box you paste them into rather

@@ -22,7 +22,6 @@ const DIR = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.resolve(DIR, '..');
 const DIST = path.join(ROOT, 'dist');
 const OUT = path.join(ROOT, 'design/store');
-const CONFIGS = path.join(ROOT, 'test/fixtures/test-site-configs.json');
 
 const SIZE = { width: 1280, height: 800 };
 
@@ -32,25 +31,28 @@ const PROFILE = {
     email: 'ada@example.com', phone: '+1 555 123 4567', city: 'London',
     coverLetter: 'I have shipped platform tooling for eight years, most recently the build system behind a 400-engineer monorepo.',
   },
-  custom: {},
+  keywords: {},
+  customFields: [
+    { id: 'c_years', label: 'Years of experience', kind: 'text', value: '8', keywords: ['experience in years'] },
+    { id: 'c_visa', label: 'Visa sponsorship', kind: 'yesNo', value: 'No', keywords: ['right to work'] },
+  ],
 };
 
 /** Postings for the Queue tab, so the stat cards and the list are not empty. */
 const now = Date.now();
 const day = 86_400_000;
-// slow-boards is deliberately NOT `applied`: it is the posting the modal
-// screenshots are taken on, and an applied URL retires Apply and Skip — the
-// listing would then show the one state where the extension does nothing.
+// slow-boards is deliberately NOT `applied`: it is the posting the card
+// screenshots are taken on, and an applied posting leads with that record.
 const JOB_URLS = [
   ['http://localhost:5199/sites/slow-boards.html', 'opened', 0],
   ['http://localhost:5199/sites/cv-confirm.html', 'applied', 3],
   ['http://localhost:5199/sites/chaos-form.html', 'applied', 2],
   ['http://localhost:5199/sites/modal-lever.html', 'applied', 2],
   ['http://localhost:5199/sites/quick-plain.html', 'skipped', 1],
-  ['http://localhost:5199/sites/mixed-external.html', 'redirected', 1],
-  ['http://localhost:5199/sites/external-link.html', 'opened', 0],
+  ['http://localhost:5199/sites/questions.html', 'markedDone', 1],
+  ['http://localhost:5199/sites/ats-form.html', 'opened', 0],
   ['http://localhost:5199/sites/quick-uploads.html', 'new', 0],
-  ['http://localhost:5199/sites/listing.html', 'new', 0],
+  ['http://localhost:5199/sites/quick-board.html?job=plain&n=2', 'new', 0],
 ].map(([url, status, ago]) => ({
   url,
   status,
@@ -121,19 +123,10 @@ async function extensionPage(file) {
 
 const seed = await extensionPage('src/options/options.html');
 await seed.evaluate(
-  async ({ profile, configs, jobUrls }) => {
-    await chrome.storage.local.set({
-      profile,
-      siteConfigs: configs,
-      jobUrls,
-      settings: { autoRunOnLoad: true, closeTabOnSubmit: false },
-    });
+  async ({ profile, jobUrls }) => {
+    await chrome.storage.local.set({ profile, jobUrls, lessons: [] });
   },
-  {
-    profile: PROFILE,
-    configs: JSON.parse(fs.readFileSync(CONFIGS, 'utf8')),
-    jobUrls: JOB_URLS,
-  },
+  { profile: PROFILE, jobUrls: JOB_URLS },
 );
 // Through the real file input, so the options page's own encode path runs.
 await seed.setInputFiles('#cv-input', {
@@ -155,8 +148,11 @@ async function shot(page, name) {
 const job = await context.newPage();
 await job.setViewportSize(SIZE);
 await job.goto('http://localhost:5199/sites/slow-boards.html');
-// The fixture injects its form ~2s in; the modal follows the fill.
+// The fixture injects its form ~2s in; the card's pill follows the fill. Off the
+// queue the card starts folded, so it is opened the way a user opens it.
+await job.locator('.cf-pill').click({ timeout: 30_000 });
 await job.locator('.cf-card').waitFor({ state: 'visible', timeout: 30_000 });
+await job.locator('.cf-view', { hasText: 'Job' }).click();
 await job.waitForTimeout(1200);
 await shot(job, '1-review-job');
 
@@ -176,9 +172,9 @@ await opts.locator('#tab-profile').click();
 await opts.waitForTimeout(400);
 await shot(opts, '4-profile');
 
-await opts.locator('#tab-sites').click();
+await opts.locator('#custom-section').scrollIntoViewIfNeeded();
 await opts.waitForTimeout(400);
-await shot(opts, '5-sites');
+await shot(opts, '5-own-fields');
 
 await opts.locator('#tab-help').click();
 await opts.waitForTimeout(400);

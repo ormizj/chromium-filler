@@ -3,53 +3,25 @@
  * and back. All the difficulty is next door in syncJobs.ts — this file only
  * reads, writes, prunes and validates.
  *
- * It reads the two keys directly rather than through `getState()`, which returns
- * four of the five and omits `jobDetails` entirely, so it is not a sufficient
- * source for anything that has to be complete.
+ * It reads the two keys directly rather than through `getState()`, which omits
+ * `jobDetails` entirely, so it is not a sufficient source for anything that has to
+ * be complete.
  */
 
-import {
-  getDeletedSiteConfigs, getJobDetails, getJobUrls, getSettings, getStoredSiteConfigs,
-  saveDeletedSiteConfigs, saveJobDetails, saveJobUrls, saveStoredSiteConfigs,
-} from './storage';
+import { getJobDetails, getJobUrls, saveJobDetails, saveJobUrls } from './storage';
 import { pruneTombstones } from './jobUrls';
 import { pruneDetails } from './jobDetails';
-import { pruneConfigTombstones } from './siteConfigs';
-import type { StoredSiteConfig } from './types';
 import {
   SYNC_SCHEMA, isSupportedSnapshot, mergeJobs, upgradeSnapshot, type JobSnapshot,
 } from './syncJobs';
 
 /**
- * Whether this device's site configs take part — `settings.syncSiteConfigs`.
- * Off, the local snapshot carries none and `applySnapshot` writes none, so the
- * far side's configs pass through the merge to the upload untouched: turning it
- * off here never deletes them over there.
+ * What this device currently holds. No site configs: this build has none, and
+ * whatever an older peer uploaded passes through the merge to the upload untouched.
  */
-async function configsIncluded(): Promise<boolean> {
-  return (await getSettings()).syncSiteConfigs;
-}
-
-/** What this device currently holds (and is willing to share). */
 export async function buildSnapshot(): Promise<JobSnapshot> {
-  const [jobUrls, jobDetails, withConfigs] = await Promise.all([
-    getJobUrls(), getJobDetails(), configsIncluded(),
-  ]);
-  const [siteConfigs, deletedSiteConfigs] = withConfigs
-    ? await Promise.all([getStoredSiteConfigs(), getDeletedSiteConfigs()])
-    : [[], {}];
-  return { schema: SYNC_SCHEMA, jobUrls, jobDetails, siteConfigs, deletedSiteConfigs };
-}
-
-/**
- * The merge sorts configs by id, but locally order is meaningful —
- * `findMatchingConfig` takes the first match. Keep this device's order and
- * append whatever arrived.
- */
-function inLocalOrder(merged: StoredSiteConfig[], local: StoredSiteConfig[]): StoredSiteConfig[] {
-  const rank = new Map(local.map((c, i) => [c.id, i]));
-  const known = merged.filter((c) => rank.has(c.id)).sort((a, b) => rank.get(a.id)! - rank.get(b.id)!);
-  return [...known, ...merged.filter((c) => !rank.has(c.id))];
+  const [jobUrls, jobDetails] = await Promise.all([getJobUrls(), getJobDetails()]);
+  return { schema: SYNC_SCHEMA, jobUrls, jobDetails, siteConfigs: [], deletedSiteConfigs: {} };
 }
 
 /**
@@ -59,6 +31,9 @@ function inLocalOrder(merged: StoredSiteConfig[], local: StoredSiteConfig[]): St
  * a merge whose result changed with the clock could not be idempotent. A
  * tombstone only has to outlive the other device's next sync, and a capture is
  * worth keeping only while its posting is.
+ *
+ * The opaque configs are not written locally — they are returned, so the upload
+ * carries them back to the peer that owns them.
  */
 export async function applySnapshot(
   snapshot: JobSnapshot,
@@ -66,20 +41,11 @@ export async function applySnapshot(
 ): Promise<JobSnapshot> {
   const jobUrls = pruneTombstones(snapshot.jobUrls, now);
   const jobDetails = pruneDetails(snapshot.jobDetails, jobUrls.map((e) => e.url));
-  const deletedSiteConfigs = pruneConfigTombstones(snapshot.deletedSiteConfigs, now);
-  const writes: Promise<void>[] = [saveJobUrls(jobUrls), saveJobDetails(jobDetails)];
-  if (await configsIncluded()) {
-    // Local order on disk only; the upload keeps the merge's sorted order, so two
-    // devices holding the same configs write the same file.
-    const local = inLocalOrder(snapshot.siteConfigs, await getStoredSiteConfigs());
-    writes.push(saveStoredSiteConfigs(local), saveDeletedSiteConfigs(deletedSiteConfigs));
-  }
-  await Promise.all(writes);
+  await Promise.all([saveJobUrls(jobUrls), saveJobDetails(jobDetails)]);
   // Returned, not just stored: the far side wants the same answer this device
   // just settled on. Writing the *unpruned* merge back instead meant the remote
-  // file never shed a tombstone or an orphaned capture, and grew for the life of
-  // the account carrying job text belonging to postings that no longer exist.
-  return { ...snapshot, jobUrls, jobDetails, deletedSiteConfigs };
+  // file never shed a tombstone or an orphaned capture.
+  return { ...snapshot, jobUrls, jobDetails };
 }
 
 /**

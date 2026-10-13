@@ -12,8 +12,8 @@ import { beforeEach, afterEach, describe, expect, it } from 'vitest';
 import { resetChromeMock } from '../../test/setup';
 import { FakeGoogle } from '../../test/fakeGoogle';
 import { SYNC_SCHEMA, type JobSnapshot } from '../shared/syncJobs';
-import type { JobUrlEntry, StoredSiteConfig } from '../shared/types';
-import { getJobUrls, getSiteConfigs, getStoredSiteConfigs } from '../shared/storage';
+import type { JobUrlEntry } from '../shared/types';
+import { getJobUrls } from '../shared/storage';
 import {
   connectAccount, disconnectAccount, setSyncClient, syncNow, syncOnStartup, syncState,
 } from './sync';
@@ -122,7 +122,7 @@ describe('the first merge', () => {
 
     const s = await syncNow(false);
 
-    expect(s.pending).toEqual({ local: 1, remote: 2, sites: { local: 0, remote: 0 } });
+    expect(s.pending).toEqual({ local: 1, remote: 2 });
     // Nothing was written at either end.
     expect(await localUrls()).toEqual(['https://a.example/1']);
     expect(remote().jobUrls).toHaveLength(2);
@@ -381,68 +381,42 @@ describe('syncOnStartup', () => {
   });
 });
 
-describe('site configs', () => {
+/**
+ * This build has no site configs. A peer still running an older build does, and
+ * reads them back out of the shared file — so they ride through untouched rather
+ * than being dropped on upload, and none of them is ever written to this device.
+ */
+describe('site configs from an older build', () => {
   beforeEach(ready);
 
-  function site(id: string, over: Partial<StoredSiteConfig> = {}): StoredSiteConfig {
-    return { id, name: id, urlPatterns: [`*://${id}/*`], updatedAt: Date.now(), ...over };
-  }
+  const site = (id: string, updatedAt = 1) => ({ id, name: id, urlPatterns: [`*://${id}/*`], updatedAt });
 
-  it('carries both halves each way, and keeps local list order', async () => {
-    const at = Date.now();
-    await chrome.storage.local.set({
-      siteConfigs: [
-        site('zeta', { desktop: { extract: {}, submitSelector: '#d', updatedAt: at } }),
-        site('acme', { desktop: { extract: {}, submitSelector: '#a', updatedAt: at } }),
-      ],
-    });
-    google.seed(JSON.stringify({
-      ...snapshot([]),
-      siteConfigs: [site('zeta', { updatedAt: at + 1, mobile: { extract: {}, submitSelector: '.m', updatedAt: at + 1 } })],
-    }));
+  it('carries the far side\'s configs back up untouched, and keeps none of them here', async () => {
+    google.seed(JSON.stringify({ ...snapshot([]), siteConfigs: [site('zeta'), site('acme')], deletedSiteConfigs: { old: 5 } }));
 
     await syncNow(true);
 
-    const local = await getStoredSiteConfigs();
-    expect(local.map((c) => c.id)).toEqual(['zeta', 'acme']);
-    expect(local[0].desktop?.submitSelector).toBe('#d');
-    expect(local[0].mobile?.submitSelector).toBe('.m');
-    // jsdom reads as desktop, so this device sees its own half.
-    expect((await getSiteConfigs())[0].submitSelector).toBe('#d');
-    expect(remote().siteConfigs.map((c) => c.id)).toEqual(['acme', 'zeta']);
+    expect(remote().siteConfigs.map((c: { id: string }) => c.id)).toEqual(['acme', 'zeta']);
+    expect(remote().deletedSiteConfigs).toEqual({ old: 5 });
+    expect((await chrome.storage.local.get('siteConfigs')).siteConfigs).toBeUndefined();
   });
 
-  it('applies a deletion from the other device', async () => {
-    await chrome.storage.local.set({ siteConfigs: [site('acme', { updatedAt: Date.now() - 1000 })] });
-    google.seed(JSON.stringify({ ...snapshot([]), deletedSiteConfigs: { acme: Date.now() } }));
+  it('never sends a stale local copy over the far side\'s', async () => {
+    await chrome.storage.local.set({ siteConfigs: [site('acme', 999)] });
+    google.seed(JSON.stringify({ ...snapshot([]), siteConfigs: [site('acme', 2)] }));
 
     await syncNow(true);
 
-    expect(await getStoredSiteConfigs()).toEqual([]);
-    expect(remote().deletedSiteConfigs).toHaveProperty('acme');
-  });
-
-  it('switched off, neither sends nor takes — and never deletes the far side\'s', async () => {
-    await chrome.storage.local.set({
-      settings: { syncEnabled: true, syncSiteConfigs: false },
-      siteConfigs: [site('local-only')],
-    });
-    google.seed(JSON.stringify({ ...snapshot([]), siteConfigs: [site('remote-only')] }));
-
-    await syncNow(true);
-
-    expect((await getStoredSiteConfigs()).map((c) => c.id)).toEqual(['local-only']);
-    expect(remote().siteConfigs.map((c) => c.id)).toEqual(['remote-only']);
+    expect(remote().siteConfigs).toEqual([site('acme', 2)]);
   });
 
   it('reads a schema-1 file as one with no configs', async () => {
-    await chrome.storage.local.set({ siteConfigs: [site('acme')] });
     google.seed(JSON.stringify({ schema: 1, jobUrls: [], jobDetails: {} }));
 
     const s = await syncNow(true);
 
     expect(s.lastError).toBeUndefined();
     expect(remote().schema).toBe(SYNC_SCHEMA);
-    expect(remote().siteConfigs.map((c) => c.id)).toEqual(['acme']);
+    expect(remote().siteConfigs).toEqual([]);
   });
 });

@@ -425,3 +425,79 @@ button.cf-btn.cf-applied-btn[aria-disabled='true'] {
   width: 100%;
   min-height: var(--tap);
 }
+
+/* ---------------- Teaching ---------------- */
+
+/* "Appeared later": the report holds still, so inputs that arrived after the first
+   sweep join the end under their own small head rather than slotting in above rows
+   the user may be working down. */
+.cf-later {
+  padding: var(--space-3) var(--space-6) var(--space-1);
+  font-size: var(--text-xs);
+  color: var(--muted);
+  border-bottom: 1px solid var(--border);
+}
+
+/* An ignored question stays in its place, quietly — it asks nothing of anyone. */
+.cf-report .cf-row.cf-ignored .cf-field b {
+  color: var(--muted);
+  font-weight: 500;
+}
+
+/* The Teach chooser opens inside the list, under its row, as part of it: the row's
+   own hairline moves below the chooser, so the two read as one object. */
+.cf-report .cf-row:has(+ .cf-teach) {
+  border-bottom: 0;
+}
+.cf-teach {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  padding: 0 var(--space-6) var(--space-4);
+  border-bottom: 1px solid var(--border);
+}
+.cf-report > .cf-teach:last-child {
+  border-bottom: 0;
+}
+
+.cf-fld {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.cf-fld-label {
+  font-size: var(--text-xs);
+  color: var(--muted);
+}
+
+.cf-input {
+  width: 100%;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  padding: 7px 9px;
+  background: var(--surface);
+  color: var(--fg);
+  font: var(--text-md) var(--font);
+  min-height: 36px;
+}
+
+@media (pointer: coarse) {
+  .cf-input {
+    min-height: var(--tap);
+  }
+}
+
+/* Cancel · Save, held against the right like every other pair of answers here;
+   equal halves on a phone, where the two are a thumb's width apart either way. */
+.cf-teach-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: var(--space-2);
+  margin-top: var(--space-1);
+}
+@media (max-width: 640px) {
+  .cf-teach-actions > .cf-btn {
+    flex: 1 1 0;
+  }
+}

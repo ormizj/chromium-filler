@@ -5,13 +5,10 @@
  */
 import { describe, it, expect, beforeEach } from 'vitest';
 import { extractJob, previewContainer } from './extract';
-import type { SiteConfig } from '../shared/types';
+import type { ExtractSelectors } from './extract';
 
-function config(extract: SiteConfig['extract'] = {}): SiteConfig {
-  return {
-    id: 'test', name: 'Test', urlPatterns: ['*://*/*'], extract,
-    fieldOverrides: {}, prep: [],
-  } as unknown as SiteConfig;
+function config(extract: ExtractSelectors = {}): ExtractSelectors {
+  return extract;
 }
 
 beforeEach(() => {

@@ -7,7 +7,7 @@
  */
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import {
-  onSubmitted, onTabClosed, openUrls, sessionState, skipUrl, startSession, stopSession, urlForTab,
+  adoptChildTab, onTabClosed, openUrls, queueTab, sessionState, skipUrl, startSession, stopSession, urlForTab,
 } from './session';
 import { addUrls } from '../shared/jobUrls';
 import { getJobUrls, getSettings, saveJobUrls, saveSettings } from '../shared/storage';
@@ -118,15 +118,28 @@ describe('finishing a posting opens the next one', () => {
     expect(urls).toEqual(['https://j.test/2', 'https://j.test/3']);
   });
 
-  it('a submission frees the slot even when the tab is left open', async () => {
-    // closeTabOnSubmit is a setting; the posting is finished either way.
-    await seed(4);
-    await settled(startSession(2));
-    const [[firstTab]] = await sessionTabs();
+  it('closing a queue tab marks its posting done', async () => {
+    await seed(3);
+    await settled(startSession(1));
+    const [[tab]] = await sessionTabs();
 
-    await settled(onSubmitted(firstTab));
+    closeTab(tab);
+    await settled(onTabClosed(tab));
 
-    expect((await sessionTabs()).map(([, url]) => url)).toEqual(['https://j.test/2', 'https://j.test/3']);
+    expect((await statuses())['https://j.test/1']).toBe('markedDone');
+  });
+
+  it('with markDoneOnClose off, closing frees the slot and records nothing', async () => {
+    await saveSettings({ ...(await getSettings()), markDoneOnClose: false });
+    await seed(3);
+    await settled(startSession(1));
+    const [[tab]] = await sessionTabs();
+
+    closeTab(tab);
+    await settled(onTabClosed(tab));
+
+    expect((await statuses())['https://j.test/1']).toBe('opened');
+    expect((await sessionTabs()).map(([, url]) => url)).toEqual(['https://j.test/2']);
   });
 
   it('two finishes landing together do not both claim the same slot', async () => {
@@ -137,7 +150,8 @@ describe('finishing a posting opens the next one', () => {
     const [[t1], [t2]] = await sessionTabs();
 
     closeTab(t1);
-    await settled(Promise.all([onTabClosed(t1), onSubmitted(t2)]));
+    closeTab(t2);
+    await settled(Promise.all([onTabClosed(t1), onTabClosed(t2)]));
 
     const urls = (await sessionTabs()).map(([, url]) => url);
     expect(urls).toEqual(['https://j.test/3', 'https://j.test/4']);
@@ -150,7 +164,6 @@ describe('finishing a posting opens the next one', () => {
     const before = await sessionTabs();
 
     await settled(onTabClosed(9999));
-    await settled(onSubmitted(9999));
 
     expect(await sessionTabs()).toEqual(before);
     expect(openTabs.size).toBe(1);
@@ -168,6 +181,8 @@ describe('finishing a posting opens the next one', () => {
     await settled(onTabClosed(t2));
 
     expect((await sessionTabs()).map(([, url]) => url)).toEqual(['https://j.test/3', 'https://j.test/4']);
+    // …and finishes its posting, exactly as the event would have.
+    expect((await statuses())['https://j.test/1']).toBe('markedDone');
   });
 
   it('ends the session once the queue drains and the last tab closes', async () => {
@@ -317,5 +332,68 @@ describe('queued links that would leave the browser', () => {
     await settled(startSession(1));
 
     expect([...openTabs.values()].map((t) => t.url)).toEqual([APP]);
+  });
+});
+
+describe('queue membership — what a page is told about itself', () => {
+  it('a queue tab knows it is one, and which posting it is', async () => {
+    await seed(3);
+    await settled(startSession(1));
+    const [[tab, url]] = await sessionTabs();
+
+    const state = await queueTab(tab);
+    expect(state).toMatchObject({ inQueue: true, child: false, url });
+    expect(state.progress?.total).toBe(3);
+  });
+
+  it('a tab the queue did not open is not in it', async () => {
+    await seed(2);
+    await settled(startSession(1));
+    expect((await queueTab(9999)).inQueue).toBe(false);
+    expect((await queueTab(undefined)).inQueue).toBe(false);
+  });
+
+  it('a tab opened from a queue tab belongs to the same posting, without taking a slot', async () => {
+    await seed(3);
+    await settled(startSession(1));
+    const [[tab, url]] = await sessionTabs();
+
+    await adoptChildTab(500, tab);
+    await adoptChildTab(501, 500); // a handoff from the handoff
+    expect(await queueTab(500)).toMatchObject({ inQueue: true, child: true, url });
+    expect(await queueTab(501)).toMatchObject({ inQueue: true, child: true, url });
+    expect(await sessionTabs()).toHaveLength(1);
+  });
+
+  it('closing a child tab finishes nothing and opens nothing', async () => {
+    await seed(3);
+    await settled(startSession(1));
+    const [[tab]] = await sessionTabs();
+    await adoptChildTab(500, tab);
+
+    await settled(onTabClosed(500));
+
+    expect((await statuses())['https://j.test/1']).toBe('opened');
+    expect(openTabs.size).toBe(1);
+    expect((await queueTab(500)).inQueue).toBe(false);
+  });
+
+  it('a tab opened from an ordinary tab is not adopted', async () => {
+    await seed(2);
+    await settled(startSession(1));
+    await adoptChildTab(500, 9999);
+    expect((await queueTab(500)).inQueue).toBe(false);
+  });
+
+  it('skipping from a child tab frees the parent\'s slot', async () => {
+    await seed(3);
+    await settled(startSession(1));
+    const [[tab, url]] = await sessionTabs();
+    await adoptChildTab(500, tab);
+
+    await settled(skipUrl(url, 500));
+
+    expect((await statuses())[url]).toBe('skipped');
+    expect((await sessionTabs()).map(([, u]) => u)).toEqual(['https://j.test/2']);
   });
 });

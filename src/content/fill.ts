@@ -5,7 +5,7 @@
 
 import type { MatchConfidence } from '../shared/types';
 import { currentPalette } from '../ui/palette';
-import { tagElement, retintTag, clearTags } from './fieldTags';
+import { tagElement, retintTag, clearTags, untagElement } from './fieldTags';
 
 /** Set `value` via the native setter so React's value tracker sees the change. */
 function setNativeValue(el: HTMLInputElement | HTMLTextAreaElement, value: string): void {
@@ -78,6 +78,83 @@ export function fillTextField(el: HTMLElement, value: string): boolean {
   return false;
 }
 
+/** A radio's own words — its labels, else its value. */
+function radioText(r: HTMLInputElement): string {
+  const own = r.labels?.length ? Array.from(r.labels).map((l) => l.textContent ?? '').join(' ') : '';
+  return (own || r.value).replace(/\s+/g, ' ').trim().toLowerCase();
+}
+
+/**
+ * Pick the radio in a group whose label (or value) is the wanted answer — with the
+ * same strictness `findOption` holds a `<select>` to: exact first, then a single
+ * unambiguous prefix or phrase, and nothing at all when two options could be meant.
+ */
+export function fillRadioGroup(group: HTMLInputElement[], value: string): boolean {
+  const wanted = value.trim().toLowerCase();
+  if (!wanted) return false;
+  const exact = group.filter((r) => radioText(r) === wanted || r.value.toLowerCase() === wanted);
+  let pick = exact.length === 1 ? exact[0] : undefined;
+  if (!pick && !exact.length) {
+    const prefixed = group.filter((r) => radioText(r).startsWith(wanted));
+    if (prefixed.length === 1) pick = prefixed[0];
+    else if (!prefixed.length && wanted.length >= MIN_PARTIAL) {
+      const contained = group.filter((r) => radioText(r).includes(wanted));
+      if (contained.length === 1) pick = contained[0];
+    }
+  }
+  if (!pick) return false;
+  pick.click();
+  // `click()` on a radio checks it and fires `input`/`change` the way a user's press
+  // does; a framework that ignores both still sees `checked` set.
+  if (!pick.checked) {
+    pick.checked = true;
+    dispatch(pick, 'input', 'change');
+  }
+  return pick.checked;
+}
+
+const YES = /^(yes|y|true|1|on|checked|agree|i agree)$/i;
+const NO = /^(no|n|false|0|off|unchecked)$/i;
+
+/** Tick or untick a lone checkbox from a yes/no answer. Anything else is left alone. */
+export function fillCheckbox(box: HTMLInputElement, value: string): boolean {
+  const v = value.trim();
+  const want = YES.test(v) ? true : NO.test(v) ? false : undefined;
+  if (want === undefined) return false;
+  if (box.checked !== want) box.click();
+  if (box.checked !== want) {
+    box.checked = want;
+    dispatch(box, 'input', 'change');
+  }
+  return true;
+}
+
+/** The first option of a select that is a prompt rather than an answer. */
+const PROMPT = /^(-+|select|choose|please select|please choose|select an option|select one|choose one|pick one|none selected)\b/i;
+
+/**
+ * Whether an input already holds something — typed by the user, restored by the
+ * browser, or set by the site. The engine fills empty inputs only: an answer
+ * already in a box is never the extension's to replace.
+ */
+export function hasValue(el: HTMLElement, group?: HTMLInputElement[]): boolean {
+  if (el instanceof HTMLInputElement) {
+    if (el.type === 'radio') return (group ?? [el]).some((r) => r.checked);
+    if (el.type === 'checkbox') return el.checked;
+    if (el.type === 'file') return !!el.files?.length;
+    return el.value.trim() !== '';
+  }
+  if (el instanceof HTMLTextAreaElement) return el.value.trim() !== '';
+  if (el instanceof HTMLSelectElement) {
+    const opt = el.selectedOptions[0];
+    if (!opt || opt.value === '') return false;
+    // A site that writes its prompt as the first option with a real value ("Please
+    // select") is still asking — the selection is the browser's default, not an answer.
+    return !(el.selectedIndex === 0 && PROMPT.test(opt.text.trim()));
+  }
+  return (el.textContent ?? '').trim() !== '';
+}
+
 /** Attach a File to a file input using DataTransfer (the supported approach). */
 export function fillFileInput(input: HTMLInputElement, file: File): boolean {
   if (typeof DataTransfer === 'undefined') return false;
@@ -123,6 +200,15 @@ export function highlight(el: HTMLElement, confidence: MatchConfidence, label?: 
   // a field — and dropping the chip there would unname the one field just acted on.
   if (label) tagElement(el, label, confidence);
   else retintTag(el, confidence);
+}
+
+/** Take one element's mark away — a row that turned out to need nothing drawn. */
+export function unhighlight(el: HTMLElement): void {
+  if (!el.hasAttribute(HL_ATTR)) return;
+  el.style.removeProperty('outline');
+  el.style.removeProperty('outline-offset');
+  el.removeAttribute(HL_ATTR);
+  untagElement(el);
 }
 
 export function clearHighlights(root: ParentNode = document): void {

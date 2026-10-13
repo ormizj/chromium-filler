@@ -1,23 +1,19 @@
 /**
- * Options page: the job queue (session control + URL database), profile editor,
- * CV upload, behavior settings, the site-config JSON editor, Sync, and Help.
+ * Options page: the job queue (session control + URL database), the profile —
+ * your details, your own fields, the CV and cover letter, and what the extension
+ * has been taught — behavior settings, Sync, and Help.
  *
- * The six areas are tabs rather than one long scroll — the queue is the only
- * part used daily, and on a phone it used to sit behind everything else. Sync
- * earns one despite being configured once, because it has its own connected
- * state to report; as a section under Settings it sat below the layout
- * simulator, a screen and a half past the last thing anyone was looking for.
+ * The five areas are tabs rather than one long scroll — the queue is the only
+ * part used daily, and on a phone it used to sit behind everything else.
  *
  * Everything explanatory on this page renders from `shared/help.ts`, never from
- * copy written here: the same words have to reach the on-page setup panel, and
- * two copies of an explanation is how the old per-surface CSS ended up
- * contradicting itself.
+ * copy written here: the same words have to reach the review card, and two
+ * copies of an explanation is how they end up contradicting each other.
  */
 
 import type {
-  DocKind, JobUrlEntry, JobUrlStatus, ModalLayout, Profile, RedirectTarget,
-  StoredSiteConfig,
-  TextFieldKey,
+  CustomField, CustomFieldKind, DocKind, JobUrlEntry, JobUrlStatus, Lesson, ModalLayout,
+  Profile, TextFieldKey,
 } from '../shared/types';
 import type { SessionState, SyncState } from '../shared/messages';
 import {
@@ -30,9 +26,9 @@ import {
 // about the thing being configured.
 import { FillerModal, type ModalCallbacks, type ModalData } from '../content/modal/modal';
 import { FIELD_ORDER, FIELD_LABELS } from '../shared/fieldKeys';
-import { configTemplate } from '../shared/configTemplate';
-import { FORM_FACTORS, currentFormFactor } from '../shared/formFactor';
-import { isEmptySetup, migrateLegacy, resolveSiteConfig, stampChanges } from '../shared/siteConfigs';
+import { fieldLabel, newCustomField } from '../shared/profileFields';
+import { dropField, forget, lessonsFor, targetField } from '../shared/lessons';
+import { isFragile } from '../shared/inputSignature';
 import { extractUrls } from '../shared/urlImport';
 import {
   ALL_JOB_STATUSES, addUrls, applyStatus, deleteUrl, jobUrlStats, markOpenedDone, visibleUrls,
@@ -40,8 +36,8 @@ import {
 import { hostOf } from '../shared/url';
 import { MSG } from '../shared/messages';
 import {
-  getProfile, saveProfile, getSettings, saveSettings,
-  getSiteConfigs, getStoredSiteConfigs, saveStoredSiteConfigs, addDeletedSiteConfigs,
+  getProfile, saveProfile, mutateProfile, getSettings, saveSettings,
+  getLessons, mutateLessons,
   getJobUrls, mutateJobUrls,
   getJobDetails, saveJobDetails, mutateJobDetails,
 } from '../shared/storage';
@@ -50,15 +46,15 @@ import {
   EXPORT_FIELD_ORDER, buildExport, exportFilename, resolveExport, toCsv,
   type ExportFormat, type ExportSelection,
 } from '../shared/jobExport';
-import { EXPORT_FIELD_LABELS, FORM_FACTOR_TEXT, JOB_STATUS_LABELS } from '../shared/labels';
+import { EXPORT_FIELD_LABELS, JOB_STATUS_LABELS } from '../shared/labels';
 import {
   buildSnapshot, mergeIntoLocal, parseSnapshot, snapshotFilename,
 } from '../shared/syncSnapshot';
 import { getCv, getDoc, setDoc, clearDoc } from '../shared/cvStore';
 import { readSyncClient } from '../shared/syncConfig';
 import {
-  CONCEPT_HELP, CONFIG_HELP, PREP_HELP, REDIRECT_HELP, SETTINGS_HELP, SYNC_SETUP_STEPS,
-  SYNC_TROUBLESHOOTING, describeConfig, type GuideStep, type HelpEntry,
+  CONCEPT_HELP, SETTINGS_HELP, SYNC_SETUP_STEPS, SYNC_TROUBLESHOOTING,
+  type GuideStep, type HelpEntry,
 } from '../shared/help';
 import { helpButton, helpPanel, richText } from '../ui/help';
 import { setLimitAttrs } from '../ui/limits';
@@ -79,7 +75,7 @@ function setStatus(el: HTMLElement, text: string, kind: 'ok' | 'err' | '' = ''):
 
 /* ---------------- Tabs ---------------- */
 
-const TABS = ['queue', 'profile', 'settings', 'sites', 'sync', 'help'] as const;
+const TABS = ['queue', 'profile', 'settings', 'sync', 'help'] as const;
 type TabName = (typeof TABS)[number];
 
 function selectTab(name: TabName, pushHash = true): void {
@@ -106,11 +102,7 @@ function selectTab(name: TabName, pushHash = true): void {
   // `revealSection` (boot, and the checklist's "Go →") are left alone when the
   // tab they name is already the open one.
   if (changed) window.scrollTo({ top: 0 });
-  if (pushHash) {
-    // Preserve any `create=` payload so a deep link survives a tab switch.
-    const create = parseHash().create;
-    location.hash = create ? `${name}&create=${encodeURIComponent(create)}` : name;
-  }
+  if (pushHash) location.hash = name;
 }
 
 const flashing = new WeakMap<Element, number>();
@@ -151,7 +143,7 @@ function revealSection(id: string, focus?: string): void {
  * `at` is a section id and `focus` a selector inside it; together they are what
  * lets a caller name a *place* rather than a tab. See `revealSection`.
  */
-function parseHash(): { tab?: TabName; create?: string; at?: string; focus?: string } {
+function parseHash(): { tab?: TabName; at?: string; focus?: string } {
   const raw = location.hash.replace(/^#/, '');
   if (!raw) return {};
   const parts = raw.split('&');
@@ -160,7 +152,7 @@ function parseHash(): { tab?: TabName; create?: string; at?: string; focus?: str
     const hit = parts.find((p) => p.startsWith(`${name}=`));
     return hit ? decodeURIComponent(hit.slice(name.length + 1)) : undefined;
   };
-  return { tab, create: param('create'), at: param('at'), focus: param('focus') };
+  return { tab, at: param('at'), focus: param('focus') };
 }
 
 function initTabs(): void {
@@ -266,6 +258,305 @@ async function initProfile(): Promise<void> {
     await saveValues(container.querySelectorAll<HTMLInputElement>('[data-field]'));
     setStatus($('profile-status'), 'Saved', 'ok');
   });
+}
+
+/* ---------------- Wordings ---------------- */
+
+/**
+ * A list of wordings as chips, with a box to add one. Enter or a comma adds what
+ * is typed; × on a chip removes it. `onChange` gets the whole new list — the
+ * caller decides where it is stored.
+ */
+function chipEditor(values: string[], placeholder: string, label: string, onChange: (next: string[]) => void): HTMLElement {
+  const wrap = document.createElement('div');
+  wrap.className = 'chipedit';
+  let list = [...values];
+
+  const draw = () => {
+    wrap.replaceChildren(...list.map((v, i) => {
+      const chip = document.createElement('span');
+      chip.className = 'chip chipedit-chip';
+      const text = document.createElement('span');
+      text.textContent = v;
+      const x = document.createElement('button');
+      x.type = 'button';
+      x.className = 'chipedit-x';
+      x.textContent = '×';
+      x.setAttribute('aria-label', `Remove “${v}”`);
+      x.addEventListener('click', () => {
+        list = list.filter((_, j) => j !== i);
+        onChange(list);
+        draw();
+        input.focus();
+      });
+      chip.append(text, x);
+      return chip;
+    }), input);
+  };
+
+  const input = document.createElement('input');
+  input.type = 'text';
+  input.className = 'chipedit-input';
+  input.placeholder = placeholder;
+  input.setAttribute('aria-label', label);
+  const commit = () => {
+    const words = input.value.split(',').map((w) => w.trim()).filter(Boolean)
+      .filter((w) => !list.some((x) => x.toLowerCase() === w.toLowerCase()));
+    input.value = '';
+    if (!words.length) return;
+    list = [...list, ...words];
+    onChange(list);
+    draw();
+    input.focus();
+  };
+  input.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter' || e.key === ',') { e.preventDefault(); commit(); }
+    if (e.key === 'Backspace' && !input.value && list.length) {
+      list = list.slice(0, -1);
+      onChange(list);
+      draw();
+      input.focus();
+    }
+  });
+  input.addEventListener('blur', commit);
+  draw();
+  return wrap;
+}
+
+/**
+ * Extra wordings for the built-in fields, behind a disclosure: the built-ins
+ * already know the common phrasings, and sixteen chip editors in the open would
+ * bury the form. This is for the board that asks for "Christian name".
+ */
+async function initWordings(): Promise<void> {
+  const body = $('wordings-body');
+  const profile = await getProfile();
+  body.replaceChildren(...FIELD_ORDER.map((field) => {
+    const row = document.createElement('div');
+    row.className = 'wording-row';
+    const name = document.createElement('span');
+    name.className = 'wording-name';
+    name.textContent = FIELD_LABELS[field];
+    row.append(name, chipEditor(profile.keywords?.[field] ?? [], 'Add a wording…', `Other wordings for ${FIELD_LABELS[field]}`, (next) => {
+      void mutateProfile((p) => ({ ...p, keywords: { ...p.keywords, [field]: next } }))
+        .then(() => setStatus($('wordings-status'), 'Saved', 'ok'));
+    }));
+    return row;
+  }));
+}
+
+/* ---------------- Your own fields ---------------- */
+
+const KIND_LABELS: Record<CustomFieldKind, string> = {
+  text: 'Short answer',
+  longText: 'Long answer',
+  yesNo: 'Yes / No',
+};
+
+/** Save one custom field's edit, without rewriting the others. */
+async function patchCustomField(id: string, patch: Partial<CustomField>): Promise<void> {
+  await mutateProfile((p) => ({
+    ...p,
+    customFields: (p.customFields ?? []).map((f) => (f.id === id ? { ...f, ...patch } : f)),
+  }));
+  setStatus($('custom-status'), 'Saved', 'ok');
+}
+
+/** The answer box, shaped by the kind: a line, a paragraph, or Yes/No. */
+function answerControl(field: CustomField): HTMLElement {
+  if (field.kind === 'yesNo') {
+    const select = document.createElement('select');
+    select.className = 'custom-value';
+    for (const v of ['', 'Yes', 'No']) select.append(new Option(v || 'Choose…', v));
+    select.value = field.value;
+    select.addEventListener('change', () => void patchCustomField(field.id, { value: select.value }));
+    return select;
+  }
+  const box = field.kind === 'longText' ? document.createElement('textarea') : document.createElement('input');
+  box.className = 'custom-value';
+  if (box instanceof HTMLTextAreaElement) box.rows = 3;
+  box.value = field.value;
+  box.placeholder = 'Your answer';
+  box.addEventListener('change', () => void patchCustomField(field.id, { value: box.value.trim() }));
+  return box;
+}
+
+function customCard(field: CustomField, lessons: Lesson[]): HTMLElement {
+  const card = document.createElement('div');
+  card.className = 'custom-card';
+  card.dataset.field = field.id;
+
+  const head = document.createElement('div');
+  head.className = 'custom-head';
+  const name = document.createElement('input');
+  name.className = 'custom-name';
+  name.value = field.label;
+  name.placeholder = 'Field name, e.g. Years of experience';
+  name.setAttribute('aria-label', 'Field name');
+  name.addEventListener('change', () => {
+    const label = name.value.trim();
+    if (label) void patchCustomField(field.id, { label });
+    else name.value = field.label;
+  });
+
+  const kind = document.createElement('select');
+  kind.className = 'custom-kind';
+  kind.setAttribute('aria-label', 'Kind of answer');
+  for (const [k, label] of Object.entries(KIND_LABELS)) kind.append(new Option(label, k));
+  kind.value = field.kind;
+  kind.addEventListener('change', async () => {
+    await patchCustomField(field.id, { kind: kind.value as CustomFieldKind });
+    await renderCustomFields();
+  });
+
+  // Remove asks first when lessons point at the field: they would be deleted with
+  // it, and a lesson is something the user taught, not something to lose by a
+  // stray press. The confirm is the button itself, worded with the count.
+  const used = lessonsFor(lessons, field.id).length;
+  const remove = document.createElement('button');
+  remove.className = 'btn-danger custom-remove';
+  remove.textContent = 'Remove';
+  let armed = false;
+  remove.addEventListener('click', async () => {
+    if (used && !armed) {
+      armed = true;
+      remove.textContent = `Remove, and ${used} lesson${used === 1 ? '' : 's'}?`;
+      return;
+    }
+    await mutateProfile((p) => ({ ...p, customFields: (p.customFields ?? []).filter((f) => f.id !== field.id) }));
+    await mutateLessons((l) => dropField(l, field.id));
+    await renderCustomFields();
+    await renderLearned();
+  });
+  remove.addEventListener('blur', () => {
+    if (!armed) return;
+    armed = false;
+    remove.textContent = 'Remove';
+  });
+  head.append(name, kind, remove);
+
+  const answer = document.createElement('label');
+  answer.className = 'custom-line';
+  const answerCap = document.createElement('span');
+  answerCap.className = 'custom-cap';
+  answerCap.textContent = 'Answer';
+  answer.append(answerCap, answerControl(field));
+
+  const words = document.createElement('div');
+  words.className = 'custom-line';
+  const wordsCap = document.createElement('span');
+  wordsCap.className = 'custom-cap';
+  wordsCap.textContent = 'Answers questions like';
+  words.append(wordsCap, chipEditor(field.keywords, 'Add a wording…', `Questions ${field.label} answers`, (next) => {
+    void patchCustomField(field.id, { keywords: next });
+  }));
+
+  card.append(head, answer, words);
+  if (used) {
+    const meta = document.createElement('small');
+    meta.className = 'custom-meta';
+    meta.textContent = `Also answers ${used} question${used === 1 ? '' : 's'} you taught it — listed under What it has learned.`;
+    card.append(meta);
+  }
+  return card;
+}
+
+async function renderCustomFields(): Promise<void> {
+  const [profile, lessons] = await Promise.all([getProfile(), getLessons()]);
+  const list = $('custom-fields');
+  const fields = profile.customFields ?? [];
+  list.replaceChildren(...fields.map((f) => customCard(f, lessons)));
+  $('custom-empty').hidden = fields.length > 0;
+}
+
+function initCustomFields(): Promise<void> {
+  attachHelp($('custom-heading'), CONCEPT_HELP.customFields);
+  $('custom-add').addEventListener('click', async () => {
+    const field = newCustomField('', 'text');
+    field.label = 'New field';
+    await mutateProfile((p) => ({ ...p, customFields: [...(p.customFields ?? []), field] }));
+    await renderCustomFields();
+    const name = document.querySelector<HTMLInputElement>(`.custom-card[data-field="${field.id}"] .custom-name`);
+    name?.focus();
+    name?.select();
+  });
+  return renderCustomFields();
+}
+
+/* ---------------- What it has learned ---------------- */
+
+/**
+ * Every lesson, under the field it answers — so the question "why did it put my
+ * phone number there?" has a place to be answered, and undone. Grouped rather than
+ * listed by date, because a wrong lesson is found by the field it went wrong on.
+ */
+async function renderLearned(): Promise<void> {
+  const [profile, lessons] = await Promise.all([getProfile(), getLessons()]);
+  const box = $('learned-list');
+  $('learned-empty').hidden = lessons.length > 0;
+
+  const groups = new Map<string, Lesson[]>();
+  for (const l of lessons) {
+    const key = targetField(l) ?? '__ignore';
+    groups.set(key, [...(groups.get(key) ?? []), l]);
+  }
+  const order = [...groups.keys()].sort((a, b) => {
+    if (a === '__ignore') return 1;
+    if (b === '__ignore') return -1;
+    return fieldLabel(profile, a).localeCompare(fieldLabel(profile, b));
+  });
+
+  box.replaceChildren(...order.map((key) => {
+    const group = document.createElement('div');
+    group.className = 'learned-group';
+    const head = document.createElement('h4');
+    head.className = 'learned-head';
+    head.textContent = key === '__ignore' ? 'Ignored questions' : fieldLabel(profile, key);
+    group.append(head);
+    for (const lesson of groups.get(key)!) {
+      const row = document.createElement('div');
+      row.className = 'learned-row';
+      const text = document.createElement('div');
+      text.className = 'learned-text';
+      const q = document.createElement('span');
+      q.className = 'learned-q';
+      q.textContent = `“${lesson.label}”`;
+      const meta = document.createElement('small');
+      const bits = [
+        lesson.taughtOn ? `taught on ${lesson.taughtOn}` : undefined,
+        lesson.hits ? `used ${lesson.hits} time${lesson.hits === 1 ? '' : 's'}` : 'not used yet',
+        lesson.signature.section ? `in “${lesson.signature.section}”` : undefined,
+      ].filter(Boolean);
+      meta.textContent = bits.join(' · ');
+      text.append(q, meta);
+      if (isFragile(lesson.signature)) {
+        const chip = document.createElement('span');
+        chip.className = 'chip warn';
+        chip.textContent = lesson.signature.host ? 'this site only' : 'by position';
+        chip.title = lesson.signature.host
+          ? 'The page gave this box no words of its own, so the lesson only applies on the site it was taught on.'
+          : 'Several identical boxes on that page: the lesson remembers which one by its position.';
+        text.append(chip);
+      }
+      const remove = document.createElement('button');
+      remove.className = 'btn-ghost learned-remove';
+      remove.textContent = 'Forget';
+      remove.setAttribute('aria-label', `Forget the lesson for “${lesson.label}”`);
+      remove.addEventListener('click', async () => {
+        await mutateLessons((l) => forget(l, lesson.id));
+        await renderLearned();
+        await renderCustomFields();
+      });
+      row.append(text, remove);
+      group.append(row);
+    }
+    return group;
+  }));
+}
+
+function initLearned(): Promise<void> {
+  attachHelp($('learned-heading'), CONCEPT_HELP.teaching);
+  return renderLearned();
 }
 
 /* ---------------- The two documents ---------------- */
@@ -384,70 +675,19 @@ function attachRowHelp(control: HTMLElement, entry: HelpEntry): void {
   }
 }
 
-/** `key — what it does`, the shape used by both the Sites reference and Help. */
-function referenceRow(key: string, entry: HelpEntry): HTMLElement {
-  const row = document.createElement('div');
-  row.className = 'reference-row';
-
-  const name = document.createElement('code');
-  name.className = 'reference-key';
-  name.textContent = key;
-
-  const body = document.createElement('div');
-  body.className = 'reference-text';
-  const p = document.createElement('p');
-  p.append(...richText(entry.body));
-  body.append(p);
-
-  if (entry.when) {
-    const when = document.createElement('p');
-    when.className = 'cf-help-when';
-    when.append(...richText(entry.when));
-    body.append(when);
-  }
-  if (entry.example) {
-    const example = document.createElement('code');
-    example.className = 'cf-help-example';
-    example.textContent = entry.example;
-    body.append(example);
-  }
-
-  row.append(name, body);
-  return row;
-}
-
-/** The whole config schema, key by key. Shared by the Sites tab and Help. */
-function renderReference(into: HTMLElement): void {
-  const groups: Array<[string, Record<string, HelpEntry>]> = [
-    ['Site config', CONFIG_HELP],
-    ['redirect — two-step postings', REDIRECT_HELP],
-    ['Prep step actions', PREP_HELP],
-  ];
-  into.replaceChildren(...groups.flatMap(([title, entries]) => {
-    const head = document.createElement('h4');
-    head.className = 'reference-head';
-    head.textContent = title;
-    return [head, ...Object.entries(entries).map(([key, entry]) => referenceRow(key, entry))];
-  }));
-}
-
 /** The Help tab. Static content, all of it from the catalog. */
 function initHelp(): void {
   const flow = [
-    'You save your details and your CV once, here.',
+    'You save your details and your CV once, on the Profile tab — and any questions you '
+      + 'get asked a lot as fields of your own.',
     'You open a job posting — by hand, or from the queue.',
-    'The extension checks whether one of your site configs matches that URL.',
-    // "Page actions", the wizard's own name for the list (SETUP_STEP_TITLES.prep).
-    // "Setup steps" collides with the wizard's numbered steps, which is the one
-    // synonym `describeConfig` is written to keep out of the vocabulary.
-    'It waits for the form, runs that site’s page actions, and works out whether the '
-      + 'posting applies here or on the employer’s own site.',
-    'It fills every field it is confident about, CV included, and shows you a review.',
-    // Apply, not "the site's own Send" — ours is the button the user presses and
-    // the site's is the one it presses for them, which is the whole distinction
-    // `labels.ts` exists to hold. This step had them the wrong way round.
-    'You check the review, fix anything it flagged, and press Apply — which presses the '
-      + 'site’s own Send button for you.',
+    'Every input on the page goes past the extension. What it recognises is filled and '
+      + 'outlined green; what it only suspects is outlined yellow; what it does not know is '
+      + 'listed on the review card.',
+    'More fields appearing — a form opening, the next page of one — are filled as they appear.',
+    'You teach it the questions it did not know, once each. From then on they fill on every site.',
+    'You check the page and press the site’s own Submit button. Then close the tab: on a '
+      + 'queue tab that finishes the posting and opens the next.',
   ];
   $('help-flow').replaceChildren(...flow.map((text) => {
     const li = document.createElement('li');
@@ -456,69 +696,42 @@ function initHelp(): void {
   }));
 
   const concepts: Array<keyof typeof CONCEPT_HELP> = [
-    'howItWorks', 'neverSubmits', 'apply', 'dots', 'autoVsSaved', 'picker', 'todoChip',
-    'urlPattern', 'twoStep', 'sessions', 'successSelector', 'syncClient',
+    'howItWorks', 'neverSubmits', 'teaching', 'customFields', 'dots', 'picker', 'leftAlone',
+    'sessions', 'queueChip', 'markedDone', 'syncClient',
   ];
   $('help-concepts').replaceChildren(...concepts.map((key) => helpPanel(CONCEPT_HELP[key])));
-
-  renderReference($('help-reference'));
 
   // Written here rather than in the catalog: these are symptoms, not settings,
   // and each one is a pointer at the entry that explains the cause.
   const trouble: HelpEntry[] = [
     {
       title: 'Nothing was filled at all',
-      // Both halves land on the JSON now. The panel's six-step form is only
-      // reachable once a site has been recorded — which is exactly what a page with
-      // no matching config has not been — so sending the URL-pattern errand there
-      // would name a screen that is not on offer. `waitFor` never had a row at all,
-      // which `SETUP_STEP_HELP.site.rows` already says.
-      body: 'Either no site config matches this URL — the popup says “no config” — or '
-        + 'the form had not loaded yet. For the first, open the posting and press “Set '
-        + 'up this site” to record it; if the site is already set up and only a sister '
-        + 'page is unrecognised, widen its URL pattern under Sites here. For the second, '
-        + 'give the site a `waitFor` selector, which is a JSON-only key — edit the '
-        + 'config under Sites.',
+      body: 'Check “Fill automatically” in Settings, and that your details are on the Profile '
+        + 'tab. A page with a password box on its form is left alone on purpose — that is a '
+        + 'login or a sign-up. Otherwise press Fill in the popup: it fills the page whatever '
+        + 'the settings say.',
     },
     {
-      title: 'One field stayed grey',
-      body: 'The guessing found nothing for it. In the review card\u2019s Fields tab press '
-        + 'Pick on that row and tap the real input on the page; the selector is saved '
-        + 'for this site and it will be right every time after that.',
+      title: 'A question stayed grey',
+      body: 'Nothing recognised it. Press Teach on its row in the review card and say what it '
+        + 'is — one of your details, one of your own fields, or a new field made there and '
+        + 'then. It is filled at once, and every site asking it the same way is filled from '
+        + 'then on.',
     },
     {
-      title: 'It navigated away from a posting I wanted to fill',
-      // Not "open the ⋯ menu and press Fill this page instead": under the default
-      // “new tab, closing the posting” the source tab is closed shortly after the
-      // handoff settles, so that menu is gone by the time anyone reads this. The
-      // route below is the one that still exists afterwards — the setup panel
-      // holds the handoff open for as long as it is on screen.
-      // Both labels quoted as the surfaces actually draw them. "Set up this site"
-      // is the popup's primary button on a site with *no* config — which this is
-      // not, since it classified and followed one — so here the control is the
-      // popup's "Site setup" link. And the redirect target reads "New tab, close
-      // posting"; sending someone to Settings to find a wording that is not there
-      // is the same errand as naming a button that is not there.
-      body: 'It classified the posting as applying on the employer’s site, and followed '
-        + 'it. If you catch it in time, the review modal’s ⋯ menu has “Fill this page '
-        + 'instead” — but under the default “New tab, close posting” that tab '
-        + 'closes itself, so the way back is: turn off “Auto-run when a matching page '
-        + 'loads” in Settings, re-open the posting, and press “Site setup” in the popup. '
-        + 'With auto-run off nothing is classified or followed until you ask, so the posting '
-        + 'stays put. Then set a quick-apply marker under Application type so the same '
-        + 'board is judged correctly from then on.',
+      title: 'It filled a box with the wrong thing',
+      body: 'Press Not this on that row and choose the right field, or “Ignore this question”. '
+        + 'If the wrong answer came from a lesson, forget it under Profile → What it has learned.',
     },
     {
-      title: 'It never marked a posting applied',
-      body: 'Applied is only recorded once the site’s own confirmation becomes visible. '
-        + 'Give that site a `successSelector` pointing at its thank-you element — there '
-        + 'is no other way of telling, so without one Apply stays greyed out and nothing '
-        + 'on that site can ever be recorded as applied.',
+      title: 'A field is not on the card at all',
+      body: 'Some fields are drawn in ways the extension cannot read as a question. Press '
+        + 'Teach in the popup, tap the field on the page, and Confirm — the card opens on it.',
     },
     {
       title: 'The queue opened far too many tabs',
       body: 'Lower “Tabs at once” on the Queue tab. A session keeps that many postings '
-        + 'open and opens the next as you finish each one; on a phone use 1–2.',
+        + 'open and opens the next as you close each one; on a phone use 1–2.',
     },
   ];
   $('help-trouble').replaceChildren(...trouble.map(helpPanel));
@@ -613,70 +826,54 @@ function guideStep(step: GuideStep, i: number): HTMLLIElement {
 /* ---------------- Settings ---------------- */
 
 async function initSettings(): Promise<void> {
-  const autoRun = $<HTMLInputElement>('auto-run');
-  const closeOnSubmit = $<HTMLInputElement>('close-on-submit');
+  const fillAuto = $<HTMLInputElement>('fill-auto');
+  const openCard = $<HTMLInputElement>('open-card-queue');
+  const markDone = $<HTMLInputElement>('mark-done-on-close');
   const closeOnSkip = $<HTMLInputElement>('close-on-skip');
-  const finishSetup = $<HTMLInputElement>('finish-setup');
   const closeDelay = $<HTMLInputElement>('close-delay');
   const keepInBrowser = $<HTMLInputElement>('keep-in-browser');
-  const redirectTarget = $<HTMLSelectElement>('redirect-target');
   const modalFullscreen = $<HTMLInputElement>('modal-fullscreen');
 
   const settings = await getSettings();
-  autoRun.checked = settings.autoRunOnLoad;
-  closeOnSubmit.checked = settings.closeTabOnSubmit;
+  fillAuto.checked = settings.fillAutomatically;
+  openCard.checked = settings.openCardOnQueueTabs;
+  markDone.checked = settings.markDoneOnClose;
   closeOnSkip.checked = settings.closeTabOnSkip;
-  finishSetup.checked = settings.finishSetupOnApply;
   closeDelay.value = String(settings.closeTabDelayMs);
   keepInBrowser.checked = settings.keepInBrowser;
-  redirectTarget.value = settings.redirectTarget;
   modalFullscreen.checked = settings.modalFullscreen;
 
   const persist = async () => {
     const s = await getSettings();
     await saveSettings({
       ...s,
-      autoRunOnLoad: autoRun.checked,
-      closeTabOnSubmit: closeOnSubmit.checked,
+      fillAutomatically: fillAuto.checked,
+      openCardOnQueueTabs: openCard.checked,
+      markDoneOnClose: markDone.checked,
       closeTabOnSkip: closeOnSkip.checked,
-      finishSetupOnApply: finishSetup.checked,
       closeTabDelayMs: Math.max(0, Number(closeDelay.value) || 0),
       keepInBrowser: keepInBrowser.checked,
-      redirectTarget: redirectTarget.value as RedirectTarget,
       modalFullscreen: modalFullscreen.checked,
     });
     setStatus($('settings-status'), 'Saved', 'ok');
   };
 
-  autoRun.addEventListener('change', persist);
-  closeOnSubmit.addEventListener('change', persist);
-  closeOnSkip.addEventListener('change', persist);
-  finishSetup.addEventListener('change', persist);
-  closeDelay.addEventListener('change', persist);
-  keepInBrowser.addEventListener('change', persist);
-  redirectTarget.addEventListener('change', persist);
-  modalFullscreen.addEventListener('change', persist);
+  for (const control of [fillAuto, openCard, markDone, closeOnSkip, closeDelay, keepInBrowser, modalFullscreen]) {
+    control.addEventListener('change', persist);
+  }
 
-  attachRowHelp(autoRun, SETTINGS_HELP.autoRunOnLoad);
-  attachRowHelp(closeOnSubmit, SETTINGS_HELP.closeTabOnSubmit);
+  attachRowHelp(fillAuto, SETTINGS_HELP.fillAutomatically);
+  attachRowHelp(openCard, SETTINGS_HELP.openCardOnQueueTabs);
+  attachRowHelp(markDone, SETTINGS_HELP.markDoneOnClose);
   attachRowHelp(closeOnSkip, SETTINGS_HELP.closeTabOnSkip);
-  attachRowHelp(finishSetup, SETTINGS_HELP.finishSetupOnApply);
   attachRowHelp(closeDelay, SETTINGS_HELP.closeTabDelayMs);
   attachRowHelp(keepInBrowser, SETTINGS_HELP.keepInBrowser);
-  attachRowHelp(redirectTarget, SETTINGS_HELP.redirectTarget);
   attachRowHelp(modalFullscreen, SETTINGS_HELP.modalFullscreen);
+  attachHelp($('queue-settings-heading'), CONCEPT_HELP.sessions);
 
-  // The two-step subsection's intro, from the catalog for the same reason as the
-  // queue's: it restated `CONCEPT_HELP.twoStep` in different words, and the full
-  // explanation now sits behind the `?` on the heading itself.
-  attachHelp($('twostep-heading'), CONCEPT_HELP.twoStep);
-  $('twostep-hint').textContent = CONCEPT_HELP.twoStep.short ?? '';
-
-  // What the stored rectangle *is* — that both sheets share it, that a drag on a
-  // job page does not write it, that it is desktop-only. The two hint paragraphs
-  // below are the simulator's own operating instructions (which handle does what,
-  // Shift for 10px, what a lit edge means) and stay where they are; this is the
-  // setting behind them, and until now nothing rendered its entry at all.
+  // What the stored rectangle *is* — that a drag on a page does not write it, that
+  // it is desktop-only. The hint paragraphs below are the simulator's own
+  // operating instructions and stay where they are.
   attachHelp($('panels-heading'), SETTINGS_HELP.modalLayout);
 
   await initModalLayout(settings.modalLayout);
@@ -962,10 +1159,8 @@ function describeScreen(vp: ModelledViewport): string {
 
 /** The preview modal is a mannequin: its buttons must not do anything real. */
 const PREVIEW_CALLBACKS: ModalCallbacks = {
-  onRerun: () => {}, onApply: () => {}, onSendMyself: () => {},
-  onConfirm: () => {}, onPick: () => {}, onFollow: () => {},
-  onFillAnyway: () => {}, onSkip: () => {}, onClose: () => {},
-  onOpenSetup: () => {}, onOpenOptions: () => {},
+  onRerun: () => {}, onConfirm: () => {}, onTeach: () => {}, onPoint: () => {},
+  onSkip: () => {}, onClose: () => {}, onOpenOptions: () => {},
 };
 
 function previewData(layout: ModalLayout): ModalData {
@@ -981,126 +1176,18 @@ function previewData(layout: ModalLayout): ModalData {
     // meant to answer "does this size work", and an empty report would hide the
     // one piece of chrome most likely to be clipped by a bad one.
     matches: [
-      { field: 'fullName', source: 'heuristic', confidence: 'high', filled: true, required: false, valueToFill: 'Ada Lovelace' },
-      { field: 'city', source: 'none', confidence: 'none', filled: false, required: false },
+      {
+        id: 'p1', question: 'Full name', kind: 'text', field: 'fullName', fieldLabel: 'Full name',
+        source: 'heuristic', confidence: 'high', filled: true, required: false, valueToFill: 'Ada Lovelace',
+      },
+      {
+        id: 'p2', question: 'Where are you based?', kind: 'text',
+        source: 'none', confidence: 'none', filled: false, required: false,
+      },
     ],
-    // Ready, so the preview shows the live Apply the user will actually meet
-    // rather than a greyed one — this panel exists to judge the layout.
-    applyState: 'ready',
+    choices: [],
     layout,
   };
-}
-
-/* ---------------- Site configs ---------------- */
-
-/**
- * The editor holds the *stored* shape — the shell, plus a `desktop` and a
- * `mobile` half (`shared/siteConfigs.ts`). A flat config pasted from before the
- * split is still accepted, and becomes this device's half on save.
- */
-function validateConfigs(data: unknown): asserts data is StoredSiteConfig[] {
-  if (!Array.isArray(data)) throw new Error('Top level must be an array of configs.');
-  const ids = new Set<string>();
-  data.forEach((c, i) => {
-    if (typeof c?.id !== 'string' || !c.id) throw new Error(`Config #${i + 1}: missing "id".`);
-    if (ids.has(c.id)) throw new Error(`Config "${c.id}": the id is used twice.`);
-    ids.add(c.id);
-    if (!Array.isArray(c?.urlPatterns) || c.urlPatterns.length === 0) {
-      throw new Error(`Config "${c.id}": "urlPatterns" must be a non-empty array.`);
-    }
-    for (const ff of FORM_FACTORS) {
-      const half = c[ff];
-      if (half === undefined) continue;
-      if (!half || typeof half !== 'object' || Array.isArray(half)) {
-        throw new Error(`Config "${c.id}": "${ff}" must be an object.`);
-      }
-      if (half.extract !== undefined && typeof half.extract !== 'object') {
-        throw new Error(`Config "${c.id}": "${ff}.extract" must be an object.`);
-      }
-    }
-  });
-}
-
-/** Which config's plain-English summary is showing, by id. */
-let explainedConfig: string | undefined;
-
-/**
- * The saved configs as selectable chips. Picking one writes out what it will
- * actually do, in a sentence — until this existed, reading the JSON was the
- * only way to find out, and the JSON explains nothing about itself. Once per
- * half, because the two are separate setups and either may be missing.
- */
-function renderConfigSummary(configs: StoredSiteConfig[]): void {
-  const box = $('configs-summary');
-  box.replaceChildren(...configs.map((c) => {
-    const chip = document.createElement('button');
-    chip.type = 'button';
-    chip.className = 'chip chip-btn';
-    chip.textContent = c.name || c.id;
-    chip.title = c.urlPatterns.join('\n');
-    chip.setAttribute('aria-pressed', String(explainedConfig === c.id));
-    chip.addEventListener('click', () => {
-      explainedConfig = explainedConfig === c.id ? undefined : c.id;
-      renderConfigSummary(configs);
-    });
-    return chip;
-  }));
-
-  const explain = $('configs-explain');
-  const chosen = configs.find((c) => c.id === explainedConfig);
-  explain.hidden = !chosen;
-  if (!chosen) return;
-  explain.replaceChildren(...FORM_FACTORS.flatMap((ff) => {
-    const head = document.createElement('h5');
-    head.textContent = FORM_FACTOR_TEXT[ff].setup;
-    const p = document.createElement('p');
-    if (isEmptySetup(chosen[ff])) p.textContent = 'Not set up yet — record a posting on this site from a '
-      + `${FORM_FACTOR_TEXT[ff].name.toLowerCase()} browser.`;
-    else p.append(...richText(describeConfig(resolveSiteConfig(chosen, ff))));
-    return [head, p];
-  }));
-}
-
-async function initConfigs(): Promise<void> {
-  const ta = $<HTMLTextAreaElement>('configs-json');
-  const configs = await getStoredSiteConfigs();
-  ta.value = JSON.stringify(configs, null, 2);
-  renderConfigSummary(configs);
-  renderReference($('configs-reference-body'));
-  attachHelp($('configs-heading'), CONCEPT_HELP.formFactor);
-
-  $('save-configs').addEventListener('click', async () => {
-    try {
-      const parsed = JSON.parse(ta.value);
-      validateConfigs(parsed);
-      const ff = currentFormFactor();
-      // Stamped on content, so only what really changed outranks the other
-      // device in a sync; a removed config is tombstoned, or the next sync would
-      // bring it straight back.
-      const { configs: next, deleted } = stampChanges(
-        await getStoredSiteConfigs(),
-        parsed.map((c) => migrateLegacy(c, ff)),
-        Date.now(),
-      );
-      await saveStoredSiteConfigs(next);
-      await addDeletedSiteConfigs(deleted);
-      ta.value = JSON.stringify(next, null, 2);
-      renderConfigSummary(next);
-      setStatus($('configs-status'), 'Saved', 'ok');
-    } catch (e) {
-      setStatus($('configs-status'), (e as Error).message, 'err');
-    }
-  });
-
-  $('add-template').addEventListener('click', () => appendTemplate(ta));
-}
-
-function appendTemplate(ta: HTMLTextAreaElement, url?: string): void {
-  let arr: StoredSiteConfig[] = [];
-  try { arr = JSON.parse(ta.value); if (!Array.isArray(arr)) arr = []; } catch { arr = []; }
-  arr.push(migrateLegacy(configTemplate(url), currentFormFactor()));
-  ta.value = JSON.stringify(arr, null, 2);
-  revealSection('configs-section', '#configs-json');
 }
 
 /* ---------------- URL import ---------------- */
@@ -1801,14 +1888,6 @@ async function initSync(): Promise<void> {
     await renderSync();
   });
 
-  const sitesToggle = $<HTMLInputElement>('sync-site-configs');
-  attachRowHelp(sitesToggle, SETTINGS_HELP.syncSiteConfigs);
-  sitesToggle.checked = (await getSettings()).syncSiteConfigs;
-  sitesToggle.addEventListener('change', async () => {
-    await saveSettings({ ...(await getSettings()), syncSiteConfigs: sitesToggle.checked });
-    setStatus(status, `Site setup sync ${sitesToggle.checked ? 'on' : 'off'}`, 'ok');
-  });
-
   /**
    * Which account, and when it last ran. Written directly rather than through
    * `setStatus`, which clears anything non-error after three seconds: this is a
@@ -1938,12 +2017,8 @@ async function initSync(): Promise<void> {
     if (s.pending) {
       // The one check before the first merge: connecting the wrong account would
       // fold a stranger's job list into this one, and only the counts show it.
-      const sites = s.pending.sites
-        ? ` and ${s.pending.sites.remote} site setup(s) with ${s.pending.sites.local}`
-        : '';
       showToast(
-        `Combine ${s.pending.remote} posting(s) from ${s.account} with ${s.pending.local} here`
-          + `${sites}?`,
+        `Combine ${s.pending.remote} posting(s) from ${s.account} with ${s.pending.local} here?`,
         'Combine',
         () => void runSync(true),
       );
@@ -2006,14 +2081,15 @@ async function initSync(): Promise<void> {
  * It lives on the Queue tab because that is where the page opens, and a new
  * user's problem is not "which tab" but "what am I supposed to do first".
  */
+/** Where the checklist's dismissal is kept. Not a setting: it changes nothing the extension does. */
+const START_DISMISSED_KEY = 'gettingStartedDismissed';
+
 async function renderGettingStarted(): Promise<void> {
   const section = $('start-section');
-  const settings = await getSettings();
-  if (settings.helpSeen) { section.hidden = true; return; }
+  const dismissed = (await chrome.storage.local.get(START_DISMISSED_KEY))[START_DISMISSED_KEY];
+  if (dismissed) { section.hidden = true; return; }
 
-  const [profile, cv, urls, configs] = await Promise.all([
-    getProfile(), getCv(), getJobUrls(), getSiteConfigs(),
-  ]);
+  const [profile, cv, urls] = await Promise.all([getProfile(), getCv(), getJobUrls()]);
 
   // `at` is the section the step is actually about and `focus` the control it
   // wants pressed or typed into: the tab alone is not an answer, and for the two
@@ -2039,11 +2115,11 @@ async function renderGettingStarted(): Promise<void> {
       focus: '#urls-paste',
     },
     {
-      // The seeded example config matches only the local test fixture, so it is
-      // not evidence that the user has set up a site of their own. No Go: this
-      // one happens on a job page, and there is nothing here to send them to.
-      label: 'Open a posting and press “Set up this site”',
-      done: configs.some((c) => c.id !== 'example-fixture'),
+      label: 'Add a field for a question you get asked a lot',
+      done: (profile.customFields ?? []).length > 0,
+      tab: 'profile',
+      at: 'custom-section',
+      focus: '#custom-add',
     },
     {
       // Named for what the tick actually means. Nothing here requires a
@@ -2101,8 +2177,7 @@ async function renderGettingStarted(): Promise<void> {
 function initGettingStarted(): void {
   $('start-dismiss').addEventListener('click', async () => {
     $('start-section').hidden = true;
-    const settings = await getSettings();
-    await saveSettings({ ...settings, helpSeen: true });
+    await chrome.storage.local.set({ [START_DISMISSED_KEY]: true });
   });
 }
 
@@ -2114,20 +2189,13 @@ async function main(): Promise<void> {
   initHelp();
   initGettingStarted();
   await Promise.all([
-    initProfile(), initCv(), initCoverLetter(), initSettings(), initConfigs(),
-    initSession(), initUrls(), initSync(),
+    initProfile(), initWordings(), initCustomFields(), initLearned(), initCv(), initCoverLetter(),
+    initSettings(), initSession(), initUrls(), initSync(),
   ]);
   await renderGettingStarted();
 
-  // Deep link: `#sites&create=<url>` (and the bare `#create=<url>` the popup and
-  // setup panel still send) pre-adds a config template on the Sites tab.
-  const { tab, create, at, focus } = parseHash();
-  if (create) {
-    selectTab('sites', false);
-    appendTemplate($<HTMLTextAreaElement>('configs-json'), create);
-  } else {
-    selectTab(tab ?? 'queue', false);
-  }
+  const { tab, at, focus } = parseHash();
+  selectTab(tab ?? 'queue', false);
 
   // `&at=<section>` finishes the journey. A tab is not a destination: the URL
   // importer is the third section of the Queue tab and the config JSON is below
@@ -2137,11 +2205,16 @@ async function main(): Promise<void> {
   if (at) revealSection(at, focus);
 
   // The session runs in the background; reflect its progress without a reload.
-  // The checklist ticks off the same events, so it refreshes here too.
-  chrome.storage.onChanged.addListener((_changes, area) => {
+  // The checklist ticks off the same events, so it refreshes here too — and a
+  // lesson taught on a page lands in the Learned list while this tab is open.
+  chrome.storage.onChanged.addListener((changes, area) => {
     if (area === 'local' || area === 'session') {
       void renderQueue();
       void renderGettingStarted();
+    }
+    if (area === 'local' && 'lessons' in changes) {
+      void renderLearned();
+      void renderCustomFields();
     }
   });
 

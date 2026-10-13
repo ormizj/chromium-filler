@@ -37,11 +37,9 @@ async function mountPopup(
 }
 
 const matched = (over: Partial<StatusResponse> = {}): StatusResponse => ({
-  siteMatched: true,
-  siteName: 'Local test fixture',
-  configId: 'example-fixture',
   filledCount: 0,
   reportedCount: 0,
+  toTeach: 0,
   hasRun: false,
   ...over,
 });
@@ -85,34 +83,32 @@ afterEach(() => {
 });
 
 describe('popup render', () => {
-  it('matched, not run: shows "ready to fill" and an enabled Fill button', async () => {
+  it('before anything was filled: says so, with an enabled Fill', async () => {
     await mountPopup(matched());
     const badge = document.getElementById('site-status')!;
     const primary = document.getElementById('primary') as HTMLButtonElement;
-    expect(badge.textContent).toBe('matched');
-    expect(badge.className).toContain('ok');
-    expect(document.getElementById('detail')!.textContent).toContain('ready to fill');
+    expect(badge.textContent).toBe('ready');
+    expect(document.getElementById('detail')!.textContent).toMatch(/nothing filled/i);
     expect(primary.textContent).toBe('Fill');
     expect(primary.disabled).toBe(false);
+    expect((document.getElementById('reset') as HTMLButtonElement).hidden).toBe(true);
   });
 
-  // "Reset", not "Reset & Re-run": one press resets and stops there, which is
-  // deliberate (see the test below). A label naming an action the button does
-  // not take is the drift `labels.ts` exists to keep out of the vocabulary.
-  it('matched, has run: shows filled/reported counts and Reset', async () => {
-    await mountPopup(matched({ hasRun: true, filledCount: 5, reportedCount: 6 }));
-    expect(document.getElementById('detail')!.textContent).toContain('5/6 fields filled');
-    expect((document.getElementById('primary') as HTMLButtonElement).textContent).toBe('Reset');
+  it('after a fill: the counts, a reminder to submit, and a Reset beside them', async () => {
+    await mountPopup(matched({ hasRun: true, filledCount: 5, reportedCount: 7, toTeach: 2 }));
+    const detail = document.getElementById('detail')!.textContent!;
+    expect(detail).toContain('5 filled · 2 to teach');
+    expect(detail).toMatch(/submit on the site/i);
+    expect(document.getElementById('site-status')!.className).toContain('ok');
+    expect((document.getElementById('primary') as HTMLButtonElement).textContent).toBe('Fill');
+    expect((document.getElementById('reset') as HTMLButtonElement).hidden).toBe(false);
   });
 
-  it('no config: prompts to set one up visually, button enabled', async () => {
-    await mountPopup(matched({ siteMatched: false, siteName: undefined }));
+  it('marks a tab the queue opened', async () => {
+    await mountPopup(matched({ inQueue: true }));
     const badge = document.getElementById('site-status')!;
-    const primary = document.getElementById('primary') as HTMLButtonElement;
-    expect(badge.textContent).toBe('no config');
-    expect(badge.className).toContain('warn');
-    expect(primary.textContent).toBe('Set up this site');
-    expect(primary.disabled).toBe(false);
+    expect(badge.textContent).toBe('queue');
+    expect(badge.className).toContain('accent');
   });
 
   it('no content script: shows the un-fillable message and disables the button', async () => {
@@ -124,20 +120,6 @@ describe('popup render', () => {
     expect(primary.disabled).toBe(true);
   });
 
-  it('clicking the button with no config enters on-page setup in the tab', async () => {
-    const noCfg = matched({ siteMatched: false, siteName: undefined });
-    await mountPopup(noCfg);
-    const sent = recordTabMessages(noCfg);
-    (document.getElementById('primary') as HTMLButtonElement).click();
-    await flush();
-    expect(sent).toContainEqual(expect.objectContaining({ type: MSG.SETUP }));
-  });
-
-  /**
-   * Filling hands the work to the page, and the review modal reports it in full.
-   * The popup used to stay open on top of that repeating a one-line summary of
-   * it — every other action here closes.
-   */
   it('Fill runs the page and closes the popup', async () => {
     await mountPopup(matched());
     const sent = recordTabMessages(matched({ hasRun: true, filledCount: 3, reportedCount: 5 }));
@@ -147,54 +129,43 @@ describe('popup render', () => {
     expect(window.close).toHaveBeenCalled();
   });
 
-  /** Reset does not: it puts the button back to Fill, which is what to press next. */
-  it('Reset leaves the popup open on a Fill button', async () => {
+  /** Reset leaves the popup open: the press that follows is the point of it. */
+  it('Reset empties the page and leaves the popup open', async () => {
     await mountPopup(matched({ hasRun: true, filledCount: 3, reportedCount: 5 }));
-    recordTabMessages(matched());
-    (document.getElementById('primary') as HTMLButtonElement).click();
-    await flush();
-    expect(window.close).not.toHaveBeenCalled();
-    expect((document.getElementById('primary') as HTMLButtonElement).textContent).toBe('Fill');
-  });
-
-  it('exposes a Site setup link that enters setup in the tab', async () => {
-    await mountPopup(matched());
-    const link = document.getElementById('reconfigure') as HTMLAnchorElement;
     const sent = recordTabMessages(matched());
-    link.click();
+    (document.getElementById('reset') as HTMLButtonElement).click();
     await flush();
-    expect(sent).toContainEqual(expect.objectContaining({ type: MSG.SETUP }));
+    expect(sent).toContainEqual(expect.objectContaining({ type: MSG.RESET }));
+    expect(window.close).not.toHaveBeenCalled();
+    expect((document.getElementById('reset') as HTMLButtonElement).hidden).toBe(true);
   });
 
-  /**
-   * The action rows are furniture, not a report on the page. Site setup used to
-   * be hidden on an unconfigured site and Queue whenever a session was running,
-   * so the popup was a different shape every time it opened — and the control
-   * you wanted was missing exactly when the page was in the state you wanted it
-   * for. Where a thing is is half of knowing it exists.
-   */
+  it('Teach starts pointing at a field in the tab', async () => {
+    await mountPopup(matched());
+    const sent = recordTabMessages(matched());
+    (document.getElementById('teach') as HTMLAnchorElement).click();
+    await flush();
+    expect(sent).toContainEqual(expect.objectContaining({ type: MSG.TEACH }));
+    expect(window.close).toHaveBeenCalled();
+  });
+
+  /** The action rows are furniture, not a report on the page: always all there. */
   it('keeps every action visible whatever the page and the session are doing', async () => {
-    const visible = () => ['primary', 'open-queue', 'reconfigure', 'open-options']
+    const visible = () => ['primary', 'open-queue', 'teach', 'open-options']
       .filter((id) => !(document.getElementById(id) as HTMLElement).hidden);
 
     await mountPopup(matched());
     expect(visible()).toHaveLength(4);
 
     mockSession(session());
-    await mountPopup(matched({ siteMatched: false, siteName: undefined }));
+    await mountPopup(matched({ hasRun: true, inQueue: true }));
     expect(visible()).toHaveLength(4);
   });
 
-  /**
-   * Fill acts on the page in front of you; the other three open a different
-   * surface. Queue sat in the top row beside Fill, which read as a second thing
-   * to do *here* — and left the bottom row two buttons wide with a gap between
-   * the primary action and the rest of the extension.
-   */
-  it('puts the three ways out in one row, in order', async () => {
+  it('puts Teach, Queue and Options in one row, in order', async () => {
     await mountPopup(matched());
     expect([...document.querySelector('.links')!.children].map((el) => el.id))
-      .toEqual(['reconfigure', 'open-queue', 'open-options']);
+      .toEqual(['teach', 'open-queue', 'open-options']);
     expect([...document.querySelector('.actions')!.children].map((el) => el.id))
       .toEqual(['primary']);
   });
@@ -225,9 +196,18 @@ describe('queue session', () => {
     expect(chips).toContain('48 waiting');
   });
 
+  it('offers Skip only on a tab the queue opened', async () => {
+    mockSession(session());
+    await mountPopup(matched());
+    expect((document.getElementById('session-skip') as HTMLButtonElement).disabled).toBe(true);
+    mockSession(session());
+    await mountPopup(matched({ inQueue: true }));
+    expect((document.getElementById('session-skip') as HTMLButtonElement).disabled).toBe(false);
+  });
+
   it('skipping reports this posting to the background so the next one opens', async () => {
     const sent = mockSession(session());
-    await mountPopup(matched(), 'https://boards.example/job/7');
+    await mountPopup(matched({ inQueue: true }), 'https://boards.example/job/7');
     (document.getElementById('session-skip') as HTMLButtonElement).click();
     await flush();
     expect(sent).toContainEqual(
@@ -250,14 +230,14 @@ describe('queue session', () => {
 });
 
 /**
- * A brand-new install has no profile and no CV, so every page it opens reports
- * "no site config matches this URL" — accurate, and the wrong place to look.
+ * A brand-new install has no profile and no CV, so there is nothing to fill any
+ * page with — and the place to fix that is Options, not the page.
  */
 describe('first-run nudge', () => {
   const nudge = () => document.getElementById('nudge') as HTMLAnchorElement;
 
   it('names the missing details rather than only the missing config', async () => {
-    await saveProfile({ values: {}, custom: {} });
+    await saveProfile({ values: {} });
     await clearCv();
     await mountPopup(matched());
     expect(nudge().hidden).toBe(false);
@@ -265,7 +245,7 @@ describe('first-run nudge', () => {
   });
 
   it('moves on to the CV once the profile is filled in', async () => {
-    await saveProfile({ values: { email: 'ada@example.com' }, custom: {} });
+    await saveProfile({ values: { email: 'ada@example.com' } });
     await clearCv();
     await mountPopup(matched());
     expect(nudge().hidden).toBe(false);
@@ -273,7 +253,7 @@ describe('first-run nudge', () => {
   });
 
   it('stays out of the way once both are set up', async () => {
-    await saveProfile({ values: { email: 'ada@example.com' }, custom: {} });
+    await saveProfile({ values: { email: 'ada@example.com' } });
     await setCv(new File(['cv'], 'cv.pdf', { type: 'application/pdf' }));
     await mountPopup(matched());
     expect(nudge().hidden).toBe(true);
@@ -285,7 +265,7 @@ describe('minimized report', () => {
    * The close button used to destroy the report, leaving "Reset" — a
    * destructive action — as the only way back. Collapsed now means restorable.
    */
-  it('offers Show report instead of Reset when the modal is collapsed', async () => {
+  it('offers Show report instead of Fill when the card is collapsed', async () => {
     await mountPopup(matched({ hasRun: true, filledCount: 5, reportedCount: 6, modalMinimized: true }));
     expect((document.getElementById('primary') as HTMLButtonElement).textContent).toBe('Show report');
   });

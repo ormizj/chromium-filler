@@ -158,9 +158,7 @@ function indexPage() {
       <li class="card">
         <a href="${escapeHtml(s.url)}">${escapeHtml(s.title)}</a>
         <p class="expect">${escapeHtml(s.expect)}</p>
-        <p class="meta"><code>${escapeHtml(s.url)}</code>${
-          s.config ? ` · config <code>${escapeHtml(s.config)}</code>` : ' · <em>no config — created on landing</em>'
-        }</p>
+        <p class="meta"><code>${escapeHtml(s.url)}</code></p>
       </li>`).join('');
     return `<section><h2>${escapeHtml(flow.title)}</h2><ul>${cards}</ul></section>`;
   }).join('');
@@ -197,14 +195,14 @@ function indexPage() {
   <body>
     <h1>Chromium Filler — fixture scenarios</h1>
     <p class="lead">One entry per addressable scenario. Load the unpacked extension from
-      <code>dist/</code> with the configs from <code>test/fixtures/test-site-configs.json</code>,
-      then work down the list: each card says what should happen.</p>
+      <code>dist/</code>, add your details in Options, then work down the list: each card
+      says what should happen. No page here has a config — there are none.</p>
     <p class="hosts">
       board <code>${escapeHtml(HOSTS.board)}</code> ·
       employer <code>${escapeHtml(HOSTS.employer)}</code> ·
       tracker <code>${escapeHtml(HOSTS.tracker)}</code><br />
-      Different ports are different hosts to the extension, which is what makes the
-      cross-origin handoff real here.
+      Different ports are different hosts to the extension, which is what proves a
+      lesson taught on one site fills on another.
     </p>
     ${groups}
   </body>

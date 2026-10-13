@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import {
-  ALL_JOB_STATUSES, addUrls, applyStatus, applyStatusChain, deleteUrl, jobUrlStats, linkRedirect,
+  ALL_JOB_STATUSES, addUrls, applyStatus, applyStatusChain, deleteUrl, finishOnClose, jobUrlStats, linkRedirect, makeEntry,
   markOpenedDone, normalizeEntry, pruneTombstones, recordStatus, removeUrl, statusForUrl, TOMBSTONE_TTL_MS,
   visibleUrls,
 } from './jobUrls';
@@ -375,5 +375,27 @@ describe('normalizeEntry — legacy backfill', () => {
     const e = normalizeEntry(legacy);
     expect(e.updatedAt).toBe(500);
     expect(e.history).toEqual([{ status: 'new', at: 500 }]);
+  });
+});
+
+describe('finishOnClose', () => {
+  const at = (status: JobUrlEntry['status']) => applyStatus([makeEntry('u', 1)], 'u', status, 2);
+
+  it('moves an opened posting to markedDone', () => {
+    const out = finishOnClose(at('opened'), 'u', 3);
+    expect(out[0].status).toBe('markedDone');
+    expect(out[0].history.at(-1)).toEqual({ status: 'markedDone', at: 3 });
+  });
+
+  it('never demotes or rewrites a posting that already has an answer', () => {
+    for (const status of ['skipped', 'applied', 'markedDone', 'redirected', 'new'] as const) {
+      const list = at(status);
+      expect(finishOnClose(list, 'u', 3), status).toBe(list);
+    }
+  });
+
+  it('leaves a URL the database does not know alone', () => {
+    const list = at('opened');
+    expect(finishOnClose(list, 'other', 3)).toBe(list);
   });
 });

@@ -28,10 +28,15 @@ export type FieldKey =
 export type TextFieldKey = Exclude<FieldKey, 'resume'>;
 
 export interface Profile {
-  /** Value for each text field the user has provided. */
+  /** Value for each built-in text field the user has provided. */
   values: Partial<Record<TextFieldKey, string>>;
-  /** Extra site-specific key -> value pairs the user maintains manually. */
-  custom: Record<string, string>;
+  /**
+   * Extra wordings for the built-in fields, on top of the keyword tables in
+   * `fieldKeys.ts` — "Given name" for First name on the one board that says so.
+   */
+  keywords?: Partial<Record<FieldKey, string[]>>;
+  /** The fields the user made — see `CustomField`. */
+  customFields?: CustomField[];
 }
 
 /**
@@ -49,157 +54,148 @@ export interface CvFile {
   data: ArrayBuffer;
 }
 
-export type PrepAction = 'click' | 'waitFor' | 'scrollIntoView' | 'delay';
-
-export interface PrepStep {
-  action: PrepAction;
-  /** CSS selector the action targets (for click/waitFor/scrollIntoView). */
-  selector?: string;
-  /** Milliseconds, used by `delay` and as a per-step timeout for `waitFor`. */
-  ms?: number;
-  /** If true, a failure/timeout is logged and skipped instead of aborting. */
-  optional?: boolean;
-}
-
 /**
- * Two-step ("redirect") postings: boards mix quick-apply postings, whose form is
- * on the page, with postings that hand off to an external ATS. This block tells
- * the classifier which shape a given posting has and how to follow the handoff.
+ * A field the user defined themselves, for the questions the built-in sixteen do
+ * not cover — "Years of experience", "Do you need sponsorship?", a salary figure.
+ *
+ * It is matched by its `keywords`: whole phrases compared against what an input
+ * asks (`shared/questionText.ts`), the user's own wording rather than a regex. The
+ * label counts as a keyword too, so a field named "Notice period" answers a box
+ * labelled "Notice period" with nothing else configured.
  */
-export interface RedirectConfig {
-  /** The control that leaves for the external application (anchor or JS button). */
-  applySelector?: string;
-  /** If this resolves, the posting is quick-apply (in-page form). Checked first. */
-  quickApplySelector?: string;
-  /** A badge/label meaning "external posting", even when the link looks internal. */
-  markerSelector?: string;
-  /**
-   * Steps run on the posting BEFORE following the link — typically clicking the
-   * board's own "Save job" so its application tracking records the apply. These
-   * are always treated as optional: a failure must never block the handoff.
-   */
-  beforeFollow?: PrepStep[];
-  /** When false, the built-in text/cross-origin heuristic is off. Default true. */
-  autoDetect?: boolean;
-}
-
-export interface SiteConfig {
+export interface CustomField {
+  /** `c_` + random — never a `FieldKey`, so the two id spaces cannot meet. */
   id: string;
-  name: string;
-  /** Match patterns (`*://host/*`) or `/regex/` strings tested against the URL. */
-  urlPatterns: string[];
-  /** Selector to await before acting; forms load slowly. */
-  waitFor?: string;
-  /** Max ms to wait for `waitFor` before proceeding anyway. Default ~15000. */
-  waitTimeoutMs?: number;
-  /** Prerequisite steps run automatically before filling. */
-  prep?: PrepStep[];
+  label: string;
   /**
-   * Selectors for pulling the posting into the modal: the title, description and
-   * requirements containers, plus optional overrides for the three meta facts
-   * (company / location / employment type). The meta three are read from the page's
-   * JSON-LD by default (`shared/jobMeta.ts`) and only need a selector on a board
-   * that publishes none or publishes it wrong.
+   * How the value is edited in Options. Filling does not branch on it: a `yesNo`
+   * value is the text "Yes" or "No", which a `<select>`, a radio group or a
+   * checkbox each know how to take.
    */
-  extract: {
-    jobTitle?: string;
-    jobDescription?: string;
-    jobRequirements?: string;
-    company?: string;
-    location?: string;
-    employmentType?: string;
-  };
-  /** Explicit selector overrides per field; these always win over heuristics. */
-  fieldOverrides?: Partial<Record<FieldKey, string>>;
-  /** Override selector for the CV file input. */
-  cvUpload?: string;
-  /**
-   * Steps run as the first phase of the modal's Apply (e.g. re-open and confirm
-   * an attach dialog), for sites that only record the CV once it is confirmed.
-   */
-  submitCv?: PrepStep[];
-  /**
-   * The site's own Send button — the control Apply presses. Omit it and the
-   * heuristic in `shared/submitDetect.ts` looks for it; save one when the page
-   * has several plausible buttons, or when nothing is found and Apply greys out.
-   */
-  submitSelector?: string;
-  /** When false, heuristics are disabled and only overrides are used. Default true. */
-  autoDetect?: boolean;
-  /** Quick-apply vs. external-redirect classification + handoff for this site. */
-  redirect?: RedirectConfig;
-  /**
-   * Selector for the site's "submitted successfully" confirmation element
-   * (e.g. a thank-you banner). This is the ONLY "actually sent" signal: auto-close
-   * + mark-applied fire once this element becomes *visible*, never merely on a
-   * submit attempt (which can fail).
-   *
-   * There is deliberately no `submit`-event fallback — the event fires before the
-   * server answers, and a site that validates in JS sees it and *then* rejects the
-   * form, which recorded applications that never happened. So this is required
-   * rather than optional: without it `Controller.applyState` reads `noConfirmation`
-   * and Apply refuses to press Send at all.
-   */
-  successSelector?: string;
+  kind: CustomFieldKind;
+  value: string;
+  /** Extra question wordings this field answers, beyond its label. */
+  keywords: string[];
 }
 
-/**
- * Which half of a site's setup applies on this device. Read off the user agent
- * (`shared/formFactor.ts`), because that is what the site's server sees when it
- * decides which page to send — a board that serves a phone a different DOM does
- * so on the strength of the UA, not of the window's width.
- */
-export type FormFactor = 'desktop' | 'mobile';
-
-/** The four keys of a `SiteConfig` that say *which* site it is, not how to work it. */
-export type SiteShellKey = 'id' | 'name' | 'urlPatterns' | 'autoDetect';
+export type CustomFieldKind = 'text' | 'longText' | 'yesNo';
 
 /**
- * Everything a recording, a Pick or the wizard writes: a `SiteConfig` minus its
- * shell. One per form factor, kept fully separate — a desktop recording never
- * reads as the mobile setup, and the other way round.
+ * What a report row or a lesson can point at: one of the built-in fields, or one
+ * the user made. Custom ids always start with `c_`.
  */
-export type SiteSetup = Omit<SiteConfig, SiteShellKey> & {
-  /** When this half last changed — sync merges each half on its own stamp. */
-  updatedAt?: number;
-};
+export type FieldId = FieldKey | string;
+
+/** What kind of control an input is, as far as matching and filling care. */
+export type InputKind =
+  | 'text' | 'email' | 'tel' | 'url' | 'number' | 'date'
+  | 'textarea' | 'select' | 'radio' | 'checkbox' | 'file' | 'editable';
 
 /**
- * A site config as it is *stored* (and synced): the shell once, and a setup for
- * each form factor. Nothing outside storage and sync reads this shape — every
- * consumer is handed `SiteConfig`, the view resolved for this device by
- * `resolveSiteConfig` (`shared/siteConfigs.ts`).
+ * What identifies one input well enough to recognise it again — on this page and
+ * on any other site that asks the same question the same way.
+ *
+ * Only the parts a lesson actually needed are stored (`shared/inputSignature.ts`
+ * adds them strongest-first until exactly one input on the page matches), and a
+ * lesson matches an input only when *every* stored part is equal. That is the
+ * whole collision rule: a lesson taught on "Name" under "Reference 1" carries the
+ * section, so it can never fill the "Name" under "Reference 2".
  */
-export interface StoredSiteConfig {
+export interface InputSignature {
+  /** The normalized question — see `fingerprint` in questionText.ts. */
+  question: string;
+  kind: InputKind;
+  /** Normalized `name` attribute, when the page gave one that looks stable. */
+  name?: string;
+  /** The nearest legend or heading above the input, normalized. */
+  section?: string;
+  /** For a select or radio group: its option labels, normalized and joined. */
+  options?: string;
+  /** Last resort: which of several otherwise-identical inputs, in page order. */
+  index?: number;
+  /**
+   * Only for an input the page says nothing about — no question, no usable name.
+   * A lesson keyed on "an unlabelled text box" alone would match one on every site
+   * in the world, so it is pinned to the host it was taught on. Never set when the
+   * input has words of its own: those lessons are global.
+   */
+  host?: string;
+}
+
+/** What a lesson says an input is. */
+export type LessonTarget = { field: FieldId } | { ignore: true };
+
+/**
+ * Something the user taught the extension about one input. Global — a lesson is
+ * keyed on the input, never on the site, so it applies wherever that input turns up.
+ */
+export interface Lesson {
   id: string;
-  name: string;
-  urlPatterns: string[];
-  autoDetect?: boolean;
-  /** When the shell (name, patterns, autoDetect) last changed. */
-  updatedAt?: number;
-  desktop?: SiteSetup;
-  mobile?: SiteSetup;
+  signature: InputSignature;
+  target: LessonTarget;
+  /** The question as the page worded it, for Options — the signature is normalized. */
+  label: string;
+  /** Where it was taught, for Options only. Never part of matching. */
+  taughtOn?: string;
+  createdAt: number;
+  /** How many pages it has filled since. */
+  hits: number;
 }
 
 export type MatchConfidence = 'high' | 'low' | 'none';
-export type MatchSource = 'override' | 'heuristic' | 'none';
+/**
+ * How an input was recognised: a lesson the user taught, the built-in heuristics,
+ * a keyword the user wrote, or not at all.
+ */
+export type MatchSource = 'lesson' | 'heuristic' | 'keyword' | 'none';
 
-/** One row of the review report shown in the modal. */
+/**
+ * One row of the review report: one input on the page, and what became of it.
+ *
+ * A row per *input*, not per profile field. The report used to list the fields
+ * the profile could supply and say which of them the page had; now it lists what
+ * the page asks and says which of them the extension could answer — which is the
+ * only shape in which "this question was not recognised, teach it" can be a row.
+ */
 export interface FieldMatch {
-  field: FieldKey;
-  selectorUsed?: string;
+  /** Stable for the life of the page — the row's handle for every callback. */
+  id: string;
+  /** What the input asks, as the page words it (not normalized). */
+  question: string;
+  kind: InputKind;
+  /** The field it was matched to. Absent: not recognised — a row to teach. */
+  field?: FieldId;
+  /** That field's name, for display — a custom field carries its own. */
+  fieldLabel?: string;
   source: MatchSource;
   confidence: MatchConfidence;
+  /** The value that was (or would be) filled, for display. */
   valueToFill?: string;
   filled: boolean;
   required: boolean;
+  /** Joined the report after the first sweep — a form that appeared later. */
+  later?: boolean;
+  /**
+   * Recognised, and left alone because the input already held a value — typed by
+   * the user, restored by the browser or set by the site. Counts as done.
+   */
+  kept?: boolean;
+  /** Taught on this page a moment ago — the row's button retires to "Taught ✓". */
+  taught?: boolean;
+  /** Taught as "ignore this question". Stays in place, needs nothing. */
+  ignored?: boolean;
 }
 
 /**
- * `markedDone` is the one status only the user ever sets: a posting they have
- * finished with outside the extension — typically one a queue session opened and
- * that would otherwise sit at `opened`, a mid-flow status, for ever. Nothing in
- * the extension may assign it on its own.
+ * `markedDone` is set only by a user action: Options → Queue's "Mark opened as
+ * done", or closing a tab the queue opened (`settings.markDoneOnClose`). The user
+ * submits on the site by hand, so the extension cannot know an application went
+ * in — this says "I am finished with this one", which is all it can honestly
+ * record. Never from a timer or a heuristic.
+ *
+ * `redirected` and `applied` are no longer assigned by anything automatic — there
+ * is no redirect following and no confirmation watch — but both stay: they are in
+ * stored and synced histories, and `applied` is still set by hand in Options.
  */
 export type JobUrlStatus = 'new' | 'opened' | 'redirected' | 'applied' | 'skipped' | 'markedDone';
 
@@ -266,68 +262,51 @@ export interface JobUrlStats {
   markedDone: number;
 }
 
-/** Where a followed external application opens. */
-export type RedirectTarget = 'newTabCloseSource' | 'newTab' | 'sameTab';
-
 /** Re-exported so `types.ts` stays the one import for the data model. */
 export type { ModalLayout } from './modalLayout';
 export type { ExportSelection } from './jobExport';
 
 export interface Settings {
-  /** Auto-run the full flow when a matching page finishes loading. */
-  autoRunOnLoad: boolean;
-  /** Close the tab automatically once a submission is detected. */
-  closeTabOnSubmit: boolean;
   /**
-   * Close the tab when the review modal's Skip is pressed. Shares
-   * `closeTabDelayMs` with the submit path deliberately: two timeouts for the
-   * same "tidy this tab away" behaviour is a distinction nobody wants to make.
-   * Turning it off never stalls a queue session — `skipUrl` frees the slot
-   * itself rather than waiting for the tab to go.
+   * Fill every page as it loads, and every input that appears on it afterwards.
+   *
+   * The engine runs on every site — there is no per-site setup any more — so this is
+   * the one switch over all of it. Off, nothing is touched until the popup's Fill is
+   * pressed on a page.
+   */
+  fillAutomatically: boolean;
+  /**
+   * Open the review card expanded on a tab the queue opened. Everywhere else the
+   * card starts folded to its pill: a card over a shop's checkout, because its
+   * address form was filled, is the extension talking over a page nobody asked it
+   * about. On a queue tab the posting *is* what you asked about.
+   */
+  openCardOnQueueTabs: boolean;
+  /**
+   * Closing a tab the queue opened finishes that posting (`markedDone`) and frees
+   * its slot for the next one. The user submits on the site by hand now, so closing
+   * the tab is the one gesture that says "done with this one" — without this, every
+   * posting the queue opened would sit at `opened` for ever.
+   *
+   * Only ever moves a posting *up* from `opened`: one already skipped or applied is
+   * left as it is. Off, closing a tab frees the slot and records nothing.
+   */
+  markDoneOnClose: boolean;
+  /**
+   * Close the tab when the review card's Skip is pressed. Turning it off never
+   * stalls a queue session — `skipUrl` frees the slot itself rather than waiting
+   * for the tab to go.
    */
   closeTabOnSkip: boolean;
-  /** Milliseconds to wait before closing the tab, after a submit or a skip. */
+  /** Milliseconds to wait before closing the tab after a skip. */
   closeTabDelayMs: number;
   /**
-   * Let Apply send on a site whose confirmation element is not set yet, and ask the
-   * user to point at the site's reply afterwards.
+   * Only ever open a queued link as a web page — never let one hand off to a phone
+   * app. An `intent://` entry is opened at the `browser_fallback_url` it carries;
+   * one with no web address at all is not opened. Off hands the link over as
+   * written, for someone who would rather finish in the app.
    *
-   * This is the second half of setting a site up, and it is deliberately the one
-   * place the "nothing is sent to a site whose outcome cannot be read back" rule
-   * bends. It has to bend somewhere: the confirmation element does not exist until an
-   * application has really gone in, so requiring it before sending is a deadlock that
-   * left `successSelector` unset on nearly every site. The outcome is still read
-   * back — by the person who pressed Apply, once, so that the extension can read it
-   * for itself every time after. Nothing is recorded as applied unless they point at
-   * something.
-   *
-   * Off restores the strict behaviour exactly: `applyState` reads `noConfirmation`,
-   * Apply is greyed, and the element is set by hand in the setup panel.
-   */
-  finishSetupOnApply: boolean;
-  /**
-   * Where an external ("two-step") application opens when a redirect posting is
-   * followed: a new tab replacing the posting tab (default), a new tab beside
-   * it, or in place.
-   */
-  redirectTarget: RedirectTarget;
-  /**
-   * Only ever open a link as a web page — never let one hand off to a phone app.
-   *
-   * An "Apply" control is sometimes an `intent://` or `linkedin://` link, which
-   * Android resolves by launching the app. That is always a dead end here: the
-   * extension cannot fill a form or watch for a `successSelector` inside an app,
-   * so the redirect watch expires and the posting stays `opened` for ever. Same
-   * reasoning as Apply requiring `successSelector` — if the outcome cannot be read
-   * back, do not go.
-   *
-   * On, an `intent://` link is rewritten to the `browser_fallback_url` it carries,
-   * so the ATS form opens and fills as normal; one with no web form at all is left
-   * alone and the modal says so. Off hands the link over as the page wrote it, for
-   * someone who would rather finish in the app by hand.
-   *
-   * Read in exactly one place — `navigableUrl` in `shared/appLink.ts`. Everything
-   * downstream consumes its result, which is why no other file tests this flag.
+   * Read in exactly one place — `navigableUrl` in `shared/appLink.ts`.
    */
   keepInBrowser: boolean;
   /**
@@ -337,72 +316,37 @@ export interface Settings {
    */
   sessionBatchSize: number;
   /**
-   * Where an on-page sheet sits, and how big it is, on desktop.
-   *
-   * Both of them: the review modal and the setup panel are one object with two
-   * renderings, and at most one is expanded at a time (`content/sheet.ts`), so
-   * there is one slot on the page and one rectangle describing it. The name is
-   * historical — this predates the setup panel joining it, and renaming a stored
-   * key buys nothing a sentence here does not.
+   * Where the review card sits, and how big it is, on desktop.
    *
    * The simulator in Options → Settings is the only thing that writes it: dragging
-   * or resizing a sheet on a job page moves it for that page alone, because a
-   * nudge to see the field underneath is not a preference.
-   * Ignored under 640px, where both sheets are a full-width bottom sheet.
+   * or resizing the card on a page moves it for that page alone, because a nudge to
+   * see the field underneath is not a preference.
+   * Ignored under 640px, where the card is a full-width bottom sheet.
    * See `shared/modalLayout.ts` — every read is clamped to the viewport.
    */
   modalLayout: ModalLayout;
   /**
-   * Open an on-page sheet filling the whole viewport instead of at `modalLayout`.
-   * Toggled from a sheet's own header button — the one setting the content script
-   * writes, because it is answering "I want to read this posting", which is a
-   * thing you decide while looking at a posting.
-   *
-   * It *overrides* `modalLayout` rather than replacing it, so turning it off
-   * returns the card to the rectangle the simulator configured. Not the
-   * browser's Fullscreen API: the card is a shadow root on someone else's page,
-   * which can refuse the request, and whose Escape would cancel it silently.
+   * Open the card filling the whole viewport instead of at `modalLayout`.
+   * Toggled from the card's own header button — the one setting the content script
+   * writes. It *overrides* `modalLayout` rather than replacing it, so turning it off
+   * returns the card to the rectangle the simulator configured.
    */
   modalFullscreen: boolean;
-  /**
-   * Whether the user has dismissed the setup panel's legend. The basics (what
-   * the dots mean, auto vs. saved, what Pick does) are explained on top of the
-   * panel until then, and one tap away afterwards — re-explaining them on every
-   * posting would be the same wall of text sixty times in a session.
-   */
-  helpSeen: boolean;
   /**
    * Share the job database with another browser profile through a Google Drive
    * folder only this extension can see.
    *
-   * The job database — the URL list and the captured postings — and, under
-   * `syncSiteConfigs`, the site configs. The profile, the CV and the rest of these
-   * settings are device state and never leave the machine. `modalLayout` alone
-   * would be reason enough: it is a rectangle measured against *this* screen.
+   * The job database only — the URL list and the captured postings. The profile,
+   * the custom fields, the lessons, the CV and these settings are device state and
+   * never leave the machine.
    *
-   * On by default, matching `syncSiteConfigs`. That does not make a request on
-   * its own: nothing is sent until the user enters an OAuth client in Options →
-   * Sync and presses Connect, so the first request the extension ever makes is
-   * still one the user asked for. Off by default, it was the last switch of a
-   * finished setup, and the one most often missed.
+   * On by default. That does not make a request on its own: nothing is sent until
+   * the user enters an OAuth client in Options → Sync and presses Connect.
    */
   syncEnabled: boolean;
   /**
-   * Carry the site configs in the sync as well — both halves, desktop and mobile,
-   * each merged on its own stamp (`shared/syncConfigs.ts`), so a site recorded on
-   * one computer is set up on the other, and a phone's mobile setup and a laptop's
-   * desktop one never overwrite each other.
-   *
-   * On by default (it only matters once `syncEnabled` is). Off, this device sends
-   * none and takes none, and the far side's configs pass through untouched — so
-   * turning it off here never deletes them over there.
-   */
-  syncSiteConfigs: boolean;
-  /**
    * What the Queue tab's Archive button writes out: which columns, which
-   * posting statuses, and JSON or CSV. Device state, like everything else here —
-   * it is a preference about a download, not part of the job database, so it is
-   * never in the sync snapshot.
+   * posting statuses, and JSON or CSV. Device state.
    *
    * Stored as *sparse overrides* (`shared/jobExport.ts`), not as the resolved
    * lists: a key this build has never heard of is ignored, and a column added by
@@ -415,7 +359,7 @@ export interface Settings {
 /** Everything persisted in chrome.storage.local (the CV bytes are stored separately, also in chrome.storage.local). */
 export interface StoredState {
   profile: Profile;
-  siteConfigs: SiteConfig[];
+  lessons: Lesson[];
   jobUrls: JobUrlEntry[];
   settings: Settings;
 }

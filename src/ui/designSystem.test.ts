@@ -18,7 +18,6 @@ import { describe, it, expect } from 'vitest';
 import { readFileSync, readdirSync, statSync } from 'fs';
 import { LIGHT_PALETTE, DARK_PALETTE, PALETTE_TOKENS, type Palette } from './palette';
 import { STATUS_TEXT } from '../shared/labels';
-import { SETUP_STEP_ICONS, SETUP_STEP_ORDER } from '../shared/setupSteps';
 
 // String path math on import.meta.url rather than the global URL: under jsdom
 // `new URL('.', 'file://…')` mis-resolves the base to http://localhost, so fs
@@ -262,7 +261,7 @@ describe('design system — every status is complete', () => {
   const ICONS: Record<'ok' | 'warn' | 'none', string> = {
     ok: '--icon-check',
     warn: '--icon-alert',
-    none: '--icon-x',
+    none: '--icon-teach',
   };
 
   for (const cls of ['ok', 'warn', 'none'] as const) {
@@ -277,34 +276,6 @@ describe('design system — every status is complete', () => {
     for (const status of ['high', 'low', 'none'] as const) {
       expect(STATUS_TEXT[status].word.trim()).not.toBe('');
     }
-  });
-});
-
-/**
- * The wizard rail's step marks, held to the same rule as the status dots above:
- * a step with no icon is a blank node in a row of six, and the rail is the only
- * thing on the panel that says which step is which.
- *
- * `SETUP_STEP_ICONS` is typed `Record<SetupStepKey, …>`, so a seventh step
- * already fails `npm run typecheck` until it is *named*. This is the other half:
- * the name it is given has to be a token tokens.css actually declares, which the
- * type system cannot see.
- */
-describe('design system — every wizard step has a mark', () => {
-  for (const key of SETUP_STEP_ORDER) {
-    it(`step "${key}" names a token tokens.css declares`, () => {
-      const token = SETUP_STEP_ICONS[key];
-      expect(token, `${key} must name an --icon-* token`).toMatch(/^--icon-/);
-      expect(tokensCss, `tokens.css must define ${token}`)
-        .toMatch(new RegExp(`${token}\\s*:`));
-    });
-  }
-
-  // Six identical marks would be no better than the six identical dots this
-  // replaced — the whole point is telling step 3 from step 5 at a glance.
-  it('no two steps share a mark', () => {
-    const used = SETUP_STEP_ORDER.map((k) => SETUP_STEP_ICONS[k]);
-    expect(new Set(used).size).toBe(used.length);
   });
 });
 

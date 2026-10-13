@@ -1,61 +1,42 @@
-import type { Profile, Settings, SiteConfig, StoredState } from './types';
+import type { Profile, Settings, StoredState } from './types';
 import { DEFAULT_MODAL_LAYOUT } from './modalLayout';
 
 export const DEFAULT_PROFILE: Profile = {
   values: {},
-  custom: {},
+  keywords: {},
+  customFields: [],
 };
 
 export const DEFAULT_SETTINGS: Settings = {
-  autoRunOnLoad: true,
-  closeTabOnSubmit: false,
-  // On by default, unlike closeTabOnSubmit: skipping *is* the decision to be
-  // done with a posting, so leaving its tab open only makes work. Submitting is
-  // different — the confirmation is often worth reading.
+  fillAutomatically: true,
+  openCardOnQueueTabs: true,
+  // On: the user submits by hand, so closing the tab is the only "done" the
+  // extension ever hears — off, a queue session leaves every posting at `opened`.
+  markDoneOnClose: true,
+  // On: skipping *is* the decision to be done with a posting, so leaving its tab
+  // open only makes work.
   closeTabOnSkip: true,
-  finishSetupOnApply: true,
   closeTabDelayMs: 1500,
-  redirectTarget: 'newTabCloseSource',
-  // On: filling and recording are both impossible inside a phone app, so this is
-  // the only setting under which the extension can finish what it starts.
+  // On: filling is impossible inside a phone app, so this is the only setting under
+  // which a queued posting can be filled at all.
   keepInBrowser: true,
   // Two: a phone cannot hold more job pages in memory, and on a laptop two tabs
   // is still one to work in and one loading behind it.
   sessionBatchSize: 2,
   modalLayout: DEFAULT_MODAL_LAYOUT,
   modalFullscreen: false,
-  helpSeen: false,
-  // On, like syncSiteConfigs below: it does nothing at all until a client is
-  // entered and an account connected, so the first request is still one the user
-  // asked for — and off, it was the step a finished setup most often missed.
+  // On: it does nothing at all until a client is entered and an account
+  // connected, so the first request is still one the user asked for.
   syncEnabled: true,
-  // On: once sync is, a site recorded on one computer should not need recording
-  // again on the other. Only takes effect while syncEnabled is on.
-  syncSiteConfigs: true,
   // Empty means "no decisions taken yet", which resolves to every column, the
   // applied postings, as JSON — see `resolveExport`. Spelling those out here
   // instead would freeze today's schema into every fresh install.
   exportOptions: {},
 };
 
-/**
- * A ready-to-tweak example config. Also matches the local test fixture so the
- * extension does something useful out of the box.
- */
-export const EXAMPLE_SITE_CONFIG: SiteConfig = {
-  id: 'example-fixture',
-  name: 'Local test fixture',
-  urlPatterns: ['*://*/sample-form.html', '/sample-form\\.html/'],
-  waitFor: 'form',
-  waitTimeoutMs: 15000,
-  prep: [{ action: 'click', selector: '#expand-description', optional: true }],
-  extract: { jobTitle: '#job-title', jobDescription: '#job-description' },
-  autoDetect: true,
-};
-
 export const DEFAULT_STATE: StoredState = {
   profile: DEFAULT_PROFILE,
-  siteConfigs: [EXAMPLE_SITE_CONFIG],
+  lessons: [],
   jobUrls: [],
   settings: DEFAULT_SETTINGS,
 };

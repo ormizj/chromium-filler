@@ -1,5 +1,5 @@
 import { describe, it, expect, afterEach, vi } from 'vitest';
-import { fillTextField } from './fill';
+import { fillCheckbox, fillRadioGroup, fillTextField, hasValue } from './fill';
 
 function mount(html: string): HTMLElement {
   const root = document.createElement('div');
@@ -92,5 +92,70 @@ describe('fillTextField', () => {
     const root = mount(`<select><option value="1">One</option></select>`);
     const el = root.querySelector('select')!;
     expect(fillTextField(el, 'nope')).toBe(false);
+  });
+});
+
+describe('fillChoice — radio groups and checkboxes', () => {
+  const radios = () => {
+    document.body.innerHTML = `
+      <label><input type="radio" name="v" id="y" value="1"> Yes</label>
+      <label><input type="radio" name="v" id="n" value="0"> No</label>`;
+    return Array.from(document.querySelectorAll<HTMLInputElement>('input[type="radio"]'));
+  };
+
+  it('picks the radio whose label matches the value', () => {
+    const group = radios();
+    expect(fillRadioGroup(group, 'No')).toBe(true);
+    expect(group[1].checked).toBe(true);
+  });
+
+  it('matches on the value attribute too', () => {
+    const group = radios();
+    expect(fillRadioGroup(group, '1')).toBe(true);
+    expect(group[0].checked).toBe(true);
+  });
+
+  it('refuses to guess between options', () => {
+    document.body.innerHTML = `
+      <label><input type="radio" name="l"> Senior engineer</label>
+      <label><input type="radio" name="l"> Senior manager</label>`;
+    const group = Array.from(document.querySelectorAll<HTMLInputElement>('input'));
+    expect(fillRadioGroup(group, 'senior')).toBe(false);
+    expect(group.some((r) => r.checked)).toBe(false);
+  });
+
+  it('ticks a checkbox for yes and leaves it for no', () => {
+    document.body.innerHTML = '<input type="checkbox" id="c">';
+    const box = document.getElementById('c') as HTMLInputElement;
+    expect(fillCheckbox(box, 'No')).toBe(true);
+    expect(box.checked).toBe(false);
+    expect(fillCheckbox(box, 'Yes')).toBe(true);
+    expect(box.checked).toBe(true);
+    expect(fillCheckbox(box, 'maybe')).toBe(false);
+  });
+});
+
+describe('hasValue — what the engine must leave alone', () => {
+  it('reads text, select, radio and checkbox state', () => {
+    document.body.innerHTML = `
+      <input id="t" value="x"><input id="e">
+      <select id="s1"><option value="">Choose…</option><option>A</option></select>
+      <select id="s2"><option>A</option><option selected>B</option></select>
+      <input type="radio" name="r" id="r1"><input type="radio" name="r" id="r2" checked>
+      <input type="radio" name="q" id="q1">
+      <input type="checkbox" id="cb" checked>`;
+    const $ = (id: string) => document.getElementById(id) as HTMLElement;
+    expect(hasValue($('t'))).toBe(true);
+    expect(hasValue($('e'))).toBe(false);
+    expect(hasValue($('s1'))).toBe(false);
+    expect(hasValue($('s2'))).toBe(true);
+    expect(hasValue($('r1'), [$('r1'), $('r2')] as HTMLInputElement[])).toBe(true);
+    expect(hasValue($('q1'), [$('q1')] as HTMLInputElement[])).toBe(false);
+    expect(hasValue($('cb'))).toBe(true);
+  });
+
+  it('a select whose first option is a prompt counts as empty', () => {
+    document.body.innerHTML = '<select id="s"><option>Please select</option><option>Spain</option></select>';
+    expect(hasValue(document.getElementById('s') as HTMLElement)).toBe(false);
   });
 });

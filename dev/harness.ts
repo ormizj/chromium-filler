@@ -3,8 +3,10 @@
  *
  *   popup | options  — pulls the REAL page HTML + stylesheet and runs the REAL
  *                      popup.ts / options.ts against the mocked `chrome.*`.
- *   modal | setup    — renders the REAL shadow-DOM surface (review modal, setup
- *                      panel) over a fake job posting, with representative data.
+ *   modal            — renders the REAL shadow-DOM review card over a fake job
+ *                      posting, with representative data.
+ *   chip             — the REAL queue chip over a fake posting, beside the card's
+ *                      folded pill — the two things in the page's corners.
  *   picker           — runs the REAL click-to-pick toolbar over a deliberately
  *                      nested posting. It draws on the host page's own light DOM
  *                      rather than in a shadow root, so it was the one surface
@@ -16,11 +18,10 @@
  * loading the built extension into a browser and driving a real site — which
  * makes iterating on them, or checking them at phone width, far too slow.
  *
- * `&state=…` picks WHICH flow the surface is showing. The redirect states in
- * particular were previously unreachable here: a two-step posting renders a
- * completely different modal body (a notice and two buttons, no report), and it
- * could only be seen by driving a real board with the extension installed.
- * `test/fixtures/scenarios.mjs` is the same list of flows, as real pages.
+ * `&state=…` picks WHICH rendering the surface is showing — most of them are
+ * otherwise reachable only by driving a real site, or by pressing something a
+ * screenshot cannot press. `test/fixtures/scenarios.mjs` is the same list of
+ * flows, as real pages.
  */
 
 import './mock-chrome';
@@ -31,66 +32,13 @@ import { DEFAULT_MODAL_LAYOUT } from '../src/shared/modalLayout';
 import {
   FillerModal, type ModalCallbacks, type ModalData, type ModalView,
 } from '../src/content/modal/modal';
-import { SetupPanel, type SetupData } from '../src/content/setupPanel';
+import { QueueChip } from '../src/content/queueChip';
 import { startPicker } from '../src/content/picker';
 import { describeElement } from '../src/shared/elementChain';
-import { SETUP_STEP_ORDER, type SetupStepKey } from '../src/shared/setupSteps';
-import { RecorderBar } from '../src/content/recorderBar';
-import { RECORDER_HOST_ID } from '../src/content/extensionUi';
-import { detectForConfig, DETECTABLE_FIELDS } from '../src/content/fieldDetect';
-import { highlight } from '../src/content/fill';
-import { FIELD_LABELS } from '../src/shared/fieldKeys';
-import { ACTION_LABELS, heldSendNotice } from '../src/shared/labels';
-import {
-  compileRecording, type RecordFlow, type Recording, type RecordedStep,
-} from '../src/shared/recording';
+import type { FieldChoice } from '../src/shared/profileFields';
 
-/**
- * A recording that is deliberately *not* perfect, because a clean one shows none of
- * what the review is for: one step the extension could only identify by its position
- * on the page, and no confirmation marked — which is the warning that matters most,
- * since Apply stays greyed out without one.
- */
-function recordedState(flow: RecordFlow): Partial<SetupData> {
-  const at = (n: number) => n * 900;
-  const strong = (selector: string) =>
-    ({ selector, strength: 'strong' as const, strategy: 'id' as const });
-
-  const steps: RecordedStep[] = [
-    { id: 's1', at: at(1), leg: 'posting', url: 'https://acme.test/job/42', action: 'click', label: 'Show full description', target: strong('#expand') },
-    { id: 's2', at: at(2), leg: 'posting', url: 'https://acme.test/job/42', action: 'click', label: 'Job description', bind: 'jobDescription', bindSource: 'user', target: strong('#posting-body') },
-  ];
-
-  if (flow === 'external') {
-    steps.push(
-      { id: 's3', at: at(3), leg: 'posting', url: 'https://acme.test/job/42', action: 'click', label: 'Apply on company site', bind: 'applySelector', bindSource: 'user', target: strong('#apply-external') },
-      { id: 's4', at: at(4), leg: 'posting', url: 'https://acme.test/job/42', action: 'navigate', label: '', to: 'https://ats.acme.test/apply' },
-      { id: 's5', at: at(5), leg: 'destination', url: 'https://ats.acme.test/apply', action: 'click', label: 'Start application', target: { selector: 'main > div > div:nth-of-type(2) > button', strength: 'fragile', strategy: 'path' } },
-      { id: 's6', at: at(7), leg: 'destination', url: 'https://ats.acme.test/apply', action: 'input', label: 'Email address', bind: 'field:email', bindSource: 'auto', target: strong('#email') },
-      { id: 's7', at: at(8), leg: 'destination', url: 'https://ats.acme.test/apply', action: 'input', label: 'Upload CV', bind: 'field:resume', bindSource: 'auto', target: strong('#cv') },
-      { id: 's8', at: at(9), leg: 'destination', url: 'https://ats.acme.test/apply', action: 'click', label: 'Submit application', bind: 'submit', bindSource: 'user', target: strong('#send') },
-    );
-  } else {
-    steps.push(
-      { id: 's3', at: at(3), leg: 'posting', url: 'https://acme.test/job/42', action: 'click', label: 'Continue', target: { selector: 'body > div > div:nth-of-type(3) > button', strength: 'fragile', strategy: 'path' } },
-      { id: 's4', at: at(5), leg: 'posting', url: 'https://acme.test/job/42', action: 'input', label: 'Email address', bind: 'field:email', bindSource: 'auto', target: strong('#email') },
-      { id: 's5', at: at(6), leg: 'posting', url: 'https://acme.test/job/42', action: 'input', label: 'Upload CV', bind: 'field:resume', bindSource: 'auto', target: strong('#cv') },
-      { id: 's6', at: at(7), leg: 'posting', url: 'https://acme.test/job/42', action: 'click', label: 'Submit application', bind: 'submit', bindSource: 'user', target: strong('#send') },
-    );
-  }
-
-  const recording: Recording = {
-    flow,
-    startedAt: 0,
-    postingUrl: 'https://acme.test/job/42',
-    ...(flow === 'external' ? { destinationUrl: 'https://ats.acme.test/apply' } : {}),
-    steps,
-  };
-  return { recording, compiled: compileRecording(recording) };
-}
-
-type Page = 'popup' | 'options' | 'modal' | 'setup' | 'picker';
-/** Which flow the surface is rendering — see `MODAL_STATES` / `SETUP_STATES`. */
+type Page = 'popup' | 'options' | 'modal' | 'chip' | 'picker';
+/** Which flow the surface is rendering — see `MODAL_STATES`. */
 type State = string;
 
 const params = new URLSearchParams(location.search);
@@ -118,12 +66,26 @@ async function bootPage(name: 'popup' | 'options'): Promise<void> {
   // options.ts run exactly once — via the dynamic import below).
   document.body.innerHTML = doc.body.innerHTML;
 
+  // The Profile tab's newer sections, by deep link — the same `#tab&at=` routes the
+  // extension itself uses, so the harness lands where a real link would.
+  const deepLinks: Record<string, string> = {
+    profile: 'profile',
+    'custom-fields': 'profile&at=custom-section',
+    learned: 'profile&at=learned-section',
+    wordings: 'profile&at=wordings',
+  };
+  if (name === 'options' && deepLinks[state]) history.replaceState(null, '', `#${deepLinks[state]}`);
+
   await import(/* @vite-ignore */ `${base}/${name}.ts`);
 
   // A closed <details> is a state a screenshot cannot reach: opening the archive
   // panel takes a click, and the whole point of the harness is that it does not.
   if (state === 'export') {
     const panel = document.getElementById('export-options') as HTMLDetailsElement | null;
+    if (panel) panel.open = true;
+  }
+  if (state === 'wordings') {
+    const panel = document.getElementById('wordings') as HTMLDetailsElement | null;
     if (panel) panel.open = true;
   }
 
@@ -146,11 +108,8 @@ async function bootPage(name: 'popup' | 'options'): Promise<void> {
 function fakePosting(): void {
   document.body.style.cssText =
     'margin:0;padding:20px;font:15px/1.6 system-ui,sans-serif;background:#fff;color:#111827';
-  // The controls carry real handles — `for`/`id`, a `name`, a file input — because
-  // `&marks=1` runs the *real* `detectForConfig` over this posting rather than posing
-  // its chips. Without them detection claims nothing and the marks are a blank page,
-  // which is the one thing that rendering exists to disprove. It is a fairer stand-in
-  // for a job form either way: a posting whose fields nothing can identify is not one.
+  // The controls carry real handles — `for`/`id`, a `name`, a file input — so it is
+  // a fair stand-in for a job form: a posting whose fields nothing can identify is not one.
   const field = 'width:100%;padding:8px;border:1px solid #d1d5db;border-radius:6px';
   const lbl = 'display:block;margin:16px 0 4px;font-weight:600';
   document.body.innerHTML = `
@@ -171,15 +130,42 @@ function fakePosting(): void {
   `;
 }
 
+let nextRow = 1;
 const match = (
-  field: FieldMatch['field'],
+  question: string,
+  field: string | undefined,
   confidence: FieldMatch['confidence'],
   filled: boolean,
   extra: Partial<FieldMatch> = {},
 ): FieldMatch => ({
-  field, confidence, filled, source: confidence === 'none' ? 'none' : 'heuristic',
-  required: false, ...extra,
+  id: `r${nextRow++}`,
+  question,
+  kind: 'text',
+  field,
+  fieldLabel: field ? (LABELS[field] ?? field) : undefined,
+  confidence,
+  filled,
+  source: confidence === 'none' ? 'none' : 'heuristic',
+  required: false,
+  ...extra,
 });
+
+const LABELS: Record<string, string> = {
+  fullName: 'Full name', email: 'Email', phone: 'Phone', city: 'City', country: 'Country',
+  coverLetter: 'Cover letter', resume: 'Résumé / CV', firstName: 'First name', c_exp: 'Years of experience',
+};
+
+const CHOICES: FieldChoice[] = [
+  { id: 'resume', label: 'Résumé / CV', group: 'builtIn' },
+  { id: 'coverLetter', label: 'Cover letter', group: 'builtIn' },
+  { id: 'email', label: 'Email', group: 'builtIn' },
+  { id: 'phone', label: 'Phone', group: 'builtIn' },
+  { id: 'fullName', label: 'Full name', group: 'builtIn' },
+  { id: 'firstName', label: 'First name', group: 'builtIn' },
+  { id: 'city', label: 'City', group: 'builtIn' },
+  { id: 'c_exp', label: 'Years of experience', group: 'custom' },
+  { id: 'c_visa', label: 'Need sponsorship', group: 'custom' },
+];
 
 const SESSION: SessionState = {
   active: true,
@@ -188,23 +174,24 @@ const SESSION: SessionState = {
 };
 
 /**
- * The report a filled quick-apply posting produces — one row of every shape, in
- * the order `orderReport` leaves them: unmatched, then to check, then filled,
- * `FIELD_ORDER` within each band. The modal renders this verbatim now, so writing
- * it sorted is what makes the harness show what a real fill looks like.
+ * The report a filled posting produces — one row of every shape, in the order
+ * the engine settles them at the first sweep: to teach, then to check, then
+ * filled. The card renders this verbatim.
  */
 const REPORT: FieldMatch[] = [
-  match('city', 'none', false),
-  // A low-confidence row: the only shape with two actions (Confirm + Pick).
-  match('phone', 'low', false, { valueToFill: '+1 555 123 4567', selectorUsed: '.field input:nth-of-type(3)' }),
-  match('resume', 'high', true, { selectorUsed: 'input[type=file]' }),
-  match('coverLetter', 'high', true, { valueToFill: 'I love building widgets.', selectorUsed: 'textarea' }),
-  match('email', 'high', true, { valueToFill: 'ada@example.com', selectorUsed: '#email' }),
-  match('fullName', 'high', true, { valueToFill: 'Ada Lovelace', selectorUsed: '#name' }),
+  match('How did you hear about us?', undefined, 'none', false, { required: true }),
+  match('Where are you based?', undefined, 'none', false),
+  // A guess with something to fill it with: the only shape with two actions.
+  match('Mobile', 'phone', 'low', false, { kind: 'tel', valueToFill: '+1 555 123 4567' }),
+  match('Résumé / CV', 'resume', 'high', true, { kind: 'file', valueToFill: 'ada-lovelace-cv.pdf' }),
+  match('Cover letter', 'coverLetter', 'high', true, { kind: 'textarea', valueToFill: 'I love building widgets.' }),
+  match('Email', 'email', 'high', true, { kind: 'email', valueToFill: 'ada@example.com' }),
+  match('Full name', 'fullName', 'high', true, { valueToFill: 'Ada Lovelace' }),
+  match('Years of experience', 'c_exp', 'high', true, { source: 'keyword', valueToFill: '7' }),
 ];
 
 const BASE_MODAL: ModalData = {
-  siteName: 'Acme Careers',
+  siteName: 'jobs.acme.test',
   jobTitle: 'Staff Platform Engineer',
   jobDescription: [
     { kind: 'para', text: 'Acme is hiring a Staff Platform Engineer to own the deployment pipeline end to end. You will work across infrastructure, developer tooling, and release engineering.' },
@@ -212,15 +199,11 @@ const BASE_MODAL: ModalData = {
   jobRequirements: [
     { kind: 'list', items: ['8+ years', 'Kubernetes', 'Go or Rust', 'On-call experience'] },
   ],
-  // Invented fixture values, like everything else on this fake posting — the
-  // extension never derives these. `shared/jobMeta.ts` reads all three off the
-  // page's own `JobPosting` JSON-LD or a configured selector, and renders nothing
-  // where the posting states nothing (see `state=listing`, whose chip row is
-  // absent). `Remote (Berlin, DE)` is the one composed value, and both halves are
-  // still stated facts: `jobLocationType: TELECOMMUTE` plus the `jobLocation`.
+  // Invented fixture values — `shared/jobMeta.ts` reads these off the page's own
+  // JSON-LD, and renders nothing where the posting states nothing.
   meta: { company: 'Acme', location: 'Remote (Berlin, DE)', employmentType: 'Full-time' },
   matches: REPORT,
-  applyState: 'ready',
+  choices: CHOICES,
   // What a fresh install gets. Without it the card falls back to the CSS
   // defaults, which is a size no real user would ever see.
   layout: DEFAULT_MODAL_LAYOUT,
@@ -262,144 +245,66 @@ const LONG_DESCRIPTION: JobBlock[] = [
 ];
 
 /**
- * One entry per flow the modal can be in. `redirect`/`redirect-followed` are the
- * two-step posting (no report at all — a notice and "Fill this page instead"),
- * `landed` is the destination of a handoff, `empty` is the empty-profile banner
- * and `listing` is a results page whose fields all went unrecognised.
+ * One entry per rendering the card can be in. `&teach=<n>` opens the Teach chooser
+ * on the n-th row (1-based) — it is only reachable by pressing Teach.
  */
 const MODAL_STATES: Record<string, Partial<ModalData>> = {
   default: {},
   // A full-length posting: the only state that exercises the reading typography
   // and the body scroll the Job view exists for.
-  long: {
-    jobDescription: LONG_DESCRIPTION,
-    jobRequirements: [],
-  },
-  redirect: {
-    siteName: 'MixedBoard',
-    matches: [],
-    redirect: {
-      host: 'ats.acme.test',
-      reason: 'matched “Apply on company website” → ats.acme.test',
-      followed: false,
-    },
-  },
-  'redirect-followed': {
-    siteName: 'MixedBoard',
-    matches: [],
-    redirect: { host: 'ats.acme.test', reason: 'configured external apply link', followed: true },
-  },
-  // The apply control is an app link (`linkedin://…`) with no web address inside
-  // it, so nothing was followed and nothing can be. Deliberately *not* a
-  // `redirect` state: the footer's redirect branch leads with "Open application"
-  // and there is nothing here to open. The fields are the ones that were on the
-  // board page, which are still filled — the banner has to say both halves.
-  'app-link': {
-    siteName: 'MixedBoard',
-    appLink: true,
-    applyState: 'noButton',
-  },
-  landed: { siteName: 'ats.acme.test', via: 'boards.example' },
-  // Dragged into the right-hand edge, and tall enough that `clampLayout` pins it
-  // top and bottom too: the two right corners come out square and lose their
-  // border while the left ones stay rounded — the whole flush rule in one
-  // screenshot. Only visible at desktop width; the phone panel is a bottom sheet.
+  long: { jobDescription: LONG_DESCRIPTION, jobRequirements: [] },
+  // Dragged into the right-hand edge and tall enough to be pinned top and bottom:
+  // the flush rule in one screenshot. Desktop width only.
   flush: {
     jobDescription: LONG_DESCRIPTION,
     jobRequirements: [],
     layout: { right: 0, bottom: 0, width: 460, height: 4000 },
   },
-  // Fullscreen, with a real posting in it — the state the button exists for, and
-  // the one place to check that the header still holds a site name, the segmented
-  // control and two icon buttons at 390px. Renders differently at each width: a
-  // squared, borderless card on desktop, a full-height sheet on the phone panel.
-  fullscreen: {
-    jobDescription: LONG_DESCRIPTION,
-    jobRequirements: [],
-    fullscreen: true,
-  },
-  // A confident match that could not take the value — a <select> with no
-  // matching option, or an override pointing at a wrapper. It reads as "needs
-  // review" with a Confirm, never as filled: the dot is the user's only signal
-  // that a field still needs them.
+  fullscreen: { jobDescription: LONG_DESCRIPTION, jobRequirements: [], fullscreen: true },
+  // Confident matches the control would not take — a <select> with no matching
+  // option. Reads as "to check", never as filled.
   'failed-fill': {
     matches: [
-      match('fullName', 'high', true, { valueToFill: 'Ada Lovelace', selectorUsed: '#name' }),
-      match('country', 'high', false, { valueToFill: 'US', selectorUsed: 'select[name=country]' }),
-      match('city', 'high', false, { valueToFill: 'London', selectorUsed: '.city-wrapper' }),
-      match('resume', 'high', false, { selectorUsed: '.dropzone' }),
+      match('Full name', 'fullName', 'high', true, { valueToFill: 'Ada Lovelace' }),
+      match('Country', 'country', 'high', false, { kind: 'select', valueToFill: 'US' }),
+      match('Phone', 'phone', 'high', false, { kind: 'tel' }),
+      match('City', 'city', 'high', false, { kind: 'text', kept: true, valueToFill: 'London' }),
     ],
   },
-  // Confirm has been pressed on one row. The dot, the tag and the count line are
-  // deliberately identical to `default` — the report is the record of the fill and
-  // does not re-colour itself — so the retired `Confirmed ✓` is the only thing on
-  // the card saying the press landed. Reachable otherwise only by pressing it.
-  confirmed: { confirmed: ['phone'] },
-  // A page where no Send button could be found, so the footer's Apply is greyed
-  // out. `&note=apply` opens the note that says why — the whole point of the
-  // state, and only reachable by pressing the button.
-  'apply-unset': { applyState: 'noButton' },
-  // The *other* reason Apply is grey, and the one a user cannot guess: the site
-  // has no confirmation element, so a submission's outcome could not be read
-  // back. A different note entirely — pair it with `&note=apply`.
-  'apply-unverified': { applyState: 'noConfirmation' },
-  // The same missing confirmation, with the setting that turns it into an offer left
-  // on — so Apply is *live*, coral, and says what else the press will start. It is
-  // the commonest thing a set-up site can look like before it has ever been applied
-  // to, and the only state where the banner and the primary are both about setup.
-  'finish-setup': { applyState: 'finishSetup' },
-  // The same offer at the one moment it is the answer to something the user just
-  // did: a first pass has been saved and the card was pushed in front of them by
-  // `saveRecording`. Only the banner differs — and it is unreachable by any press,
-  // being downstream of a whole recording.
-  'finish-setup-saved': { applyState: 'finishSetup', setupSaved: true },
-  // Sent and confirmed. The banner, the retired Apply, and the pill all change,
-  // and none of it is reachable without actually submitting a real application.
-  applied: { applied: true },
-  // The same posting opened again later — the record read back rather than a
-  // confirmation seen. Both decisions are retired here too, so this is where to
-  // check that a de-emphasised Skip still reads as a button and not as a gap.
-  // Otherwise reachable only by applying for a job and then revisiting it.
+  // Confirm pressed on the guess. Only the retired button says so.
+  confirmed: { confirmed: [REPORT[2].id] },
+  // Rows already taught, ignored — the retired states of the Teach flow.
+  taught: {
+    matches: [
+      match('How did you hear about us?', undefined, 'none', false, { ignored: true }),
+      match('Where are you based?', 'city', 'high', true, { source: 'lesson', taught: true, valueToFill: 'London' }),
+      ...REPORT.slice(2),
+    ],
+  },
+  // Fields that arrived after the first sweep — the form behind "Apply now".
+  'appeared-later': {
+    matches: [
+      ...REPORT.slice(3),
+      match('Do you need visa sponsorship?', 'c_visa', 'high', true, { kind: 'radio', source: 'keyword', valueToFill: 'No', later: true }),
+      match('Notice period', undefined, 'none', false, { later: true }),
+      match('Salary expectation', undefined, 'none', false, { later: true, kind: 'number' }),
+    ],
+  },
+  // A posting the database already has as applied.
   'already-applied': { alreadyApplied: true, appliedAt: Date.UTC(2026, 4, 12) },
-  // The two-step version, and the reason the footer's applied branch has to come
-  // before its redirect branch: without that, this state leads with a live
-  // "Open application" primary on a job that is already applied for.
-  'already-applied-redirect': {
-    alreadyApplied: true,
-    appliedAt: Date.UTC(2026, 4, 12),
-    redirect: { host: 'ats.acme.test', reason: 'Apply link leaves for ats.acme.test', followed: false },
-  },
-  /**
-   * The `empty` flow banner, which nothing here used to reach: this state was a
-   * listing page with six unmatched rows and `noConfirmation`, so it rendered the
-   * *blocked* banner and the one it is named after was unscreenshottable.
-   *
-   * `empty` fires on an empty **report**, and `main.ts` builds one row per field
-   * it has something to fill with — so the only way to get here is an empty
-   * profile. Hence a perfectly ordinary posting with no rows at all.
-   */
-  empty: {
-    matches: [],
-    applyState: 'ready',
-  },
-  /**
-   * The listing page the state above used to be. Worth keeping on its own: it is
-   * the posting that states none of the three meta facts, so the chip row is
-   * absent entirely — the case that proves the row is never rendered empty — and
-   * it is the shape `noConfirmation` really appears on.
-   */
-  listing: {
-    siteName: 'ListingBoard',
-    jobTitle: 'Platform engineering jobs',
-    jobDescription: [
-      { kind: 'para', text: '3 results. Each employer takes applications on its own site.' },
+  // A page full of questions none of which are known yet.
+  nothing: {
+    matches: [
+      match('Preferred name', undefined, 'none', false),
+      match('Pronouns', undefined, 'none', false, { kind: 'select' }),
+      match('Notice period', undefined, 'none', false),
+      match('', undefined, 'none', false, { kind: 'checkbox' }),
     ],
-    jobRequirements: undefined,
-    meta: undefined,
-    matches: ['fullName', 'email', 'phone', 'coverLetter', 'city', 'resume']
-      .map((f) => match(f as FieldMatch['field'], 'none', false)),
-    applyState: 'noConfirmation',
   },
+  // An empty profile: the banner that blames the profile, not the page.
+  empty: { matches: [match('Email', 'email', 'high', false, { kind: 'email' })], profileEmpty: true },
+  // No inputs on the page yet at all.
+  bare: { matches: [] },
 };
 
 /**
@@ -408,18 +313,11 @@ const MODAL_STATES: Record<string, Partial<ModalData>> = {
  */
 function modalCallbacks(self: () => FillerModal | undefined): ModalCallbacks {
   return {
-    onRerun: () => console.log('[harness] re-run'),
-    onApply: () => console.log('[harness] apply'),
-    onSendMyself: () => console.log('[harness] send it myself'),
-    onConfirm: (f) => console.log('[harness] confirm', f),
-    onPick: (f) => console.log('[harness] pick', f),
-    onFollow: () => console.log('[harness] follow'),
-    onFillAnyway: () => console.log('[harness] fill anyway'),
+    onRerun: () => console.log('[harness] fill again'),
+    onConfirm: (id) => console.log('[harness] confirm', id),
+    onTeach: (id, choice) => console.log('[harness] teach', id, choice),
+    onPoint: () => console.log('[harness] point at a field'),
     onSkip: () => console.log('[harness] skip'),
-    // The overflow's two ways out of a posting. Both open another surface for
-    // real, so here they are only logged — but they have to exist, or the menu
-    // in the harness is two dead items.
-    onOpenSetup: () => console.log('[harness] open setup'),
     onOpenOptions: () => console.log('[harness] open options'),
     onClose: () => self()?.minimize(),
     onFold: (c) => console.log('[harness] modal folded', c),
@@ -432,429 +330,45 @@ function bootModal(): void {
   fakePosting();
   let modal: FillerModal;
   modal = new FillerModal(modalCallbacks(() => modal));
+  // `&view=job|fields` picks the view. The card opens on the report by default,
+  // as it does on any page the queue did not open.
+  const view = params.get('view');
+  modal.setView(view === 'job' ? 'job' : 'fields');
+  if (state === 'pill-only') modal.minimize();
 
   modal.render({
     ...BASE_MODAL,
     ...(MODAL_STATES[state] ?? {}),
-    // `?session=1` shows the queue strip, and turns Skip into "Skip → next".
-    session: params.get('session') === '1' ? SESSION : undefined,
-    // Kept alongside `state=landed` because the README links `?via=1`.
-    via: params.get('via') === '1' ? 'boards.example' : MODAL_STATES[state]?.via,
+    // `?session=1` (or `&queue=1`) is a queue tab: the strip and Skip → next.
+    queue: params.get('session') === '1' || params.get('queue') === '1' ? SESSION : undefined,
   });
+  if (view === 'job' || view === 'fields') modal.setView(view as ModalView);
 
-  // `&view=fields` opens on the report. The Job view is the default everywhere
-  // else, so without this the report is only reachable by clicking — which a
-  // screenshot cannot do.
-  const view = params.get('view');
-  if (view === 'fields' || view === 'job') modal.setView(view as ModalView);
-
-  // `&note=apply` opens the explanation behind the greyed-out Apply button, for
-  // the same reason `&view=` exists: a click is not reachable from a screenshot,
-  // and an unpressed button looks identical to a broken one.
-  if (params.get('note') === 'apply') modal.setApplyHelp(true);
+  // `&teach=<n>` opens the chooser on row n; `&new=1` with it opens "New field…".
+  const teach = Number(params.get('teach'));
+  const rows = (MODAL_STATES[state]?.matches ?? BASE_MODAL.matches);
+  if (teach && rows[teach - 1]) modal.openTeach(rows[teach - 1].id, { newField: params.get('new') === '1' });
 }
 
-function bootSetup(): void {
+/**
+ * The queue chip in its corner, and the card's pill in the other — the two things
+ * the extension leaves on a page. `&open=1` expands the card, which on a phone
+ * hides the chip (the sheet covers the bottom of the screen).
+ */
+function bootChip(): void {
   fakePosting();
-  const panel = new SetupPanel({
-    onAddPrep: (a, l) => console.log('[harness] add prep', a, l),
-    onPickPrepTarget: (i, l) => console.log('[harness] pick prep', i, l),
-    onMovePrep: (i, d, l) => console.log('[harness] move prep', i, d, l),
-    onRemovePrep: (i, l) => console.log('[harness] remove prep', i, l),
-    onSetPrepMs: (i, ms, l) => console.log('[harness] prep ms', i, ms, l),
-    onRunPrep: () => console.log('[harness] run prep'),
-    onPickContainer: (k) => console.log('[harness] pick container', k),
-    onClearContainer: (k) => console.log('[harness] clear container', k),
-    onPickField: (f) => console.log('[harness] pick field', f),
-    onClearField: (f) => console.log('[harness] clear field', f),
-    onPickRedirect: (k) => console.log('[harness] pick redirect', k),
-    onClearRedirect: (k) => console.log('[harness] clear redirect', k),
-    onPickSubmit: () => console.log('[harness] pick send button'),
-    onClearSubmit: () => console.log('[harness] clear send button'),
-    onPickSuccess: () => console.log('[harness] pick confirmation'),
-    onClearSuccess: () => console.log('[harness] clear confirmation'),
-    onRename: (n, p) => console.log('[harness] rename', n, p),
-    onStartRecording: () => console.log('[harness] start recording'),
-    onMarkConfirmation: () => console.log('[harness] mark the confirmation'),
-    onRebindStep: (id, b) => console.log('[harness] rebind step', id, b),
-    onRepickStep: (id) => console.log('[harness] re-pick step', id),
-    onRemoveStep: (id) => console.log('[harness] remove step', id),
-    onSaveRecording: () => console.log('[harness] save recording'),
-    onDiscardRecording: () => console.log('[harness] discard recording'),
-    onOpenOptions: () => console.log('[harness] open options'),
-    onDismissHelp: () => console.log('[harness] legend dismissed'),
-    onClose: () => console.log('[harness] close setup'),
-    onFold: (c) => console.log('[harness] setup folded', c),
-    onLayoutChange: (l) => console.log('[harness] setup layout', l),
-    onFullscreen: (on) => console.log('[harness] setup fullscreen', on),
+  const chip = new QueueChip(() => console.log('[harness] chip pressed'));
+  chip.render(SESSION.progress);
+  let modal: FillerModal;
+  modal = new FillerModal({
+    ...modalCallbacks(() => modal),
+    onFold: (collapsed) => chip.setCardOpen(!collapsed),
   });
-
-  const BASE_SETUP: SetupData = {
-    name: 'Acme Careers',
-    urlPattern: '*://careers.acme.test/*',
-    prep: [
-      { action: 'click', selector: '#expand-description', resolves: true },
-      { action: 'waitFor', selector: '#application_form', ms: 10000, resolves: false },
-      { action: 'delay', ms: 500 },
-    ],
-    containers: [
-      { key: 'jobTitle', label: 'Job title', status: 'high', note: 'auto · Staff Platform Engineer', hasSave: false },
-      { key: 'jobDescription', label: 'Description', status: 'high', note: 'saved · Acme is hiring a Staff…', hasSave: true },
-      { key: 'jobRequirements', label: 'Requirements', status: 'none', note: 'not set', hasSave: false },
-    ],
-    // In `FIELD_ORDER`, because that is what `refreshSetup` now sorts these rows
-    // into before rendering — the CV first, then the cover letter, then contact
-    // details. Written in the sorted order rather than sorted here: the panel is
-    // the thing under test, and a harness that re-derives its fixture would hide
-    // a controller that stopped sorting.
-    fields: [
-      { key: 'resume', label: 'Résumé / CV', status: 'high', note: 'saved · input[type=file]', hasSave: true },
-      { key: 'coverLetter', label: 'Cover letter', status: 'low', note: 'auto (low) · textarea#msg', hasSave: false },
-      { key: 'email', label: 'Email', status: 'high', note: 'auto · #email', hasSave: false },
-      { key: 'phone', label: 'Phone', status: 'low', note: 'auto (low) · .field input:nth-of-type(3)', hasSave: false },
-      { key: 'fullName', label: 'Full name', status: 'high', note: 'auto · #name', hasSave: false },
-      { key: 'city', label: 'City', status: 'none', note: 'not found', hasSave: false },
-    ],
-    verdict: {
-      title: 'Quick apply (assumed)',
-      detail: 'no external apply link found on this page',
-      kind: 'unknown',
-    },
-    redirect: [
-      { key: 'applySelector', label: 'External apply link', status: 'none', note: 'not set', hasSave: false },
-      { key: 'quickApplySelector', label: 'Quick-apply marker', status: 'high', note: 'saved · #application_form', hasSave: true },
-      { key: 'markerSelector', label: 'External marker', status: 'none', note: 'not set', hasSave: false },
-    ],
-    beforeFollow: [{ action: 'click', selector: '#save-job', resolves: true }],
-    // Empty is the normal state: most sites take the CV the moment it is
-    // attached. `state=cv-steps` is the site that needs the extra clicks.
-    submitCv: [],
-    // Found by its label rather than saved — the ordinary case, and the one that
-    // shows the row still offering Pick when it already resolved something.
-    submit: { key: 'submitSelector', label: 'Send button', status: 'low', note: 'auto · Submit application', hasSave: false },
-    // Green while merely saved: there is nothing to verify until an application
-    // has actually been sent, so absence here is not a fault.
-    success: { key: 'successSelector', label: 'Confirmation element', status: 'high', note: 'saved · #app-success', hasSave: true },
-    // The returning user, whose legend is folded away. `state=help` is the
-    // first-run view.
-    helpSeen: true,
-    // `&ff=mobile` previews the mobile half's label on home — the one place the
-    // panel says which of a site's two setups it is editing.
-    formFactor: params.get('ff') === 'mobile' ? 'mobile' : 'desktop',
-    // The panel shares the review modal's slot and rectangle, so it needs the
-    // same default here for the same reason `BASE_MODAL` does: without it the
-    // card falls back to the CSS, which is a size no real user would ever see.
-    layout: DEFAULT_MODAL_LAYOUT,
-  };
-
-  /**
-   * Setting up a two-step posting is a different job: there is no form to map,
-   * so the panel is all verdict and redirect selectors, and every form-field row
-   * is legitimately grey. That is what `state=external` shows.
-   */
-  /**
-   * A site nobody has ever taught the extension anything about: nothing saved, no
-   * page actions. That is exactly what `isUnconfigured` tests, and so what decides
-   * which shape the home screen's first pass block takes and whether the second gets
-   * a control at all. Named once because two states are that site — one where the
-   * heuristics found something and one where they found nothing.
-   */
-  const unconfigured: Partial<SetupData> = {
-    prep: [],
-    submitCv: [],
-    beforeFollow: [],
-    fields: BASE_SETUP.fields.map((f) => ({ ...f, hasSave: false })),
-    containers: BASE_SETUP.containers.map((c) => ({ ...c, hasSave: false })),
-    redirect: BASE_SETUP.redirect.map((r) => ({ ...r, hasSave: false })),
-    submit: { ...BASE_SETUP.submit, hasSave: false },
-    success: { ...BASE_SETUP.success, status: 'none' as const, note: 'not set', hasSave: false },
-  };
-
-  const SETUP_STATES: Record<string, Partial<SetupData>> = {
-    default: {},
-    /**
-     * What a first-time user actually meets: the legend open, before any of the
-     * vocabulary on the rows below it has been explained. This is the state the
-     * whole help layer exists for, and it is the one nobody can reach twice —
-     * dismissing it is persistent.
-     */
-    help: { helpSeen: false },
-    /**
-     * A site whose CV only counts once a dialog is confirmed — the one shape
-     * that fills the middle of Page actions' three lists, which Apply then runs
-     * before it presses Send. Pair it with `&step=prep`.
-     */
-    'cv-steps': {
-      name: 'DialogATS',
-      submitCv: [
-        { action: 'click', selector: '#cv-attach', resolves: true },
-        { action: 'waitFor', selector: '#cv-attached', ms: 4000, resolves: false },
-      ],
-    },
-    /**
-     * The page where nothing reads as a Send button, so the row is grey and the
-     * modal's Apply is greyed with it. Pair with `?page=modal&state=apply-unset`.
-     */
-    'submit-unset': {
-      submit: { key: 'submitSelector', label: 'Send button', status: 'none', note: 'not found — Apply is greyed out', hasSave: false },
-    },
-    /**
-     * The site nobody has finished setting up: no confirmation element, so
-     * nothing here can ever be recorded as applied and Apply refuses to send.
-     * Pair with `?page=modal&state=apply-unverified&note=apply`.
-     */
-    'success-unset': {
-      success: {
-        key: 'successSelector',
-        label: 'Confirmation element',
-        status: 'none',
-        note: 'not set — Apply is greyed out',
-        hasSave: false,
-      },
-    },
-    /**
-     * The panel filling the window, and the panel pressed into the screen corner.
-     * Both are geometry the setup panel never had before it joined the review
-     * modal's slot, and both are otherwise reachable only by dragging a real one.
-     */
-    fullscreen: { fullscreen: true },
-    flush: { layout: { right: 0, bottom: 0, width: 460, height: 4000 } },
-    /**
-     * A finished recording, waiting to be looked at. The review is a whole second
-     * rendering of this panel and the only way to reach it on a real page is to
-     * apply to a job — so without this nobody would ever see it in a screenshot.
-     *
-     * It carries a deliberately imperfect recording: one step the extension could
-     * only identify by its position (the red dot and the Pick beside it), and no
-     * confirmation marked, which is the warning that matters most.
-     */
-    /**
-     * The home screen, which is where Site setup opens on **every** site — so these
-     * four states are the most-seen screen in the whole panel, and the one place the
-     * two passes are drawn as the two passes.
-     *
-     * `home-fresh` is a site nobody has configured: pass 1 has the coral, pass 2 has
-     * no control at all (there is nothing to confirm the landing of yet), and there is
-     * **no footer**. Recording is the only way to set a site up, so there is no way
-     * into the six-step form until one has produced something — and Done is withheld
-     * too, because closing a panel that taught the extension nothing is not an
-     * outcome. The one card in the panel with no footer at all, and so worth a look.
-     */
-    'home-fresh': unconfigured,
-    /**
-     * The same site on a page detection can see nothing on. Its own rendering because
-     * it is the shape the count line exists for — all three statuses stay on the line
-     * even at zero, since the line is a key as well as a tally, and the chip row goes
-     * rather than draw a heading over nothing. `BASE_SETUP`'s fixture finds five of
-     * six, so it can never show either.
-     */
-    'home-empty': {
-      ...unconfigured,
-      fields: BASE_SETUP.fields.map((f) => ({
-        ...f, status: 'none' as const, note: 'not found', hasSave: false,
-      })),
-    },
-    review: recordedState('internal'),
-    recording: recordedState('internal'),
-    'recording-armed': recordedState('internal'),
-    'recording-reset': recordedState('internal'),
-    /**
-     * The same review for a posting that handed off. Two configs come out of it
-     * rather than one, and the lead sentence is different — which is exactly the
-     * kind of thing that goes unnoticed until someone reads it on a phone.
-     */
-    'review-external': recordedState('external'),
-    /**
-     * The other two renderings of home, and between them the whole argument of the
-     * screen: **the coral moves to whichever pass still wants something.**
-     *
-     * `home-before-send` is the ordinary outcome of a first pass — the site can fill
-     * and send, and the confirmation has never been captured, so pass 2 takes the
-     * primary and "Mark the confirmation" is the next thing to do. `home-complete` is
-     * both passes in, where neither block is coral and Done is. A swap only one
-     * fixture can produce is a swap nobody looks at, so both are named.
-     *
-     * Append `&saved=1` to either to see it as the report a recording lands on.
-     */
-    'home-before-send': {
-      success: {
-        key: 'successSelector',
-        label: 'Confirmation element',
-        status: 'none',
-        note: 'not set — Apply is greyed out',
-        hasSave: false,
-      },
-    },
-    'home-complete': {},
-    external: {
-      name: 'ExternalBoard',
-      urlPattern: '*://*/sites/external-board.html*',
-      prep: [],
-      fields: BASE_SETUP.fields.map((f) => ({ ...f, status: 'none' as const, note: 'not found', hasSave: false })),
-      verdict: {
-        title: 'External application',
-        detail: 'configured external apply link',
-        kind: 'redirect',
-      },
-      redirect: [
-        { key: 'applySelector', label: 'External apply link', status: 'high', note: 'saved · → ats.acme.test', hasSave: true },
-        { key: 'quickApplySelector', label: 'Quick-apply marker', status: 'none', note: 'not set', hasSave: false },
-        { key: 'markerSelector', label: 'External marker', status: 'low', note: 'saved selector · no match', hasSave: true },
-      ],
-    },
-  };
-
-  panel.render({ ...BASE_SETUP, ...(SETUP_STATES[state] ?? {}) });
-
-  // The two review states are a mode, not data — the panel decides whether it is
-  // showing them, for the same reason it owns which step is open.
-  if (state.startsWith('review')) panel.showReview(true);
-  // Home is where the panel opens anyway, so this is only ever re-stating it — except
-  // for `&saved=1`, the one thing on the screen that is about the press that got here
-  // rather than about the site, and so unreachable without having just recorded one.
-  if (state.startsWith('home')) panel.showHome({ saved: params.get('saved') === '1' });
-
-  /**
-   * What the page looks like *during* a recording: the panel folded to its pill and
-   * the bar up. The bar is its own surface and never takes a pill slot, so this is
-   * also the check that it does not land on top of one.
-   *
-   * Six states, because the bar has six renderings and five of them are only reachable
-   * by pressing something, which a screenshot cannot do. `recording` is the resting bar
-   * over an inert page; `recording-armed` is what Interact does — the page live under
-   * the user's finger, which has to *look* like a mode; `recording-reset` is the warning
-   * behind Reset, the one control here with no way back.
-   *
-   * The other three are the seam the two-pass setup is built on, and they are the ones
-   * most worth looking at. `recording-held` is a press that would have sent the
-   * application, refused and marked instead — a full sentence and an escape hatch in a
-   * bar that is otherwise one line of readout, so it is the state most likely to break
-   * the narrow layout. `after-send` and `after-send-saved` are the second pass's own
-   * bar: one question over a live page, and the report that replaces it. Neither can be
-   * reached in this harness by pressing anything, because both are downstream of a real
-   * application being sent.
-   */
-  const BAR_STATES = [
-    'recording', 'recording-armed', 'recording-reset', 'recording-held',
-    'recording-declare', 'recording-declare-external',
-    'recording-long', 'recording-bottom',
-    'after-send', 'after-send-unsent', 'after-send-saved',
-  ];
-  if (BAR_STATES.includes(state)) {
-    panel.minimize();
-    panel.setSlot(0);
-    const bar = new RecorderBar({
-      onInteract: () => console.log('[harness] interact'),
-      onForceSend: () => console.log('[harness] not the Send button'),
-      onDeclare: (b) => console.log('[harness] declare', b),
-      onMarkConfirmation: () => console.log('[harness] mark the confirmation'),
-      onReset: () => console.log('[harness] reset recording'),
-      onUndo: () => console.log('[harness] undo step'),
-      onDone: () => console.log('[harness] recording done'),
-    });
-    const { steps } = recordedState('internal').recording!;
-    const after = state.startsWith('after-send');
-    // The one thing the leg changes is which group of marks the menu leads with, and
-    // it leads with a different one on the board of a two-step posting.
-    const flow = state.endsWith('-external') ? 'external' : 'internal';
-    bar.render({
-      phase: after ? 'afterSend' : 'beforeSend',
-      flow,
-      leg: 'posting',
-      stepCount: steps.length,
-      mode: state === 'recording-armed' ? 'armed' : 'idle',
-      // `recording-long` is a step whose label runs the full `MAX_LABEL`, which is the
-      // only way to see the readout's second line. It reserves two lines at every
-      // width and the ordinary "Clicked Next" uses one of them, so a short label
-      // proves nothing about the half of that box nobody ever fills — and a button
-      // with an eighty-character name is not something a fixture can be relied on to
-      // have.
-      last: state === 'recording-long'
-        ? {
-          ...steps[1],
-          label: 'Submit your application for Senior Platform Engineer, '
-            + 'Remote (EMEA) — final step',
-        }
-        : steps[1],
-      bound: ['field:email'],
-      // Which door the pass was reached through, and it is the whole of the
-      // sentence the bar carries: Apply has already sent the application, while
-      // `I’ll send it myself` and the panel's own offer leave it sitting unsent.
-      sent: state !== 'after-send-unsent',
-      notice: state === 'recording-held'
-        ? heldSendNotice('Submit application')
-        : state === 'after-send-saved'
-          ? 'Saved. This site can read its own confirmations now — Apply works here '
-            + 'from now on.'
-          : undefined,
-    });
-    // Pressed rather than posed: both popovers are opened by the same click a user
-    // makes, so the harness cannot show a state the bar itself cannot reach.
-    const press = (within: string, label: string) => {
-      const host = document.getElementById(RECORDER_HOST_ID) as HTMLElement | null;
-      host?.shadowRoot?.querySelectorAll<HTMLButtonElement>(`${within} .cf-btn`)
-        .forEach((b) => { if (b.textContent === label) b.click(); });
-    };
-    if (state === 'recording-reset') press('.cf-rec-exits', ACTION_LABELS.resetRecording);
-    // The menu is the surface the marks are chosen from, and it is ~26 items under
-    // four heads with a caption on four of them — none of which is on screen until
-    // something opens it, and it is the one thing here that can overflow a phone.
-    if (state.startsWith('recording-declare')) press('.cf-rec-options', ACTION_LABELS.declare);
-    // The other end of the page. Pressed rather than posed for the same reason as the
-    // popovers above — where the bar sits is page-lifetime state on the instance, so
-    // there is no prop to set it with, and a screenshot cannot press the button.
-    if (state === 'recording-bottom') {
-      const host = document.getElementById(RECORDER_HOST_ID) as HTMLElement | null;
-      host?.shadowRoot?.querySelector<HTMLButtonElement>('.cf-rec-place')?.click();
-    }
-  }
-
-  // `&step=…` opens one of the six wizard steps. Each is a distinct rendering
-  // and only one is on screen at a time, so without this five of them are
-  // reachable only by clicking Next — which a screenshot cannot do. The panel
-  // otherwise opens on the first step with work outstanding, exactly as it does
-  // on a real posting.
-  const step = params.get('step');
-  if (step && (SETUP_STEP_ORDER as readonly string[]).includes(step)) {
-    panel.setStep(step as SetupStepKey);
-  }
-
-  /**
-   * The marks on the page behind the card — the other half of the same feature, and
-   * the half no shadow-root screenshot can show: they are drawn on the *host* page's
-   * light DOM, so they are invisible to everything that inspects the panel.
-   *
-   * A **parameter, not a state** (the `pills=1` precedent), because a mark is a
-   * rendering of the page rather than of the panel and has to be able to co-exist
-   * with any `state` or `step` — which a state could not, since `setStep()` forces
-   * `mode='wizard'`.
-   *
-   * It runs the real `detectForConfig` over `fakePosting()` rather than posing three
-   * chips, because the thing worth looking at is what the real path produces: which
-   * of the fake posting's controls the heuristics actually claim, and where a chip
-   * lands when the field it names is the first thing on the page.
-   */
-  if (params.get('marks') === '1') {
-    for (const d of detectForConfig({ root: document, fields: DETECTABLE_FIELDS })) {
-      if (d.element) highlight(d.element, d.confidence, FIELD_LABELS[d.field]);
-    }
-  }
-
-  // Both sheets folded, so their pills stack in the rail. The one arrangement
-  // that cannot be reached by rendering a single surface — and the one that goes
-  // wrong quietly, by putting two pills on the same pixel.
-  if (params.get('pills') === '1') {
-    let modal: FillerModal;
-    modal = new FillerModal(modalCallbacks(() => modal));
-    modal.render({ ...BASE_MODAL, layout: DEFAULT_MODAL_LAYOUT });
-    modal.minimize();
-    modal.setSlot(0);
-    panel.minimize();
-    panel.setSlot(1);
-  }
+  const open = params.get('open') === '1';
+  if (!open) modal.minimize();
+  modal.render({ ...BASE_MODAL, queue: SESSION });
+  chip.setCardOpen(open);
 }
-
-/* ---------------- The click-to-pick toolbar ---------------- */
 
 /**
  * A posting whose text is buried on purpose. The picker's whole subject is depth —
@@ -918,7 +432,7 @@ const BOOT: Record<Page, () => void | Promise<void>> = {
   popup: () => bootPage('popup'),
   options: () => bootPage('options'),
   modal: bootModal,
-  setup: bootSetup,
+  chip: bootChip,
   picker: bootPicker,
 };
 

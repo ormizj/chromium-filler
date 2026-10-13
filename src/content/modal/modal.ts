@@ -1,84 +1,57 @@
 /**
- * Shadow-DOM review modal. Two views behind one header toggle:
+ * Shadow-DOM review card. Two views behind one header toggle:
  *
  *   Job     the posting — title, description, requirements, as real prose.
- *   Fields  the per-field report (filled / low-confidence / unmatched), with
- *           Confirm/Pick per row.
+ *   Fields  the report: one row per question on the page — what it asked, what
+ *           went in, and, for anything not recognised, a way to teach it.
  *
- * Job is the default, and that ordering is the point. Once the form is filled the
- * user's question is "do I want this job?", not "which of sixteen fields matched";
- * most postings do not even have most of those fields, so an always-expanded
- * report buried the posting under rows nobody asked for. The report is still one
- * tap away, and the Fields tab carries a status dot, so nothing needing attention
- * can hide behind the toggle.
+ * The card never sends anything. Its footer used to carry Apply; now the one
+ * thing left after the fill is the user's own press of the site's Submit button,
+ * so the footer is "Fill again" and the ways out — and, on a queue tab, Skip.
  *
- * On mobile this is the primary control: reaching the toolbar popup costs two or
- * three taps through the browser menu, so the modal carries the session actions
- * too, and closing it collapses to a pill instead of destroying it — the old
- * close button threw the report away, and the only route back (the popup's
- * "Reset") wiped every field it had just filled.
+ * Closing collapses to a pill instead of destroying the card: the report is the
+ * only record of what was filled, and on mobile the card is the primary control.
  */
 
-import type { FieldKey, FieldMatch, MatchConfidence } from '../../shared/types';
+import type { FieldId, FieldMatch, MatchConfidence } from '../../shared/types';
 import type { SessionState } from '../../shared/messages';
 import { progressDots } from '../../shared/queue';
 import type { JobBlock } from '../../shared/jobText';
 import type { JobMeta } from '../../shared/jobMeta';
-import { FIELD_LABELS } from '../../shared/fieldKeys';
+import type { FieldChoice } from '../../shared/profileFields';
 import { STATUS_LABELS, matchStatus } from '../../shared/fieldStatus';
 import { ACTION_LABELS, STATUS_TEXT } from '../../shared/labels';
-import { flowBanner, type ApplyState } from '../../shared/flowState';
+import { flowBanner } from '../../shared/flowState';
+import { fingerprint } from '../../shared/questionText';
 import { CONCEPT_HELP } from '../../shared/help';
 import { helpButton, helpPanel } from '../../ui/help';
 import { summaryLine } from '../../ui/summaryLine';
 import { Sheet, type SheetCallbacks, type SheetData } from '../sheet';
 import modalCss from './modal.css?inline';
 
+/** What a Teach can say a row is. */
+export type TeachChoice =
+  | { field: FieldId }
+  | { ignore: true }
+  | { newField: { label: string; value: string } };
+
 export interface ModalCallbacks extends SheetCallbacks {
+  /** Fill again — every empty, untouched input; never over an answer already there. */
   onRerun(): void;
-  /** Run the CV-confirmation steps, then press the site's own Send button. */
-  onApply(): void;
-  /**
-   * The other answer to `finishSetup`: the user will press the site's own Send
-   * button themselves, and the extension stands by to ask where the reply is. It
-   * reaches the same second pass Apply does — the only difference is whose finger
-   * sends the application.
-   */
-  onSendMyself(): void;
-  onConfirm(field: FieldMatch['field']): void;
-  onPick(field: FieldMatch['field']): void;
-  /** Follow (or re-try) the external application handoff. */
-  onFollow(): void;
-  /** Ignore the redirect verdict and fill this page after all. */
-  onFillAnyway(): void;
+  /** Fill one row the extension only guessed at, on the user's say-so. */
+  onConfirm(rowId: string): void;
+  /** Teach one row: a field, a new field, or "ignore this question". */
+  onTeach(rowId: string, choice: TeachChoice): void;
+  /** Point at a field on the page the report did not list. */
+  onPoint(): void;
   /** Mark this posting skipped, and move a session on to the next one. */
   onSkip(): void;
-  /** Open the on-page setup wizard for this site — the modal folds to its pill. */
-  onOpenSetup(): void;
-  /** Open the options page. */
   onOpenOptions(): void;
   onClose(): void;
 }
 
-/** Set when the posting hands off to an external application instead of a form. */
-export interface RedirectNotice {
-  /** Destination host, when known. */
-  host?: string;
-  /** Why this was classified as a redirect (from the detector). */
-  reason: string;
-  /** True once the handoff has been triggered. */
-  followed: boolean;
-}
-
 /** Which of the two views the card is showing. */
 export type ModalView = 'job' | 'fields';
-
-/**
- * Whether Apply can run here — now decided alongside every other step of the
- * flow, in `shared/flowState.ts`. Re-exported so `content/main.ts` and the dev
- * harness keep importing it from the modal, where it has always lived.
- */
-export type { ApplyState };
 
 export interface ModalData extends SheetData {
   siteName: string;
@@ -88,85 +61,49 @@ export interface ModalData extends SheetData {
   jobRequirements?: JobBlock[];
   /** Company / location / employment type, as far as the posting states them. */
   meta?: JobMeta;
+  /** The report, in its settled order. Rows never move; see `fillEngine.ts`. */
   matches: FieldMatch[];
-  /**
-   * The rows Confirm has been pressed on since the last fill.
-   *
-   * An acknowledgement of a press, deliberately **not** a status — it must never
-   * reach `matchStatus`, `statCounts` or `worstStatus`. `matches` is the record of
-   * what the fill did and the whole overview is derived from it alone; all this
-   * does is retire one row's button so the control is not silent.
-   */
-  confirmed?: FieldKey[];
-  /** Whether Apply may run, and which half is missing when it may not. */
-  applyState: ApplyState;
-  /** The site's own confirmation appeared — this posting really was sent. */
-  applied?: boolean;
-  /**
-   * The job database already had this URL down as `applied` when the page opened.
-   *
-   * Separate from `applied` because only one of them is a receipt for something
-   * that just happened: the wording and the live region belong to that one. What
-   * they share is `isApplied()` below — the renderings that are true of a finished
-   * posting however it got that way.
-   */
+  /** Rows Confirm has been pressed on — an acknowledgement, never a status. */
+  confirmed?: string[];
+  /** The job database already has this URL down as applied. */
   alreadyApplied?: boolean;
-  /** When the record says the application went in, if the entry carries it. */
   appliedAt?: number;
-  /**
-   * A recording's first pass was saved a moment ago and this card is the report of
-   * it. Only ever changes the wording of `finishSetup`, and only for one render —
-   * see `FLOW_TEXT.finishSetupSaved`.
-   */
-  setupSaved?: boolean;
-  redirect?: RedirectNotice;
-  /**
-   * This page's apply control hands off to a phone app and was left alone. Never
-   * set together with `redirect`: there is nothing here to open, so the footer
-   * must not offer to.
-   */
-  appLink?: boolean;
-  /** Host of the board posting this page was reached from. */
-  via?: string;
-  /** Queue progress, when a session is running. Drives the strip and Skip action. */
-  session?: SessionState;
-  // `layout` and `fullscreen` come from SheetData — the geometry is the setup
-  // panel's too, and both sheets share one slot on the page.
+  /** The profile has nothing to fill with at all. */
+  profileEmpty?: boolean;
+  /** What a row can be taught as. */
+  choices: FieldChoice[];
+  /** Queue progress — present only on a tab the queue opened. */
+  queue?: SessionState;
 }
 
 /**
- * The `.chip` tint each outcome wears in the report. The dot classes are the
- * `MatchConfidence` values themselves; the chip's are the shared ok/warn/err
- * tints from primitives.css, so this is the one place the two vocabularies meet.
+ * The `.chip` tint each outcome wears in the report. A question to teach is plain,
+ * not red: it is the ordinary state of most questions the first time they are seen,
+ * and a page of red tags would read as a page of failures.
  */
-const TAG_TONE: Record<MatchConfidence, string> = { high: 'ok', low: 'warn', none: 'err' };
+const TAG_TONE: Record<MatchConfidence, string> = { high: 'ok', low: 'warn', none: '' };
 
-/**
- * Is this posting finished, however it got that way?
- *
- * The card becomes a receipt on both — the `Sent` chip, the demoted title, the
- * legend, the pill, and the footer's two retired controls are all about a posting
- * with no decisions left, not about the moment a confirmation arrived. Only the
- * sentences distinguish the two, so only they read the flags directly.
- */
-function isApplied(data: ModalData): boolean {
-  return !!data.applied || !!data.alreadyApplied;
+/** The chooser's two values that are not a field. */
+const NEW_FIELD = '__new';
+const IGNORE = '__ignore';
+
+interface TeachState {
+  rowId: string;
+  /** The `<select>`'s value: a field id, `NEW_FIELD` or `IGNORE`. */
+  choice: string;
+  label: string;
+  value: string;
 }
 
 export class FillerModal extends Sheet<ModalData> {
   private cb: ModalCallbacks;
-  /**
-   * Kept across renders for the same reason the collapsed flag is: confirming a
-   * field re-renders, and being thrown back to the Job view every time would make
-   * the report unusable exactly when it is being used.
-   */
-  private view: ModalView = 'job';
-  /**
-   * Whether the note explaining the greyed-out Apply button is open. Lives here
-   * rather than in `ModalData` for the same reason `view` does: it is the user's
-   * reading state, and a re-render must not close what they just opened.
-   */
-  private applyHelp = false;
+  /** Kept across renders: the engine re-renders as fields appear. */
+  private view: ModalView = 'fields';
+  /** The open `?` on the banner. */
+  private helpOpen = false;
+  /** The open Teach chooser, and what has been typed into it. On the instance for
+   *  the reason `view` is: the engine re-renders the card while the user works in it. */
+  private teaching?: TeachState;
 
   constructor(cb: ModalCallbacks) {
     super('review', 'chromium-filler-modal-host', modalCss, cb);
@@ -175,16 +112,11 @@ export class FillerModal extends Sheet<ModalData> {
 
   render(data: ModalData): void {
     this.data = data;
-    // A note about a button that is no longer grey is just wrong text on screen:
-    // picking the Send button mid-session flips this without a further click.
-    // But an applied posting *is* blocked while `applyState` reads `ready` — the
-    // two controls are retired for a reason that has nothing to do with whether
-    // Apply could physically run — so it must not close the note it just opened.
-    if (data.applyState === 'ready' && !isApplied(data)) this.applyHelp = false;
+    // A chooser whose row is gone (a Reset) has nothing left to teach.
+    if (this.teaching && !data.matches.some((m) => m.id === this.teaching!.rowId)) this.teaching = undefined;
     this.paint();
   }
 
-  /** Re-render from the last data — what `Sheet` calls after a fold or a resize. */
   protected repaint(): void {
     if (this.data) this.render(this.data);
   }
@@ -194,17 +126,9 @@ export class FillerModal extends Sheet<ModalData> {
     const card = el('div', 'cf-card');
     card.setAttribute('role', 'dialog');
     card.setAttribute('aria-label', `${data.siteName} — ${data.jobTitle ?? 'fill report'}`);
-
     card.append(this.header(data, card));
-    // A two-step posting has no report and gets no toggle, so the Fields view
-    // there would be an empty dead end with no way back to the job.
-    const fields = this.view === 'fields' && !data.redirect;
-    card.append(fields ? this.fieldsBody(data) : this.jobBody(data));
-    // Where the strip goes: directly above the footer, never above the header —
-    // the header is the sheet's title and drag handle and has to stay at the top
-    // edge. Sitting with the footer puts "posting 8 of 13" beside the Skip that
-    // moves it on, which is the decision the number is read for.
-    if (data.session?.active) card.append(this.sessionStrip(data.session));
+    card.append(this.view === 'fields' ? this.fieldsBody(data) : this.jobBody(data));
+    if (data.queue) card.append(this.sessionStrip(data.queue));
     card.append(this.footer(data));
     return card;
   }
@@ -213,7 +137,7 @@ export class FillerModal extends Sheet<ModalData> {
     return this.pill(this.data!);
   }
 
-  /** Which view is showing — the dev harness boots straight into one. */
+  /** Which view is showing — the controller and the dev harness choose one. */
   setView(view: ModalView): void {
     if (this.view === view) return;
     this.view = view;
@@ -221,13 +145,26 @@ export class FillerModal extends Sheet<ModalData> {
   }
 
   /**
-   * Open or close the note behind the greyed-out Apply button. Public for the
-   * same reason `setView` is: it is only reachable by clicking, and a screenshot
-   * cannot click.
+   * Open the Teach chooser on one row — from the row's own button, and from the
+   * picker once the user has pointed at a field. Public for the second, and for
+   * the dev harness, which cannot press anything.
    */
-  setApplyHelp(open: boolean): void {
-    if (this.applyHelp === open) return;
-    this.applyHelp = open;
+  openTeach(rowId: string, opts: { newField?: boolean } = {}): void {
+    const row = this.data?.matches.find((m) => m.id === rowId);
+    if (!row) return;
+    this.view = 'fields';
+    this.teaching = {
+      rowId,
+      choice: opts.newField ? NEW_FIELD : row.field ?? '',
+      label: row.question,
+      value: '',
+    };
+    this.restore();
+    if (this.data) this.render(this.data);
+  }
+
+  private closeTeach(): void {
+    this.teaching = undefined;
     if (this.data) this.render(this.data);
   }
 
@@ -238,51 +175,37 @@ export class FillerModal extends Sheet<ModalData> {
     header.append(el('div', 'cf-grip'));
 
     const site = el('span', 'cf-site');
-    site.textContent = data.via ? `${data.siteName} · via ${data.via}` : data.siteName;
+    site.textContent = data.siteName;
 
     const close = el('button', 'cf-close');
     close.textContent = '×';
     close.setAttribute('aria-label', 'Minimize');
     close.onclick = () => this.cb.onClose();
 
-    // Icon-only, so the label is spoken rather than shown, and `aria-pressed`
-    // carries the state — a toggle, not a button that does two different things.
-    // Offered on a two-step posting too: that page is nothing but prose to read,
-    // which is the case the extra room is worth the most in.
     const full = document.createElement('button');
     full.className = 'cf-fullscreen';
     full.setAttribute('aria-pressed', String(!!data.fullscreen));
-    full.setAttribute('aria-label', data.fullscreen
-      ? ACTION_LABELS.exitFullscreen
-      : ACTION_LABELS.fullscreen);
+    full.setAttribute('aria-label', data.fullscreen ? ACTION_LABELS.exitFullscreen : ACTION_LABELS.fullscreen);
     full.onclick = () => this.setFullscreen(!data.fullscreen);
 
     header.append(site);
-    // The outcome, on the one strip of the card that is always visible — the body
-    // scrolls, and on a long posting the confirmation banner scrolls away with it.
-    if (isApplied(data)) {
+    if (data.alreadyApplied) {
       const chip = el('span', 'chip ok cf-sent-chip');
-      chip.textContent = 'Sent';
+      chip.textContent = 'Applied';
       header.append(chip);
     }
-    // A two-step posting has no report to switch to: there is no form on this
-    // page, so an empty Fields view would be a dead end.
-    if (!data.redirect) header.append(this.viewToggle(data));
-    header.append(full, close);
-
+    header.append(this.viewToggle(data), full, close);
     this.makeDraggable(card, header);
     return header;
   }
 
   /**
    * The Job/Fields switch. The Fields tab carries the report's worst status as a
-   * dot, so a field that still needs the user is advertised on the closed tab —
-   * hiding the report must not mean hiding a problem.
+   * dot, so a question still waiting for the user is advertised on the closed tab.
    */
   private viewToggle(data: ModalData): HTMLElement {
     const wrap = el('div', 'cf-views');
     wrap.setAttribute('role', 'tablist');
-
     const tab = (view: ModalView, label: string, dot?: MatchConfidence) => {
       const b = document.createElement('button');
       b.className = `cf-view${this.view === view ? ' active' : ''}`;
@@ -298,190 +221,67 @@ export class FillerModal extends Sheet<ModalData> {
       b.onclick = () => this.setView(view);
       return b;
     };
-
     wrap.append(tab('job', 'Job'), tab('fields', 'Fields', worstStatus(data.matches)));
     return wrap;
   }
 
   /**
-   * Two decisions and nothing else: send this one, or move on. Everything that
-   * is about the *extension* rather than the posting — Re-run, and the two ways
-   * out — goes behind the overflow, because at 390px a row of five buttons makes
-   * the two that matter no easier to hit than the three that do not.
+   * Fill again, and the ways out. Skip is visible only on a queue tab, where it is
+   * the decision the strip above it is read for ("posting 8 of 13 — skip it?");
+   * anywhere else there is no queue to skip through, and the job database has no
+   * business learning about a shop's checkout page.
    */
   private footer(data: ModalData): HTMLElement {
     const footer = el('div', 'cf-footer');
-    // The resting state — "filled, nothing has been sent yet" — belongs against
-    // the button it is about, not above the job title. The Job view leads with
-    // the posting on purpose, and a fill-status line at the top of it inverted
-    // that; down here the sentence and the control that acts on it are one
-    // object, which is what "where do I actually apply?" was asking for.
     const banner = this.flowBanner(data);
     if (banner.classList.contains('quiet')) footer.append(banner);
 
     const actions = el('div', 'cf-footer-actions');
-    // A posting you do not want is worth skipping whether or not you can apply
-    // to it here, so Skip is on every branch. The label names the consequence:
-    // during a session skipping also pulls in the next posting.
-    const skip = btn(data.session?.active ? ACTION_LABELS.skipNext : ACTION_LABELS.skip, () => this.cb.onSkip());
+    actions.append(btn(ACTION_LABELS.fillAgain, () => this.cb.onRerun()));
 
-    // Finished, by either route: nothing here is a decision any more, and an Apply
-    // that still looked live would invite a second application to the same job.
-    //
-    // Ahead of the redirect branch, and it has to be. The controller declines to
-    // follow a handoff on an applied posting, so a two-step posting opened again
-    // arrives here with `redirect` *and* `alreadyApplied` set — and this branch
-    // second would have put a live "Open application" primary on a job already
-    // applied for. `flowState.classify` orders the two the same way.
-    if (isApplied(data)) {
-      const done = btn(ACTION_LABELS.applied, () => {}, true);
-      done.setAttribute('aria-disabled', 'true');
-      done.classList.add('cf-applied-btn');
-      // Skip retires beside it, and not only for symmetry: `skipPosting` writes a
-      // status, and `recordStatus` is a blunt overwrite rather than a promote, so
-      // pressing it here would file "skipped" over "applied" and lose the record
-      // of an application that really was sent — on this device and, through the
-      // history union the sync merge derives status from, on the other one too.
-      this.retire(skip, 'Skip — this posting is already applied to, press to find out why');
-      actions.append(
-        done,
-        skip,
-        this.overflow([
-          ...this.commonMenuItems(),
-          // Only when there is somewhere to go: an applied quick-apply posting has
-          // no external application, and an item that opens nothing is worse than
-          // no item. Between the ways out and Re-run, so the two fixed ends of the
-          // list hold on every branch.
-          ...(data.redirect ? [btn(ACTION_LABELS.openApplication, () => this.cb.onFollow())] : []),
-          btn(ACTION_LABELS.rerun, () => this.cb.onRerun()),
-        ]),
-      );
-      footer.append(actions);
-      return footer;
+    if (data.queue) {
+      const skip = btn(ACTION_LABELS.skipNext, () => this.cb.onSkip());
+      // Skip on an applied posting would file "skipped" over "applied" — a blunt
+      // overwrite, carried to the other device by sync. Retired, never removed, so
+      // the press can still say why.
+      if (data.alreadyApplied) {
+        skip.setAttribute('aria-disabled', 'true');
+        skip.setAttribute('aria-label', 'Skip — this posting is already applied to, press to find out why');
+        skip.onclick = () => { this.helpOpen = !this.helpOpen; this.repaint(); };
+      }
+      actions.append(skip);
     }
 
-    if (data.redirect) {
-      // Same shape as below — the primary action, Skip, then the overflow. "Fill
-      // this page instead" is an override of a verdict the user has not been
-      // given reason to doubt, and as a third button it pushed the primary one
-      // off the right edge at 390px.
-      actions.append(
-        btn(data.redirect.followed ? ACTION_LABELS.openApplicationAgain : ACTION_LABELS.openApplication, () => this.cb.onFollow(), true),
-        skip,
-        this.overflow([
-          ...this.commonMenuItems(),
-          btn(ACTION_LABELS.fillAnyway, () => this.cb.onFillAnyway()),
-        ]),
-      );
-      footer.append(actions);
-      return footer;
-    }
-
-    /*
-     * `finishSetup` is live, and reads as what it is.
-     *
-     * It is the one non-`ready` state that is not a failure: the site fills, the Send
-     * button is known, and the only thing missing is the reply — which cannot exist
-     * until an application has gone in. So this press sends *and* starts the second
-     * setup pass, and the label says the second half out loud. A button that quietly
-     * begins a second job is worse than a grey one, and the banner above it has
-     * already said the same thing at length.
-     */
-    const finishing = data.applyState === 'finishSetup';
-    const apply = btn(
-      finishing ? ACTION_LABELS.applyFinishSetup : ACTION_LABELS.apply,
-      () => this.cb.onApply(),
-      true,
-    );
-    if (data.applyState !== 'ready' && !finishing) {
-      this.retire(apply, data.applyState === 'noConfirmation'
-        ? 'Apply — this site has no confirmation configured, press to find out why'
-        : 'Apply — no Send button found on this page, press to find out why');
-    }
-
-    /*
-     * The one branch where Skip is not one of the two visible buttons.
-     *
-     * This footer is asking a question — send this application now, or send it
-     * yourself — and both of its answers have to be on screen: a user who would
-     * rather press the site's own button has no way to learn that doing so still
-     * finishes the setup if that route is behind a `⋯`. The two-buttons-plus-`⋯`
-     * rule is the 390px one and does not bend, so the third control is the one that
-     * is not an answer to the question. Skip stays reachable in the overflow, which
-     * is all its own rule ("a posting you do not want is worth skipping whether or
-     * not you can apply to it here") actually asks for.
-     */
-    const second = finishing
-      ? btn(ACTION_LABELS.sendItMyself, () => this.cb.onSendMyself())
-      : skip;
-
-    actions.append(
-      apply,
-      second,
-      this.overflow([
-        ...this.commonMenuItems(),
-        ...(finishing ? [skip] : []),
-        btn(ACTION_LABELS.rerun, () => this.cb.onRerun()),
-      ]),
-    );
-
+    actions.append(this.overflow([
+      btn(ACTION_LABELS.openOptions, () => this.cb.onOpenOptions()),
+      btn('Point at a field', () => this.cb.onPoint()),
+    ]));
     footer.append(actions);
     return footer;
   }
 
   /* ---------------- The flow banner ---------------- */
 
-  /**
-   * What happened, and what to do about it — the first thing in either view.
-   *
-   * This replaces three unrelated renderings that never appeared together and,
-   * between them, still left the card silent in the commonest case: an `applied`
-   * banner, a `redirect` notice further down the body, and an explanation of the
-   * greyed-out Apply that only existed *after* the user pressed it. A posting
-   * that was simply filled and waiting said nothing at all.
-   *
-   * `shared/flowState.ts` decides which state this is and words it; this only
-   * draws it. The `applied` case additionally takes the `.cf-applied` class and
-   * `role="status"`, both of which the E2E suite reads back.
-   */
   private flowBanner(data: ModalData): HTMLElement {
+    const counts = statCounts(data.matches);
     const flow = flowBanner({
-      applyState: data.applyState,
-      applied: data.applied,
       alreadyApplied: data.alreadyApplied,
       appliedAt: data.appliedAt,
-      setupSaved: data.setupSaved,
-      redirect: data.redirect,
-      appLink: data.appLink,
-      filled: data.matches.filter((m) => m.filled).length,
-      total: data.matches.length,
+      profileEmpty: data.profileEmpty,
+      total: data.matches.filter((m) => !m.ignored).length,
+      filled: counts.high,
+      toTeach: counts.none,
       siteName: data.siteName,
     });
 
-    // `.cf-applied` is what makes the card a receipt, and both applied states earn
-    // it — the loudness is about a posting being finished, not about the instant a
-    // confirmation landed.
-    const done = flow.key === 'applied' || flow.key === 'alreadyApplied';
-    const box = el('div', `cf-flow ${flow.tone}${done ? ' cf-applied' : ''}`);
-    // A live region only where something genuinely arrived without the user
-    // having moved focus. On the resting states it would announce the same
-    // sentence after every Confirm — and on `alreadyApplied` there is nothing to
-    // announce at all: the record was already there when the page opened.
-    if (flow.key === 'applied') box.setAttribute('role', 'status');
-
+    const box = el('div', `cf-flow ${flow.tone}`);
     const head = el('div', 'cf-flow-head');
-    // Status is never colour alone — the quiet states carry no dot because they
-    // report no status, only where you are.
     if (flow.tone === 'ok' || flow.tone === 'warn') {
       const dot = el('span', `cf-dot ${flow.tone}`);
       dot.setAttribute('role', 'img');
-      dot.setAttribute('aria-label', flow.tone === 'ok' ? 'applied' : 'unavailable');
+      dot.setAttribute('aria-label', flow.tone === 'ok' ? 'applied' : 'attention');
       head.append(dot);
     }
-
-    // The title line and the detail are the head's own children, not a wrapper's:
-    // the head is a grid, and it is being a grid that centres the dot on the
-    // title's row whatever height the `?` gives it.
     const titleLine = el('div', 'cf-flow-titleline');
     const title = el('b', 'cf-flow-title');
     title.textContent = flow.title;
@@ -489,49 +289,27 @@ export class FillerModal extends Sheet<ModalData> {
     const detail = el('span', 'cf-flow-detail');
     detail.textContent = flow.detail;
     head.append(titleLine, detail);
-
-    // The long form stays behind a disclosure: the blocked states have a
-    // paragraph's worth of explanation each, and rendering it inline filled the
-    // card with prose before the user could reach the posting.
-    //
-    // It sits on the title's line rather than at the head's right edge: after a
-    // `flex: 1` text block the `?` ended up a card's width away from the words
-    // it explains, reading as a control belonging to the banner as a whole.
     if (flow.help) {
-      titleLine.append(helpButton(flow.title, this.applyHelp, (open) => this.setApplyHelp(open)));
+      titleLine.append(helpButton(flow.title, this.helpOpen, (open) => { this.helpOpen = open; this.repaint(); }));
     }
     box.append(head);
-    if (flow.help && this.applyHelp) box.append(helpPanel(CONCEPT_HELP[flow.help]));
-
+    if (flow.help && this.helpOpen) box.append(helpPanel(CONCEPT_HELP[flow.help]));
     return box;
   }
 
   /* ---------------- The two views ---------------- */
 
-  /** The posting. The default view, and the reason the modal is worth reading. */
   private jobBody(data: ModalData): HTMLElement {
     const body = el('div', 'cf-body');
-
-    // Top of the body, above the title: the site's own confirmation is often
-    // below the fold or hidden behind this very card, so "did that go through?"
-    // was a question the user answered by scrolling around the page they sent.
-    // The resting state is the exception and rides with the footer instead —
-    // see `placeBanner`.
     const banner = this.flowBanner(data);
     if (!banner.classList.contains('quiet')) body.append(banner);
 
     if (data.jobTitle) {
-      // Once the application is in, the posting is no longer the headline — it is
-      // the receipt's subject line. `.cf-title` at 24px next to a 13px "sent"
-      // banner said the opposite, which is why the confirmation was hard to find.
-      const t = el('h2', `cf-title${isApplied(data) ? ' cf-title-sub' : ''}`);
+      const t = el('h2', `cf-title${data.alreadyApplied ? ' cf-title-sub' : ''}`);
       t.textContent = data.jobTitle;
       body.append(t);
     }
 
-    // Company · location · type, the reference's lead under the title. Rendered only
-    // from what the posting actually states (shared/jobMeta.ts), so a board that
-    // publishes none of it gets no empty row rather than three blank chips.
     const meta = [data.meta?.company, data.meta?.location, data.meta?.employmentType]
       .filter((v): v is string => !!v);
     if (meta.length) {
@@ -544,51 +322,21 @@ export class FillerModal extends Sheet<ModalData> {
       body.append(row);
     }
 
-    // The one thing left to tell someone whose application is in: that there is
-    // nothing left to do here. Without it the card just stops, and a user who had
-    // been told to review before applying kept looking for the next step.
-    //
-    // Two sentences, because the two states are answering different questions.
-    // Fresh: "did that go through?" — yes, and you can close this. Revisited: "why
-    // can I not do anything?" — because it is already done, and here is where to
-    // change that if the record is wrong.
-    if (isApplied(data)) {
-      const done = el('p', 'cf-empty');
-      done.textContent = data.applied
-        ? 'Recorded as applied — safe to close this tab.'
-        : 'Nothing to do here. Change the status in Options → Queue if this is wrong.';
-      body.append(done);
-    }
-
-    if (data.redirect) {
-      // The banner above already says where the application lives; this is the
-      // detector's own evidence for having said so, kept small and last.
-      const why = el('small', 'cf-why');
-      why.textContent = data.redirect.reason;
-      body.append(why);
-    }
-
     const description = data.jobDescription ?? [];
     if (description.length) body.append(prose(description));
-
     const requirements = data.jobRequirements ?? [];
     if (requirements.length) {
       const label = el('div', 'cf-section');
       label.textContent = 'Requirements';
       body.append(label, prose(requirements));
     }
-
-    if (!description.length && !requirements.length && !data.redirect) {
+    if (!description.length && !requirements.length) {
       const empty = el('p', 'cf-empty');
       empty.textContent = 'No description found on this page.';
       body.append(empty);
     }
 
-    // The report at a glance, without leaving the Job view: filled / to-check /
-    // unmatched as three tiles. A two-step posting has no report to summarize, so
-    // it gets none. The Fields tab's summary line stays the greyscale fallback.
-    if (!data.redirect && data.matches.length) body.append(this.statSummary(data.matches));
-
+    if (data.matches.length) body.append(this.statSummary(data.matches));
     return body;
   }
 
@@ -601,8 +349,6 @@ export class FillerModal extends Sheet<ModalData> {
       const n = el('div', 'cf-stat-n');
       n.textContent = String(counts[status]);
       const k = el('div', 'cf-stat-k');
-      // The same dot the rows and the key carry: the tile's number is coloured
-      // by status, and colour on its own is not a status anywhere else here.
       const dot = el('span', `cf-dot ${status}`);
       dot.setAttribute('role', 'img');
       dot.setAttribute('aria-label', STATUS_LABELS[status]);
@@ -615,24 +361,13 @@ export class FillerModal extends Sheet<ModalData> {
     return wrap;
   }
 
-  /** The fill report: what went in, what needs a look, what was never found. */
+  /** The report: every question on the page, and what became of it. */
   private fieldsBody(data: ModalData): HTMLElement {
     const body = el('div', 'cf-body');
-    // The same banner as the Job view. Switching tabs must not change what the
-    // card claims has happened — the report's own legend would otherwise be the
-    // only thing on screen talking about whether anything was sent.
     const banner = this.flowBanner(data);
     if (!banner.classList.contains('quiet')) body.append(banner);
 
-    // The counts and the key are one line. Three colours and a row of buttons
-    // mean nothing on their own, and as a separate legend under the rows the key
-    // sat below sixteen of them — read, if at all, after the colours it explains.
-    // Each count wears its own dot instead: icon, number, word. A status stays on
-    // the line at zero, because this is a key as well as a tally.
     const counts = statCounts(data.matches);
-    // One vocabulary with the tiles and the rows — the words come from labels.ts —
-    // and one construction with the setup panel's offer screen, which draws the same
-    // line over the fields it recognised. Both live in `ui/summaryLine.ts`.
     body.append(summaryLine((['high', 'low', 'none'] as const).map((status) => ({
       dot: status,
       count: counts[status],
@@ -640,71 +375,53 @@ export class FillerModal extends Sheet<ModalData> {
       aria: STATUS_LABELS[status],
     }))));
 
-    // Rendered in the order the fill left them, never re-sorted here. `orderReport`
-    // runs once, in `Controller.detectAndFill` — the report is the record of a
-    // fill, and sorting it per render meant a row you confirmed dropped out from
-    // under your finger and moved every row below it. Nothing on this card changes
-    // the overview; the next fill rebuilds it.
-    const confirmed = new Set(data.confirmed);
-    const report = el('div', 'cf-report');
-    for (const m of data.matches) report.append(this.row(m, confirmed.has(m.field)));
-    body.append(report);
-
-    // Only once it has been sent. "Nothing has been sent yet" now rides in the
-    // footer next to Apply, and repeating it here — forty pixels above that same
-    // sentence — was the report saying the same thing twice. What survives is the
-    // part the footer cannot say: that this report is a record, not a plan.
-    //
-    // The two states cannot share the sentence. After a fresh send this report
-    // really is the one that went in. On a revisit it is a *new* fill of the same
-    // form, which happens to match because the profile has not changed — claiming
-    // it as the submitted application would be inventing a record the extension
-    // does not keep.
-    if (isApplied(data)) {
-      const sent = el('small', 'cf-legend-send');
-      sent.textContent = data.applied
-        ? 'Already sent — this report is what went in.'
-        : 'Already applied — this is a fresh fill, not the application that was sent.';
-      body.append(sent);
+    if (!data.matches.length) {
+      const empty = el('p', 'cf-empty');
+      empty.textContent = 'No fields on this page yet. Anything that appears is checked as it does.';
+      body.append(empty);
+      return body;
     }
 
+    const confirmed = new Set(data.confirmed);
+    const report = el('div', 'cf-report');
+    let laterShown = false;
+    for (const m of data.matches) {
+      if (m.later && !laterShown) {
+        laterShown = true;
+        const divider = el('div', 'cf-later');
+        divider.textContent = 'Appeared later';
+        report.append(divider);
+      }
+      report.append(this.row(m, confirmed.has(m.id)));
+      if (this.teaching?.rowId === m.id) report.append(this.teachPanel(m, data));
+    }
+    body.append(report);
     return body;
   }
 
   private pill(data: ModalData): HTMLElement {
     const pill = el('button', 'cf-pill');
-    const filled = data.matches.filter((m) => m.filled).length;
-    // Collapsed, the dot is the only status left on screen, so it has to carry
-    // the same meaning as the rows it is hiding.
-    const dot = el('span', `cf-dot ${isApplied(data) ? 'ok' : pillStatus(data, filled)}`);
+    const counts = statCounts(data.matches);
+    const dot = el('span', `cf-dot ${data.alreadyApplied ? 'ok' : worstStatus(data.matches)}`);
     pill.setAttribute('aria-label', 'Reopen the fill report');
     const label = el('span');
-    // Collapsed, this is the only thing left on screen — so once the posting is
-    // sent, that is what it has to say. A fill count reads as unfinished work.
-    label.textContent = data.applied ? 'Application sent'
-      : data.alreadyApplied ? 'Already applied'
-      : data.redirect ? 'External application'
-      : `${filled}/${data.matches.length} filled`;
+    label.textContent = data.alreadyApplied
+      ? 'Already applied'
+      : counts.none
+        ? `${counts.high} filled · ${counts.none} to teach`
+        : `${counts.high} filled`;
     pill.append(dot, label);
     pill.onclick = () => this.restore();
     return pill;
   }
 
-  /**
-   * Where this posting sits in the queue. Read-only on purpose: the footer's
-   * "Skip → next" is the action, and a second Skip button here just duplicated
-   * it a few pixels away.
-   */
+  /** Where this posting sits in the queue. Shown on a queue tab only. */
   private sessionStrip(session: SessionState): HTMLElement {
     const strip = el('div', 'cf-session');
     const text = el('span', 'cf-progress');
-    const { done, total, applied, queued } = session.progress;
-    text.textContent = `${done}/${total} done · ${applied} applied · ${queued} waiting`;
+    const { done, total, queued } = session.progress;
+    text.textContent = `${done}/${total} done · ${queued} waiting`;
     strip.append(text);
-
-    // The reference's `.qdots`: the same progress as a shape, so the strip reads as
-    // a position in the queue and not only as a sentence. Aria-hidden — the sentence
-    // beside it already says all of this, and a screen reader does not need it twice.
     const dots = progressDots(session.progress);
     if (dots.length) {
       const row = el('div', 'cf-qdots');
@@ -715,52 +432,6 @@ export class FillerModal extends Sheet<ModalData> {
     return strip;
   }
 
-  /**
-   * The two that are on every branch: where to configure this site, and where
-   * everything else lives.
-   *
-   * They belong in the menu and not in the footer because they are about the
-   * *extension*, not about this posting — the same rule that put Re-run here.
-   * Before this the card was a dead end: a posting whose fields came out wrong
-   * could only be fixed by closing the modal, opening the popup and pressing
-   * Site setup from there.
-   *
-   * They *lead* every branch's menu, and that is a fact about which end of the
-   * popover is near the hand rather than about their importance. The menu opens
-   * upward (`.cf-more-menu` is anchored `bottom: 100%`), so the item last in DOM
-   * order is the one sitting against the `⋯` the thumb has just pressed — the
-   * cheapest place to reach, which belongs to Re-run rather than to the two
-   * items that navigate away from the posting entirely.
-   *
-   * "Add links" used to be a third. It is the one errand here that has nothing
-   * to do with the posting on screen — you do not queue up more postings from
-   * inside one you are reviewing — and the popup's Queue button already opens
-   * the importer from a surface you reach without a job page at all.
-   */
-  private commonMenuItems(): HTMLButtonElement[] {
-    return [
-      btn(ACTION_LABELS.openOptions, () => this.cb.onOpenOptions()),
-      btn(ACTION_LABELS.siteSetup, () => this.cb.onOpenSetup()),
-    ];
-  }
-
-  /**
-   * Take a footer button out of service without taking away the press.
-   *
-   * `aria-disabled`, never the `disabled` property: a disabled button swallows
-   * pointer events, so the one thing the user does about a grey control — press it
-   * — could not answer them. It still takes the tap, and the tap opens the note.
-   *
-   * The name is spoken as well, because "unavailable" is true of the action but
-   * would leave a screen-reader user with no idea that pressing it is still worth
-   * doing. The visible label stays a prefix of `name`.
-   */
-  private retire(button: HTMLButtonElement, name: string): void {
-    button.setAttribute('aria-disabled', 'true');
-    button.setAttribute('aria-label', name);
-    button.onclick = () => this.setApplyHelp(!this.applyHelp);
-  }
-
   /** A "more" button whose menu holds the secondary footer actions. */
   private overflow(items: HTMLButtonElement[]): HTMLElement {
     const wrap = el('div', 'cf-more');
@@ -769,20 +440,12 @@ export class FillerModal extends Sheet<ModalData> {
     toggle.setAttribute('aria-expanded', 'false');
     const menu = el('div', 'cf-more-menu');
     (menu as HTMLElement).hidden = true;
-    // Ghost inside the popover, as the reference's menu is: the menu already has a
-    // border, and one around each item made it a stack of boxes. Applied here so
-    // every caller's items match, rather than at each call site.
     const setOpen = (open: boolean) => {
       menu.hidden = !open;
       toggle.setAttribute('aria-expanded', String(open));
     };
     for (const item of items) {
       item.classList.add('btn-ghost');
-      // Choosing an item closes the menu. Re-run rebuilds the card and took it
-      // with it, so this never showed; the two ways out do not — they open
-      // another tab and leave this one exactly as it was, and a menu still
-      // hanging open over the report when the user comes back is the popover
-      // having outlived the choice it was opened to make.
       const choose = item.onclick!;
       item.onclick = (e) => { setOpen(false); choose.call(item, e); };
     }
@@ -795,92 +458,198 @@ export class FillerModal extends Sheet<ModalData> {
     return wrap;
   }
 
-  private row(m: FieldMatch, confirmed = false): HTMLElement {
+  /* ---------------- Rows ---------------- */
+
+  private row(m: FieldMatch, confirmed: boolean): HTMLElement {
     const status = matchStatus(m);
-    const row = el('div', 'cf-row');
+    const row = el('div', `cf-row${m.ignored ? ' cf-ignored' : ''}`);
+    row.dataset.row = m.id;
     const dot = el('span', `cf-dot ${status}`);
     dot.setAttribute('role', 'img');
-    dot.setAttribute('aria-label', STATUS_LABELS[status]);
+    dot.setAttribute('aria-label', m.ignored ? 'ignored' : STATUS_LABELS[status]);
     row.append(dot);
 
     const field = el('div', 'cf-field');
     const name = el('b');
-    name.textContent = FIELD_LABELS[m.field] ?? m.field;
+    name.textContent = m.question || `Unlabelled ${KIND_NAMES[m.kind] ?? 'field'}`;
     const detail = el('small');
-    if (m.confidence === 'none') detail.textContent = 'not found';
-    else if (m.field === 'resume') detail.textContent = m.filled ? 'CV attached' : (m.selectorUsed ?? 'file input');
-    else detail.textContent = `${m.valueToFill ?? ''} · ${m.selectorUsed ?? ''}`.trim();
-    detail.title = detail.textContent ?? '';
+    detail.textContent = rowDetail(m);
+    detail.title = detail.textContent;
     field.append(name, detail);
     row.append(field);
 
-    // The outcome in a word, beside the dot that colours it. Status was carried by
-    // the dot alone, so reading a row meant knowing the key; the reference tags
-    // every row, and the word comes from the same catalog the legend and the tiles
-    // render from.
-    const tag = el('span', `chip cf-tag ${TAG_TONE[status]}`);
-    tag.textContent = STATUS_TEXT[status].word;
+    const tag = el('span', `chip cf-tag ${m.ignored ? '' : TAG_TONE[status]}`.trimEnd());
+    tag.textContent = m.ignored ? ACTION_LABELS.ignored : STATUS_TEXT[status].word;
     row.append(tag);
 
     const actions = el('div', 'cf-actions');
-    // Anything matched but not filled can be retried in place; only a field with
-    // no element at all has nothing for Confirm to act on.
-    // Secondary, deliberately: the reference draws every per-row action as a plain
-    // button (design/reference/states-gallery.html), and the coral fill belongs to
-    // the footer's Apply alone. As a primary, sixteen rows of Confirm outshouted
-    // the one control that actually sends anything.
-    //
-    // Once pressed it retires in place — `aria-disabled` and a dead handler, the
-    // same convention as the footer's `Applied ✓`, never the `disabled` property.
-    // The dot, the tag and the counts stay exactly as the fill left them (that is
-    // the point), so this label is the only thing on the card that says the press
-    // landed. Nothing moves: the row keeps its size and its position.
-    if (!m.filled && m.confidence !== 'none') {
+    const teachBtn = (label: string) => {
+      const b = btn(label, () => (this.teaching?.rowId === m.id ? this.closeTeach() : this.openTeach(m.id)));
+      b.setAttribute('aria-expanded', String(this.teaching?.rowId === m.id));
+      return b;
+    };
+    if (m.taught) {
+      const done = btn(ACTION_LABELS.taught, () => {});
+      done.setAttribute('aria-disabled', 'true');
+      actions.append(done);
+    } else if (!m.field && !m.ignored) {
+      actions.append(teachBtn(ACTION_LABELS.teach));
+    } else {
+      // A guess with something to fill it with can be confirmed in place. Once it
+      // has been, the row turns green where it stands and its button retires —
+      // the press is acknowledged on the row it was made on.
       if (confirmed) {
         const done = btn(ACTION_LABELS.confirmed, () => {});
         done.setAttribute('aria-disabled', 'true');
         actions.append(done);
-      } else {
-        actions.append(btn(ACTION_LABELS.confirm, () => this.cb.onConfirm(m.field)));
+      } else if (m.field && !m.filled && !m.kept && m.confidence === 'low' && m.valueToFill) {
+        actions.append(btn(ACTION_LABELS.confirm, () => this.cb.onConfirm(m.id)));
       }
+      actions.append(teachBtn(ACTION_LABELS.notThis));
     }
-    actions.append(btn(ACTION_LABELS.pick, () => this.cb.onPick(m.field)));
     row.append(actions);
     return row;
   }
+
+  /**
+   * The Teach chooser, inline under its row rather than a popover: on a phone a
+   * popover over a list is a second thing to scroll, and the row it is about would
+   * be underneath it. One select, grouped the way Options groups the fields, and
+   * two answers that are not a field — a new one, made here, or "ignore".
+   */
+  private teachPanel(m: FieldMatch, data: ModalData): HTMLElement {
+    const t = this.teaching!;
+    const panel = el('div', 'cf-teach');
+    panel.setAttribute('role', 'group');
+    panel.setAttribute('aria-label', `Teach: ${m.question || 'this field'}`);
+
+    const label = el('label', 'cf-fld-label');
+    label.textContent = 'This is';
+    const select = document.createElement('select');
+    select.className = 'cf-input';
+    select.dataset.k = 'teach:choice';
+    const placeholder = new Option('Choose…', '');
+    placeholder.disabled = true;
+    select.append(placeholder);
+    for (const [group, heading] of [['builtIn', 'Your details'], ['custom', 'Your own fields']] as const) {
+      const items = data.choices.filter((c) => c.group === group);
+      if (!items.length) continue;
+      const og = document.createElement('optgroup');
+      og.label = heading;
+      for (const c of items) og.append(new Option(c.label, c.id));
+      select.append(og);
+    }
+    const other = document.createElement('optgroup');
+    other.label = 'Something else';
+    other.append(new Option(ACTION_LABELS.newField, NEW_FIELD), new Option(ACTION_LABELS.ignore, IGNORE));
+    select.append(other);
+    select.value = t.choice;
+    select.onchange = () => { t.choice = select.value; this.repaint(); };
+    const selectId = `cf-teach-${m.id}`;
+    select.id = selectId;
+    label.setAttribute('for', selectId);
+    panel.append(label, select);
+
+    if (t.choice === NEW_FIELD) {
+      panel.append(
+        this.textBox('Field name', 'teach:label', t.label, (v) => { t.label = v; }),
+        this.textBox('Your answer', 'teach:value', t.value, (v) => { t.value = v; }),
+      );
+    }
+
+    const actions = el('div', 'cf-teach-actions');
+    const ready = t.choice === NEW_FIELD ? !!t.label.trim() : !!t.choice;
+    const save = btn(ACTION_LABELS.save, () => {
+      if (!ready) return;
+      const choice: TeachChoice = t.choice === IGNORE
+        ? { ignore: true }
+        : t.choice === NEW_FIELD
+          ? { newField: { label: t.label.trim(), value: t.value } }
+          : { field: t.choice };
+      // Closed before the callback, not after: the teach is async (a new field, a
+      // lesson to store) and the row should not sit there open while it runs.
+      this.closeTeach();
+      this.cb.onTeach(m.id, choice);
+    });
+    if (!ready) save.setAttribute('aria-disabled', 'true');
+    actions.append(btn(ACTION_LABELS.cancel, () => this.closeTeach()), save);
+    panel.append(actions);
+    return panel;
+  }
+
+  private textBox(caption: string, key: string, value: string, set: (v: string) => void): HTMLElement {
+    const wrap = el('label', 'cf-fld');
+    const cap = el('span', 'cf-fld-label');
+    cap.textContent = caption;
+    const input = document.createElement('input');
+    input.className = 'cf-input';
+    input.dataset.k = key;
+    input.value = value;
+    input.oninput = () => {
+      set(input.value);
+      // Save's availability follows the name box; repaint only on the edge.
+      const save = this.shadow.querySelector<HTMLButtonElement>('.cf-teach-actions .cf-btn:last-child');
+      const ready = !!this.teaching?.label.trim();
+      if (save) {
+        if (ready) save.removeAttribute('aria-disabled');
+        else save.setAttribute('aria-disabled', 'true');
+      }
+    };
+    wrap.append(cap, input);
+    return wrap;
+  }
 }
 
+const KIND_NAMES: Partial<Record<FieldMatch['kind'], string>> = {
+  text: 'text box', email: 'email box', tel: 'phone box', url: 'link box', number: 'number box',
+  date: 'date', textarea: 'text area', select: 'drop-down', radio: 'choice', checkbox: 'checkbox',
+  file: 'upload', editable: 'text box',
+};
+
 /**
- * The pill's dot summarizes the whole report. A redirect notice has no fields to
- * summarize, so it stays neutral-positive: nothing failed, there was simply
- * nothing to fill.
+ * The row's second line: what it was taken for, and what went in. The field's name
+ * is left off when the question already says it — "Email / Email · ada@…" is the
+ * same word twice — and kept whenever the two differ, because then the name *is*
+ * the news: "Where are you based? / City · London".
  */
-function pillStatus(data: ModalData, filled: number): MatchConfidence {
-  if (data.redirect || data.matches.length === 0) return 'high';
-  if (filled === data.matches.length) return 'high';
-  return filled > 0 ? 'low' : 'none';
+function rowDetail(m: FieldMatch): string {
+  if (m.ignored) return 'Never filled';
+  if (!m.field) return m.required ? 'Not recognised · required' : 'Not recognised';
+  const label = m.fieldLabel ?? m.field;
+  if (fingerprint(m.question) === fingerprint(label)) {
+    if (m.kind === 'file') return m.filled ? (m.valueToFill ?? 'Attached') : m.valueToFill ? 'Not attached yet' : 'Nothing stored to attach';
+    if (m.kept) return 'Kept the answer already there';
+    if (!m.valueToFill) return 'Nothing in your profile for this';
+    if (m.filled) return m.valueToFill;
+    if (m.confidence === 'low') return `${m.valueToFill}?`;
+    return `Would not take “${m.valueToFill}”`;
+  }
+  const name = label;
+  if (m.kind === 'file') {
+    if (m.filled) return `${name} · ${m.valueToFill ?? 'attached'}`;
+    return m.valueToFill ? `${name}?` : `${name} · nothing stored to attach`;
+  }
+  if (m.kept) return `${name} · kept the answer already there`;
+  if (!m.valueToFill) return `${name} · nothing in your profile for this`;
+  if (m.filled) return `${name} · ${m.valueToFill}`;
+  if (m.confidence === 'low') return `${name}? · ${m.valueToFill}`;
+  return `${name} · would not take “${m.valueToFill}”`;
 }
 
 /**
- * The report split into its three buckets, keyed by the same `matchStatus` the
- * dots use — so the summary line, the stat tiles and the row dots can never
- * count a field into different columns. `high` = actually filled, `none` = no
- * field matched, `low` = everything left (a guess, or a confident match the
- * field would not take).
+ * The report in three buckets, keyed by the same `matchStatus` the dots use, so
+ * the summary, the tiles and the rows never count a row into different columns.
+ * Ignored rows are in none of them: they asked nothing of anyone.
  */
 function statCounts(matches: FieldMatch[]): Record<MatchConfidence, number> {
   const counts: Record<MatchConfidence, number> = { high: 0, low: 0, none: 0 };
-  for (const m of matches) counts[matchStatus(m)] += 1;
+  for (const m of matches) if (!m.ignored) counts[matchStatus(m)] += 1;
   return counts;
 }
 
-/**
- * The worst outcome in the report — what the closed Fields tab has to advertise.
- * Green only when every field actually took its value.
- */
+/** The worst outcome in the report — what the closed Fields tab advertises. */
 function worstStatus(matches: FieldMatch[]): MatchConfidence {
-  if (!matches.length) return 'high';
-  const statuses = matches.map(matchStatus);
+  const statuses = matches.filter((m) => !m.ignored).map(matchStatus);
   if (statuses.includes('none')) return 'none';
   return statuses.includes('low') ? 'low' : 'high';
 }

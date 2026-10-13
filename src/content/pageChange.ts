@@ -4,9 +4,9 @@
  * Two surfaces need this and they need it for different reasons. The name chips
  * (`fieldTags.ts`) are `position: fixed` and read their coordinates from the
  * element they name, so anything that moves that element leaves the chip behind.
- * The recorder (`main.ts`) needs to know the *set* of fields changed: a click that
- * opens the application modal puts controls on the page that were not there when
- * the sweep ran, and nothing else is ever going to look again.
+ * The fill engine (`fillEngine.ts`) needs to know the *set* of inputs changed: a
+ * click that opens the application form puts controls on the page that were not
+ * there when the last sweep ran, and nothing else is ever going to look again.
  *
  * They had `scroll` + `resize` between them, which is the half of the answer that
  * covers the viewport moving and none of the half that covers the page moving
@@ -43,8 +43,17 @@ function isOwnChange(r: MutationRecord): boolean {
  *
  * `settleMs` of 0 coalesces into the next animation frame; anything larger waits
  * for that many milliseconds of quiet, restarting on every further change.
+ *
+ * `layout: false` listens to the DOM alone. The fill engine wants to know when
+ * inputs may have appeared, which a scroll or a resize never causes — and on every
+ * site, every scroll waking a sweep of the whole document is a cost with nothing
+ * to show for it.
  */
-export function watchPageChange(cb: () => void, settleMs = 0): () => void {
+export function watchPageChange(
+  cb: () => void,
+  settleMs = 0,
+  { layout = true }: { layout?: boolean } = {},
+): () => void {
   let frame = 0;
   let timer: ReturnType<typeof setTimeout> | undefined;
 
@@ -68,17 +77,19 @@ export function watchPageChange(cb: () => void, settleMs = 0): () => void {
 
   // Everything a mutation cannot see: an image or a font finishing loading, a
   // textarea growing itself, a container that reflowed without its markup changing.
-  const sizes = new ResizeObserver(schedule);
-  sizes.observe(document.documentElement);
+  const sizes = layout ? new ResizeObserver(schedule) : undefined;
+  sizes?.observe(document.documentElement);
 
   // Captured, because the scroll that moves a field is often a container's rather
   // than the window's and those do not bubble.
-  window.addEventListener('scroll', schedule, true);
-  window.addEventListener('resize', schedule);
+  if (layout) {
+    window.addEventListener('scroll', schedule, true);
+    window.addEventListener('resize', schedule);
+  }
 
   return () => {
     mutations.disconnect();
-    sizes.disconnect();
+    sizes?.disconnect();
     window.removeEventListener('scroll', schedule, true);
     window.removeEventListener('resize', schedule);
     if (frame) cancelAnimationFrame(frame);

@@ -4,7 +4,7 @@ export default defineManifest({
   manifest_version: 3,
   name: 'Chromium Filler',
   version: '0.1.4',
-  description: 'Auto-fills job application forms with per-site config, a review report, and click-to-pick overrides.',
+  description: 'Fills job application forms on any site as they appear, learns the questions you teach it, and never submits for you.',
   // `identity` is for syncing the job database through a Google Drive app folder
   // (see src/shared/syncConfig.ts). Deliberately no `alarms`: sync runs when the
   // user presses Sync now and once at browser startup, never on a timer.

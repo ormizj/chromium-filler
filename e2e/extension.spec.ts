@@ -1,33 +1,28 @@
 /**
  * End-to-end: load the real built extension into Chromium and run it against the
- * fixture scenarios. If these pass, the fill/prep/wait/CV/close pipeline and the
- * two-step handoff work against genuinely nasty markup — the confidence signal
- * for real sites.
+ * fixture scenarios. If these pass, the fill engine works on genuinely nasty
+ * markup — late forms, modal forms, hashed ids — teaching carries across sites,
+ * nothing is ever filled where it must not be, and the queue knows its tabs.
  *
- * URLs come from `test/fixtures/scenarios.mjs` (via `urlFor`), the same catalog
- * the fixture server prints and indexes, so a scenario cannot exist in one place
- * and not the other.
+ * There are no site configs: every page is filled by the same engine. URLs come
+ * from `test/fixtures/scenarios.mjs` (via `urlFor`), the same catalog the fixture
+ * server prints and indexes.
  *
  * Prereq: `npm run build` (loads dist/). Extensions require a persistent context.
  */
-import { test, expect, chromium, type BrowserContext, type Locator, type Page } from '@playwright/test';
+import { test, expect, chromium, type BrowserContext, type Page } from '@playwright/test';
 import type { JobUrlEntry } from '../src/shared/types';
 import type { JobDetailsMap } from '../src/shared/jobDetails';
 import type { ExportedJob } from '../src/shared/jobExport';
 import { MSG } from '../src/shared/messages';
-import { ACTION_LABELS, AFTER_SEND_ASK, RECORD_PASS_TEXT } from '../src/shared/labels';
-import { ATS_URL, HOSTS, queueSeedUrls, urlFor } from '../test/fixtures/scenarios.mjs';
+import { ACTION_LABELS } from '../src/shared/labels';
+import { HOSTS, queueSeedUrls, urlFor } from '../test/fixtures/scenarios.mjs';
 import path from 'node:path';
 import fs from 'node:fs';
 import { fileURLToPath } from 'node:url';
 
 const DIR = path.dirname(fileURLToPath(import.meta.url));
 const DIST = path.resolve(DIR, '../dist');
-const CONFIGS = path.resolve(DIR, '../test/fixtures/test-site-configs.json');
-/** Same fixture server, different host — a genuinely cross-origin ATS destination. */
-const ALT = HOSTS.employer;
-/** A third origin (second port), so a redirect chain crosses more than one host. */
-const TRACKER = HOSTS.tracker;
 const HEADED = process.env.PW_HEADED === '1';
 
 const PROFILE = {
@@ -36,7 +31,11 @@ const PROFILE = {
     email: 'ada@example.com', phone: '+1 555 123 4567', city: 'London',
     coverLetter: 'I love building widgets.',
   },
-  custom: {},
+  keywords: {},
+  customFields: [
+    { id: 'c_years', label: 'Years of experience', kind: 'text', value: '7', keywords: [] },
+    { id: 'c_visa', label: 'Visa sponsorship', kind: 'yesNo', value: 'No', keywords: [] },
+  ],
 };
 
 let context: BrowserContext;
@@ -46,18 +45,13 @@ test.describe.configure({ mode: 'serial' });
 
 test.beforeAll(async () => {
   test.setTimeout(120_000);
-  // Loudly, not `test.skip`. Skipping meant a run with no `dist/` reported
-  // "0 passed" as success — a green E2E that executed nothing, which is the one
-  // failure mode this suite must never have, since it *is* the confidence signal.
+  // Loudly, not `test.skip`: a run with no `dist/` must not report success.
   if (!fs.existsSync(path.join(DIST, 'manifest.json'))) {
     throw new Error(
       `No built extension at ${DIST}. Run \`npm run build\` before \`npm run test:e2e\`.`,
     );
   }
 
-  // Extensions need the full Chrome-for-Testing binary (the headless *shell*
-  // cannot load them). `channel: 'chromium'` selects it and supports extensions
-  // in new-headless mode.
   context = await chromium.launchPersistentContext('', {
     channel: 'chromium',
     headless: !HEADED,
@@ -71,30 +65,16 @@ test.beforeAll(async () => {
   if (!sw) sw = await context.waitForEvent('serviceworker', { timeout: 30_000 });
   extId = new URL(sw.url()).host;
 
-  // Seed profile / configs / settings (+ a CV via the real options file input).
+  // Seed profile / settings (+ a CV via the real options file input).
   const opts = await context.newPage();
   await opts.goto(`chrome-extension://${extId}/src/options/options.html`);
   await opts.waitForFunction(() => document.body.dataset.ready === '1');
-  const siteConfigs = JSON.parse(fs.readFileSync(CONFIGS, 'utf8'));
-  await opts.evaluate(
-    async ({ profile, configs }) => {
-      await chrome.storage.local.set({
-        profile,
-        siteConfigs: configs,
-        settings: {
-          autoRunOnLoad: true,
-          closeTabOnSubmit: true, closeTabDelayMs: 200,
-          redirectTarget: 'newTabCloseSource',
-        },
-      });
-    },
-    { profile: PROFILE, configs: siteConfigs },
-  );
+  await opts.evaluate(async ({ profile }) => {
+    await chrome.storage.local.set({ profile, lessons: [], settings: { closeTabDelayMs: 200 } });
+  }, { profile: PROFILE });
   await opts.setInputFiles('#cv-input', {
     name: 'cv.pdf', mimeType: 'application/pdf', buffer: Buffer.from('%PDF-1.4 test cv'),
   });
-  // The other document. Both are seeded through the real file inputs rather than
-  // written to storage, so the options page's own encode path is exercised too.
   await opts.setInputFiles('#cover-input', {
     name: 'cover.pdf', mimeType: 'application/pdf', buffer: Buffer.from('%PDF-1.4 test cover'),
   });
@@ -179,60 +159,6 @@ async function patchSettings(patch: Record<string, unknown>): Promise<void> {
   }, patch));
 }
 
-/**
- * Teach the config that matches `url` what this site's confirmation looks like —
- * what the user does with the setup panel's "Confirmation element" row.
- *
- * Auto-created destination configs have no `successSelector`, and nothing is
- * ever recorded as applied without one, so a handoff destination needs this step
- * before it can be finished. Simulated here rather than driven through the
- * picker: the picker has its own coverage, and this is about what happens after.
- */
-async function teachConfirmation(url: string, selector: string): Promise<void> {
-  await onExtensionPage((page) => page.evaluate(async ({ u, sel }) => {
-    const { siteConfigs } = await chrome.storage.local.get('siteConfigs');
-    const glob = (p: string) => new RegExp(`^${p.replace(/[.+?^${}()|[\]\\]/g, '\\$&')
-      .replace(/\*/g, '.*')}$`).test(u);
-    // Configs are stored in a desktop and a mobile half once the extension has
-    // written one; this browser is desktop.
-    const half = (c: Record<string, any>) => ('desktop' in c || 'mobile' in c) ? (c.desktop ??= { extract: {} }) : c;
-    for (const c of siteConfigs) {
-      if (c.urlPatterns.some(glob)) half(c).successSelector = sel;
-    }
-    await chrome.storage.local.set({ siteConfigs });
-  }, { u: url, sel: selector }));
-}
-
-/**
- * Rewind the config that matches `url` to where a finished *first* pass leaves it:
- * it knows how to fill and which button sends, and knows nothing about the reply.
- *
- * The inverse of `teachConfirmation`, and written the same way — through storage
- * rather than through the panel, because the recording of a first pass has its own
- * spec and these are about the half that comes after. Otherwise two specs would
- * depend on a third having run first, which is the ordering coupling that makes a
- * suite fail differently on its own than in a full run.
- */
-async function rewindToBeforeSend(url: string, submitSelector: string): Promise<void> {
-  // The fixture configs first: the recording specs run `clearConfigs()`, so by the
-  // time these run there may be nothing on this site to rewind. A helper that
-  // guarantees its own precondition beats a spec that passes alone and not in order.
-  const fixtures = JSON.parse(fs.readFileSync(CONFIGS, 'utf8'));
-  await onExtensionPage((page) => page.evaluate(async ({ u, sel, seed }) => {
-    await chrome.storage.local.set({ siteConfigs: seed });
-    const { siteConfigs } = await chrome.storage.local.get('siteConfigs');
-    const glob = (p: string) => new RegExp(`^${p.replace(/[.+?^${}()|[\]\\]/g, '\\$&')
-      .replace(/\*/g, '.*')}$`).test(u);
-    const half = (c: Record<string, any>) => ('desktop' in c || 'mobile' in c) ? (c.desktop ??= { extract: {} }) : c;
-    for (const c of siteConfigs) {
-      if (!c.urlPatterns.some(glob)) continue;
-      delete half(c).successSelector;
-      half(c).submitSelector = sel;
-    }
-    await chrome.storage.local.set({ siteConfigs });
-  }, { u: url, sel: submitSelector, seed: fixtures }));
-}
-
 /** Poll the job-URL database until `check` passes (the link is written async). */
 async function waitForJobUrl(
   url: string,
@@ -249,76 +175,83 @@ async function waitForJobUrl(
   throw new Error(`job URL never matched: ${url} (last seen: ${JSON.stringify(last)})`);
 }
 
-test('SlowBoards: fills the late-injected form + attaches CV', async () => {
+/**
+ * Open the review card. Off the queue it starts folded to its pill — it only
+ * appears at all because something was filled — so a test that reads the card
+ * presses the pill first, the way a user does.
+ */
+async function openCard(page: Page): Promise<void> {
+  const card = page.locator('.cf-card');
+  if (await card.count()) return;
+  await page.locator('.cf-pill').click({ timeout: 20_000 });
+  await expect(card).toBeVisible();
+}
+
+/** The report row whose question is `question`. */
+function row(page: Page, question: string | RegExp) {
+  return page.locator('.cf-report .cf-row', { has: page.locator('.cf-field b', { hasText: question }) });
+}
+
+/** Teach a row from the card: open its chooser, pick `choice`, Save. */
+async function teach(page: Page, question: string | RegExp, choice: string): Promise<void> {
+  await openCard(page);
+  const r = row(page, question);
+  await r.getByRole('button', { name: /^(Teach|Not this)$/ }).click();
+  await page.locator('.cf-teach select').selectOption(choice);
+  await page.locator('.cf-teach').getByRole('button', { name: ACTION_LABELS.save }).click();
+}
+
+async function setLessons(lessons: unknown[]): Promise<void> {
+  await onExtensionPage((p) => p.evaluate(async (l) => { await chrome.storage.local.set({ lessons: l }); }, lessons));
+}
+
+async function readLessons(): Promise<Array<{ label: string; target: unknown; signature: Record<string, unknown> }>> {
+  return onExtensionPage((p) => p.evaluate(async () => (await chrome.storage.local.get('lessons')).lessons ?? []));
+}
+
+const filesIn = (page: Page, sel: string) => page.locator(sel).evaluate(
+  (el) => [...((el as HTMLInputElement).files ?? [])].map((f) => f.name),
+);
+
+/* ---------------- Filling ---------------- */
+
+test('SlowBoards: fills the late-injected form + attaches CV, with no config at all', async () => {
   const page = await context.newPage();
   await page.goto(urlFor('slow-boards'));
 
-  await expect(page.locator('#first_name')).toHaveValue('Ada');
+  await expect(page.locator('#first_name')).toHaveValue('Ada', { timeout: 20_000 });
   await expect(page.locator('#last_name')).toHaveValue('Lovelace');
   await expect(page.locator('#email')).toHaveValue('ada@example.com');
   await expect(page.locator('#phone')).toHaveValue('+1 555 123 4567');
-  const cvCount = await page.locator('#resume-file').evaluate((el) => (el as HTMLInputElement).files?.length ?? 0);
-  expect(cvCount).toBe(1);
+  expect(await filesIn(page, '#resume-file')).toEqual(['cv.pdf']);
 
-  // Review modal is present (pierced shadow DOM) and shows the title.
+  // The card is folded off the queue; opened, the Job view reads the posting.
+  await openCard(page);
+  await page.locator('.cf-view', { hasText: 'Job' }).click();
   await expect(page.locator('.cf-title')).toContainText('Staff Platform Engineer');
-
-  // And the meta chips under it, read from the posting's own JobPosting block:
-  // company, remote-with-place, and the employment code spelled as a word.
   const chips = page.locator('.cf-jobmeta .chip');
   await expect(chips).toHaveCount(3);
   await expect(chips.nth(0)).toHaveText('SlowBoards');
-  await expect(chips.nth(1)).toHaveText('Remote (Berlin, DE)');
-  await expect(chips.nth(2)).toHaveText('Full-time');
+  // The description falls back to the posting, not to the button that expands it.
+  await expect(page.locator('.cf-body')).toContainText(/SlowBoards is hiring/i);
+  await expect(page.locator('.cf-body')).not.toContainText(/Show full description/i);
   await page.close();
 });
 
-/**
- * The description fallbacks match on substrings of `id`/`class`, and slow-boards'
- * "Show full description" **button** carries `id="expand-description"` — so it
- * matches `[id*="description" i]` earlier in the document than the description
- * it expands. The modal showed a posting whose entire body was the words "Show
- * full description".
- *
- * This is the shape every auto-created config has (a handoff destination gets one
- * with no `extract` selectors at all), so it is not an exotic case — it is what a
- * site looks like before anyone has set it up.
- */
-test('SlowBoards: an unconfigured description falls back to the posting, not to the button that opens it', async () => {
-  const strip = (drop: boolean) => onExtensionPage((opts) => opts.evaluate(async (dropIt) => {
-    const { siteConfigs } = await chrome.storage.local.get('siteConfigs');
-    const half = (c: Record<string, any>) => ('desktop' in c || 'mobile' in c) ? (c.desktop ??= { extract: {} }) : c;
-    for (const c of siteConfigs) {
-      if (c.id !== 'slow-boards') continue;
-      const h = half(c);
-      h.extract ??= {};
-      if (dropIt) delete h.extract.jobDescription;
-      else h.extract.jobDescription = '#job-description';
-    }
-    await chrome.storage.local.set({ siteConfigs });
-  }, drop));
-
-  await strip(true);
-  const page = await context.newPage();
-  await page.goto(urlFor('slow-boards'));
-  await expect(page.locator('.cf-card')).toBeVisible({ timeout: 20_000 });
-
-  const body = page.locator('.cf-body');
-  await expect(body).toContainText(/SlowBoards is hiring/i);
-  await expect(body).not.toContainText(/Show full description/i);
-
-  await page.close();
-  await strip(false);
-});
-
-test('ModalLever: opens modal (prep), fills accessible-name fields, attaches injected CV', async () => {
+test('ModalLever: fields that appear only after "Apply" are filled as they appear', async () => {
   const page = await context.newPage();
   await page.goto(urlFor('modal-lever'));
+  // Nothing to fill yet: the form does not exist until the button is pressed.
+  await page.waitForTimeout(800);
+  await expect(page.locator('#modal-form')).toHaveCount(0);
 
-  await expect(page.getByLabel('Full name')).toHaveValue('Ada Lovelace');
+  await page.click('#apply-btn');
+  await expect(page.getByLabel('Full name')).toHaveValue('Ada Lovelace', { timeout: 10_000 });
   await expect(page.getByLabel('Email address')).toHaveValue('ada@example.com');
-  const cvCount = await page.locator('#resume-hidden').evaluate((el) => (el as HTMLInputElement).files?.length ?? 0);
-  expect(cvCount).toBe(1);
+
+  // And a second wave: the upload is injected by its own button.
+  await page.click('#add-resume');
+  await expect.poll(() => filesIn(page, '#resume-hidden'), { timeout: 10_000 }).toEqual(['cv.pdf']);
   await page.close();
 });
 
@@ -347,301 +280,158 @@ test('QuickBoard: a cover-letter upload takes the cover letter, not the CV', asy
   }
 });
 
-test('ChaosForm: hashed ids + multi-step; disguised city stays unmatched', async () => {
+test('ChaosForm: hashed ids are no obstacle; the disguised city is listed to teach', async () => {
   const page = await context.newPage();
   await page.goto(urlFor('chaos-form'));
 
-  await expect(page.getByLabel('Given name')).toHaveValue('Ada');
+  await expect(page.getByLabel('Given name')).toHaveValue('Ada', { timeout: 20_000 });
   await expect(page.getByLabel('Family name')).toHaveValue('Lovelace');
   await expect(page.getByLabel('Email address')).toHaveValue('ada@example.com');
-  await expect(page.getByLabel('Cover letter')).toHaveValue('I love building widgets.');
-  const cvCount = await page.getByLabel('Attach CV').evaluate((el) => (el as HTMLInputElement).files?.length ?? 0);
-  expect(cvCount).toBe(1);
+  // Step 2 is only shown once "Next" is pressed — a class flip, not new markup —
+  // and its fields are filled as it appears.
+  await page.click('#next-btn');
+  await expect(page.getByLabel('Cover letter')).toHaveValue('I love building widgets.', { timeout: 10_000 });
+  expect((await filesIn(page, 'input[type=file]')).length).toBe(1);
 
-  // The disguised city field is NOT auto-filled, and the modal flags it red.
   await expect(page.getByLabel('Where are you located?')).toHaveValue('');
-  await expect(page.locator('.cf-view .cf-dot.none').first()).toBeVisible();
+  await openCard(page);
+  const city = row(page, 'Where are you located?');
+  await expect(city.locator('.cf-dot.none')).toBeVisible();
+  await expect(city.getByRole('button', { name: ACTION_LABELS.teach })).toBeVisible();
+
+  // Taught once, it fills in place — and the row does not move.
+  const before = await page.locator('.cf-report .cf-row .cf-field b').allTextContents();
+  await teach(page, 'Where are you located?', 'city');
+  await expect(page.getByLabel('Where are you located?')).toHaveValue('London');
+  await expect(city.getByRole('button', { name: ACTION_LABELS.taught })).toBeVisible();
+  expect(await page.locator('.cf-report .cf-row .cf-field b').allTextContents()).toEqual(before);
+
+  const lessons = await readLessons();
+  expect(lessons.map((l) => l.label)).toContain('Where are you located?');
+  await setLessons([]);
   await page.close();
 });
 
-/**
- * The report is the record of one fill and holds still.
- *
- * ChaosForm's phone input is named by its placeholder alone, which scores below
- * the threshold: it comes back yellow, unfilled, with a Confirm. Pressing that
- * used to rewrite the row's `filled` — which turned the dot green, re-counted the
- * summary line and re-sorted the report, dropping the row out from under the
- * finger that had just pressed it and moving every row below it.
- *
- * Now the page answers and the card does not: the field fills, the button
- * retires, and the dots, the counts and the order are exactly what the fill left.
- * Only a fresh fill rebuilds them, which is what Re-run is checked for here.
- */
-test('ChaosForm: Confirm fills the field and leaves the report exactly as the fill left it', async () => {
+test('ChaosForm: Confirm fills a guess in place, without moving any row', async () => {
   const page = await context.newPage();
   await page.goto(urlFor('chaos-form'));
-  await expect(page.getByLabel('Email address')).toHaveValue('ada@example.com');
-
+  await expect(page.getByLabel('Email address')).toHaveValue('ada@example.com', { timeout: 20_000 });
   const phone = page.locator('input[placeholder="Phone"]');
   await expect(phone).toHaveValue('');
 
-  await page.locator('.cf-view', { hasText: 'Fields' }).click();
-  const report = page.locator('.cf-report');
-  // The whole overview in two reads: every row's name+dot, and the count line.
-  const overview = async () => [
-    await report.locator('.cf-row').evaluateAll(
-      (rows) => rows.map((r) => `${r.querySelector('.cf-field b')?.textContent}:${r.querySelector('.cf-dot')?.className}`),
-    ),
-    await page.locator('.cf-summary').textContent(),
-  ];
-  const before = await overview();
-
-  const row = report.locator('.cf-row', { hasText: 'Phone' });
-  await row.locator('button', { hasText: /^Confirm$/ }).click();
-
-  // The page took the value...
+  await openCard(page);
+  const order = () => page.locator('.cf-report .cf-row .cf-field b').allTextContents();
+  const before = await order();
+  const r = row(page, 'Phone');
+  await r.getByRole('button', { name: ACTION_LABELS.confirm, exact: true }).click();
   await expect(phone).toHaveValue('+1 555 123 4567');
-  // ...the button says the press landed...
-  await expect(row.locator('button', { hasText: 'Confirmed ✓' })).toBeVisible();
-  await expect(row.locator('button', { hasText: /^Confirm$/ })).toHaveCount(0);
-  // ...and nothing else about the report moved.
-  expect(await overview()).toEqual(before);
-
-  // A fill is the one thing that re-establishes any of it. Re-run detects the
-  // same placeholder-only control at the same low confidence and still declines
-  // to fill it — so the report comes back identical, and the acknowledgement does
-  // not: a new record carries no memory of a press against the old one.
-  await page.locator('.cf-more button').first().click();
-  await page.locator('.cf-more-menu button', { hasText: 'Re-run' }).click();
-  await page.locator('.cf-view', { hasText: 'Fields' }).click();
-  await expect(row.locator('button', { hasText: /^Confirm$/ })).toBeVisible();
-  await expect(row.locator('button', { hasText: 'Confirmed ✓' })).toHaveCount(0);
-  expect(await overview()).toEqual(before);
-
+  await expect(r.getByRole('button', { name: ACTION_LABELS.confirmed })).toBeVisible();
+  expect(await order()).toEqual(before);
   await page.close();
 });
 
-/**
- * Apply, end to end, on the fixture that makes both of its phases matter. This
- * ATS only records the CV once "Attach" is pressed (`submitCv`), and its form
- * refuses to submit without a recorded CV — so an Apply that pressed Send first,
- * or skipped the confirmation, would produce a form that silently does nothing.
- * Then the site's own confirmation appears, which is what marks it applied.
- */
-test('DialogATS: Apply confirms the CV, presses Send, and the posting lands applied', async () => {
+/* ---------------- Teaching ---------------- */
+
+test('Questions: your own fields answer a box, and a yes/no radio group', async () => {
   const page = await context.newPage();
-  const url = urlFor('cv-confirm');
-  await page.goto(url);
-
-  await expect(page.locator('#email')).toHaveValue('ada@example.com');
-  const cvCount = await page.locator('#cv-file').evaluate((el) => (el as HTMLInputElement).files?.length ?? 0);
-  expect(cvCount).toBe(1);
-  // Attached, but the site has not accepted it — nothing on the page says so,
-  // which is exactly why Apply runs the confirmation before sending.
-  await expect(page.locator('#cv-attached')).toBeHidden();
-
-  const apply = page.locator('.cf-footer button.cf-btn', { hasText: 'Apply' });
-  await expect(apply).not.toHaveAttribute('aria-disabled', 'true');
-  await apply.click();
-
-  // Phase one: the CV is now genuinely accepted.
-  await expect(page.locator('#cv-attached')).toBeVisible();
-  await expect(page.locator('#cv-attached')).toContainText('cv.pdf');
-  // Phase two: the site's own Send button was pressed, and it went through.
-  await expect(page.locator('#dialog-success')).toBeVisible();
-
-  // And the visible confirmation — not the click — is what records the apply.
-  const entry = await waitForJobUrl(url, (e) => e.status === 'applied');
-  expect(entry.appliedAt).toBeTruthy();
-
-  // Said on screen too. The site's own banner is often below the fold or behind
-  // this card, so the modal answering "did that go through?" is the point.
-  //
-  // Asserted here and not after the storage reads below: this suite runs with
-  // `closeTabOnSubmit` on and a 200ms delay, so the tab is about to go.
-  await expect(page.locator('.cf-applied')).toContainText(/sent/i);
-  await expect(page.locator('.cf-footer button.cf-btn', { hasText: 'Applied' })).toBeVisible();
-  // Skip retires beside Apply the moment the application lands. Pressing it would
-  // reach `recordStatus`, which overwrites rather than promotes — filing "skipped"
-  // over the application that just went through.
-  await expect(page.locator('.cf-footer button.cf-btn', { hasText: 'Skip' }))
-    .toHaveAttribute('aria-disabled', 'true');
-
-  // And what the posting SAID is kept, not just that it was applied to. The tab
-  // is about to close and the page is then unreadable forever.
-  const captured = (await readJobDetails())[url];
-  expect(captured.title).toContain('Infrastructure Engineer');
-  expect(captured.description.length).toBeGreaterThan(0);
-
-  const [exported] = (await exportedJobs()).filter((j) => j.url === url);
-  expect(exported.status).toBe('applied');
-  expect(exported.appliedAt).toBeTruthy();
-  expect(exported.description.map((b) => b.text).join(' ')).toContain('Infrastructure Engineer');
-
+  await page.goto(urlFor('questions'));
+  await expect(page.locator('#q-years')).toHaveValue('7', { timeout: 20_000 });
+  await expect(page.locator('#visa-no')).toBeChecked();
+  await expect(page.locator('#q-given')).toHaveValue('Ada');
   await page.close();
 });
 
-/**
- * The gap this closes: the `applied` record was write-only from the page's point
- * of view. Nothing in the content script read it back, so re-opening a posting
- * you had already applied to handed you a live coral Apply — and pressing it
- * pressed the site's own Send button a second time.
- *
- * A fresh page-load, so `Controller.applied` is false and the only thing that can
- * possibly retire these two controls is the database.
- */
-test('DialogATS: re-opening an applied posting retires both decisions', async () => {
-  const url = urlFor('cv-confirm');
-  // Ordered after the apply spec above, which is what puts this URL on record.
-  await waitForJobUrl(url, (e) => e.status === 'applied');
+test('Questions: a lesson taught on one site fills the same question on another', async () => {
+  await setLessons([]);
+  const board = await context.newPage();
+  await board.goto(urlFor('questions'));
+  await expect(board.locator('#q-email')).toHaveValue('ada@example.com', { timeout: 20_000 });
+  await expect(board.locator('#q-preferred')).toHaveValue('');
+  await teach(board, 'Preferred name', 'firstName');
+  await expect(board.locator('#q-preferred')).toHaveValue('Ada');
+  await board.close();
 
-  const page = await context.newPage();
-  await page.goto(url);
-  await expect(page.locator('.cf-card')).toBeVisible({ timeout: 20_000 });
-
-  // The card is a receipt, on a page where nothing has happened.
-  await expect(page.locator('.cf-applied')).toContainText(/already applied/i);
-  await expect(page.locator('.cf-footer button.cf-btn', { hasText: 'Apply' })).toHaveCount(0);
-  const done = page.locator('.cf-footer button.cf-btn', { hasText: 'Applied' });
-  await expect(done).toBeVisible();
-  await expect(done).toHaveAttribute('aria-disabled', 'true');
-
-  const skip = page.locator('.cf-footer button.cf-btn', { hasText: 'Skip' });
-  await expect(skip).toHaveAttribute('aria-disabled', 'true');
-
-  // `force: true` because Playwright's actionability check honours `aria-disabled`
-  // — and pressing them is exactly what has to stay harmless. The press answers
-  // with the note instead of the action.
-  await done.click({ force: true });
-  await skip.click({ force: true });
-  await expect(page.locator('.cf-flow .cf-help')).toContainText(/second application|already applied/i);
-
-  // The site's own form was never submitted again, and the record still stands.
-  await expect(page.locator('#dialog-success')).toBeHidden();
-  const entry = await waitForJobUrl(url, (e) => e.status === 'applied');
-  expect(entry.status).toBe('applied');
-  await page.close();
+  // The same page from a different origin: a different site to the extension.
+  const ats = await context.newPage();
+  await ats.goto(`${HOSTS.employer}/sites/questions.html`);
+  await expect(ats.locator('#q-preferred')).toHaveValue('Ada', { timeout: 20_000 });
+  await ats.close();
+  await setLessons([]);
 });
 
-/**
- * Nothing is sent to a site whose outcome cannot be read back — the strict rule,
- * which is now what "Finish setup when you apply" turned *off* means.
- *
- * With it on (the default, and the two specs near the recording ones) Apply sends and
- * then asks the user to point at the site's reply, because the element it wants does
- * not exist until an application has gone in. Off, this is what is left: the button
- * greys and says which half is missing, and the user sets it by hand. Both behaviours
- * need holding, and this is the one nobody would think to check again.
- */
-test('QuickBoard: Apply refuses to send when the site has no confirmation configured', async () => {
+test('Questions: "Name" taught under Reference 1 never fills Reference 2', async () => {
+  await setLessons([]);
   const page = await context.newPage();
-  await page.goto(urlFor('quick-plain'));
-  await expect(page.locator('.cf-card')).toBeVisible({ timeout: 20_000 });
+  await page.goto(urlFor('questions'));
+  // A bare "Name" reads as your full name, so the first one is filled with it —
+  // and here that is wrong: it is a referee's name.
+  await expect(page.locator('#ref1-name')).toHaveValue('Ada Lovelace', { timeout: 20_000 });
 
-  // This config has a successSelector, so Apply is live — the control case.
-  const apply = page.locator('.cf-footer button.cf-btn', { hasText: 'Apply' });
-  await expect(apply).not.toHaveAttribute('aria-disabled', 'true');
+  await openCard(page);
+  const filledName = page.locator('.cf-report .cf-row', { has: page.locator('.cf-field b', { hasText: /^Name$/ }) })
+    .filter({ has: page.getByRole('button', { name: ACTION_LABELS.notThis }) });
+  await filledName.getByRole('button', { name: ACTION_LABELS.notThis }).click();
+  await page.locator('.cf-teach select').selectOption('__new');
+  const [label, value] = [page.locator('.cf-teach input').nth(0), page.locator('.cf-teach input').nth(1)];
+  await label.fill('Referee name');
+  await value.fill('Grace Hopper');
+  await page.locator('.cf-teach').getByRole('button', { name: ACTION_LABELS.save }).click();
 
-  // Take it away, and turn off the setting that would otherwise offer to capture it.
-  await onExtensionPage((opts) => opts.evaluate(async () => {
-    const { siteConfigs, settings } = await chrome.storage.local.get(['siteConfigs', 'settings']);
-    const half = (c: Record<string, any>) => ('desktop' in c || 'mobile' in c) ? (c.desktop ??= { extract: {} }) : c;
-    for (const c of siteConfigs) if (c.id === 'quick-board') delete half(c).successSelector;
-    await chrome.storage.local.set({
-      siteConfigs, settings: { ...settings, finishSetupOnApply: false },
-    });
+  await expect(page.locator('#ref1-name')).toHaveValue('Grace Hopper');
+  await expect(page.locator('#ref2-name')).not.toHaveValue('Grace Hopper');
+  const lessons = await readLessons();
+  expect(lessons.at(-1)!.signature.section).toBe('reference 1');
+  await page.close();
+
+  // On the next visit the lesson still names only its own box.
+  const again = await context.newPage();
+  await again.goto(urlFor('questions'));
+  await expect(again.locator('#ref1-name')).toHaveValue('Grace Hopper', { timeout: 20_000 });
+  await again.waitForTimeout(500);
+  await expect(again.locator('#ref2-name')).not.toHaveValue('Grace Hopper');
+  await again.close();
+
+  // Put the profile and the lessons back.
+  await setLessons([]);
+  await onExtensionPage((p) => p.evaluate(async () => {
+    const { profile } = await chrome.storage.local.get('profile');
+    profile.customFields = profile.customFields.filter((f: { label: string }) => f.label !== 'Referee name');
+    await chrome.storage.local.set({ profile });
   }));
-  await page.reload();
-  await expect(page.locator('.cf-card')).toBeVisible({ timeout: 20_000 });
+});
 
-  await expect(apply).toHaveAttribute('aria-disabled', 'true');
-  // Stated up front now, in the flow banner, rather than only after a press.
-  await expect(page.locator('.cf-flow.warn')).toContainText(/confirmation element/i);
-  await apply.click({ force: true });
-  await expect(page.locator('.cf-flow .cf-help')).toContainText(/confirmation element/i);
+test('Questions: a box you typed in is never written over, even by a new lesson', async () => {
+  await setLessons([]);
+  const page = await context.newPage();
+  await page.goto(urlFor('questions'));
+  await expect(page.locator('#q-email')).toHaveValue('ada@example.com', { timeout: 20_000 });
+  await page.locator('#q-preferred').fill('Countess');
 
-  await onExtensionPage((opts) => opts.evaluate(async () => {
-    const { siteConfigs, settings } = await chrome.storage.local.get(['siteConfigs', 'settings']);
-    const half = (c: Record<string, any>) => ('desktop' in c || 'mobile' in c) ? (c.desktop ??= { extract: {} }) : c;
-    for (const c of siteConfigs) if (c.id === 'quick-board') half(c).successSelector = '#quick-success';
-    await chrome.storage.local.set({
-      siteConfigs, settings: { ...settings, finishSetupOnApply: true },
-    });
-  }));
+  // A lesson for that question arrives — as if taught on another tab.
+  await setLessons([{
+    id: 'l1', signature: { question: 'preferred name', kind: 'text' }, target: { field: 'firstName' },
+    label: 'Preferred name', createdAt: Date.now(), hits: 0,
+  }]);
+  await page.waitForTimeout(800);
+  await expect(page.locator('#q-preferred')).toHaveValue('Countess');
+  await page.close();
+  await setLessons([]);
+});
+
+/* ---------------- Left alone ---------------- */
+
+test('Login: a login form, a search box and a card number are never touched', async () => {
+  const page = await context.newPage();
+  await page.goto(urlFor('login'));
+  await page.waitForTimeout(1500);
+  for (const sel of ['#s-q', '#l-email', '#l-pass', '#cc']) await expect(page.locator(sel)).toHaveValue('');
+  // Nothing filled, so nothing is put on the page either.
+  await expect(page.locator('.cf-pill')).toHaveCount(0);
+  await expect(page.locator('.cf-card')).toHaveCount(0);
   await page.close();
 });
 
-/**
- * Apply on a page with nothing that reads as a Send button. It must stay
- * pressable and say why it cannot act: a greyed control that swallows the press
- * is how a user concludes the extension is broken.
- */
-test('ListingBoard: the greyed Apply explains itself instead of doing nothing', async () => {
-  const page = await context.newPage();
-  await page.goto(urlFor('listing'));
-  await expect(page.locator('.cf-card')).toBeVisible({ timeout: 20_000 });
-
-  const apply = page.locator('.cf-footer button.cf-btn', { hasText: 'Apply' });
-  await expect(apply).toHaveAttribute('aria-disabled', 'true');
-  // The reason is on screen without being asked for; only the long form is behind
-  // the disclosure, so that is what must be absent until the button is pressed.
-  await expect(page.locator('.cf-flow.warn')).toContainText(/Send button/i);
-  await expect(page.locator('.cf-flow .cf-help')).toHaveCount(0);
-
-  // `force` because Playwright's actionability check honours `aria-disabled`
-  // and refuses the click. That attribute is the truth about the *action* — it
-  // cannot run here — while a real press still lands and is answered, which is
-  // the whole behaviour under test.
-  await apply.click({ force: true });
-  const note = page.locator('.cf-flow .cf-help');
-  await expect(note).toContainText(/Send button/i);
-  // The confirmation IS configured here, so it must not send the user off to
-  // fix that instead — the two grey reasons need two different answers.
-  await expect(note).not.toContainText(/no confirmation element set/i);
-  await page.close();
-});
-
-/**
- * Skip outside a queue session. It used not to render at all there, and the
- * status write was a no-op for a URL nobody had imported — so the one decision
- * a user makes most often, on a posting they opened themselves, was recorded
- * nowhere. Both halves are asserted here.
- */
-test('QuickBoard: Skip records a posting that was never queued, and closes it', async () => {
-  await patchSettings({ closeTabOnSkip: true, closeTabDelayMs: 0 });
-  const page = await context.newPage();
-  const url = urlFor('quick-plain');
-  await page.goto(url);
-  await expect(page.locator('.cf-card')).toBeVisible({ timeout: 20_000 });
-
-  // Nothing put this URL in the database: it was opened by hand.
-  expect((await readJobUrls()).find((e) => e.url === url)).toBeUndefined();
-
-  const closed = page.waitForEvent('close', { timeout: 20_000 });
-  await page.locator('.cf-footer button.cf-btn', { hasText: 'Skip' }).click();
-
-  const entry = await waitForJobUrl(url, (e) => e.status === 'skipped');
-  expect(entry.status).toBe('skipped');
-  await closed;
-});
-
-/** The same press with auto-close off: still recorded, tab left alone. */
-test('QuickBoard: Skip leaves the tab open when auto-close is off', async () => {
-  await patchSettings({ closeTabOnSkip: false });
-  const page = await context.newPage();
-  const url = urlFor('quick-nolink');
-  await page.goto(url);
-  await expect(page.locator('.cf-card')).toBeVisible({ timeout: 20_000 });
-
-  await page.locator('.cf-footer button.cf-btn', { hasText: 'Skip' }).click();
-  await waitForJobUrl(url, (e) => e.status === 'skipped');
-
-  // Give the close path every chance to fire before claiming it did not.
-  await page.waitForTimeout(2000);
-  expect(page.isClosed()).toBe(false);
-  await page.close();
-  await patchSettings({ closeTabOnSkip: true });
-});
+/* ---------------- Popup ---------------- */
 
 test('Popup: opens at a usable width (no vw sliver) and renders cleanly', async () => {
   const page = await context.newPage();
@@ -662,25 +452,14 @@ test('Popup: opens at a usable width (no vw sliver) and renders cleanly', async 
   await page.close();
 });
 
-/**
- * The three ways out share one row, and it has to stay a row: the labels are
- * one or two words and `.links a` is `flex: 1 1 0` with no `flex-wrap`, so the
- * failure mode is a silent column rather than an overflow. Measured rather than
- * asserted on the DOM, because that is the only thing that can see it.
- *
- * The Queue button's destination is checked here too. It is the reason Queue is
- * not a duplicate of Options — it opens the *importer*, a section three down the
- * queue tab — and it is the only place that deep link is still reached from now
- * that the modal's overflow no longer carries it.
- */
-test('Popup: Site setup, Queue and Options share one row, and Queue opens the importer', async () => {
+test('Popup: Teach, Queue and Options share one row, and Queue opens the importer', async () => {
   const page = await context.newPage();
   await page.setViewportSize({ width: 360, height: 600 });
   await page.goto(`chrome-extension://${extId}/src/popup/popup.html`);
   await expect(page.locator('.links')).toBeVisible();
 
   const tops: number[] = [];
-  for (const id of ['#reconfigure', '#open-queue', '#open-options']) {
+  for (const id of ['#teach', '#open-queue', '#open-options']) {
     const box = await page.locator(id).boundingBox();
     expect(box, id).not.toBeNull();
     tops.push(Math.round(box!.y));
@@ -692,422 +471,17 @@ test('Popup: Site setup, Queue and Options share one row, and Queue opens the im
   const importPage = await importer;
   await importPage.waitForLoadState();
   await expect(importPage.locator('#tab-queue')).toHaveAttribute('aria-selected', 'true');
-  // Focused *and* on screen. The tab alone was never the destination: the
-  // importer is the third section of it. (Not asserted as a scroll distance — a
-  // tall enough window has the section in view without moving, and that is a
-  // correct outcome, not a missing one.)
   await expect(importPage.locator('#urls-paste')).toBeFocused();
   await expect(importPage.locator('#import-section')).toBeInViewport();
   await importPage.close();
   await page.close();
 });
 
-test('Auto-close: tab closes once the success selector appears', async () => {
-  const page = await context.newPage();
-  await page.goto(urlFor('slow-boards'));
-  await expect(page.locator('#first_name')).toHaveValue('Ada');
+/* ---------------- Queue ---------------- */
 
-  const closed = page.waitForEvent('close', { timeout: 10_000 });
-  await page.locator('#submit').click({ force: true }); // reveals #app-success -> detected -> close
-  await closed;
-});
-
-/* ---------------- Two-step (redirect) postings ---------------- */
-
-test('MixedBoard: external posting saves on the board, hands off, and links both URLs', async () => {
-  test.setTimeout(90_000);
-  // Keep the posting tab open so its "Save job" state can be asserted, and let
-  // the ATS tab survive its own submit.
-  await patchSettings({ redirectTarget: 'newTab', closeTabOnSubmit: false });
-
-  const boardUrl = urlFor('mixed-external');
-  const atsUrl = ATS_URL;
-
-  const board = await context.newPage();
-  const opened = context.waitForEvent('page', { timeout: 30_000 });
-  await board.goto(boardUrl);
-
-  // The board's own bookkeeping ran before leaving.
-  await expect(board.locator('#save-job')).toHaveAttribute('data-saved', '1');
-
-  const dest = await opened;
-  await dest.waitForLoadState();
-  expect(dest.url()).toBe(atsUrl);
-
-  // The ATS had no site config: one is created on landing, then it fills.
-  await expect(dest.locator('#ats-first')).toHaveValue('Ada', { timeout: 30_000 });
-  await expect(dest.locator('#ats-email')).toHaveValue('ada@example.com');
-  const cvCount = await dest.locator('#ats-resume').evaluate((el) => (el as HTMLInputElement).files?.length ?? 0);
-  expect(cvCount).toBe(1);
-  await expect(dest.locator('.cf-site')).toContainText('via localhost:5199');
-
-  // Both ends are in the database, pointing at each other.
-  const source = await waitForJobUrl(boardUrl, (e) => e.status === 'redirected');
-  expect(source.redirectUrl).toBe(atsUrl);
-  const landed = await waitForJobUrl(atsUrl, (e) => !!e.sourceUrl);
-  expect(landed.sourceUrl).toBe(boardUrl);
-  expect(landed.status).toBe('opened');
-
-  // The auto-created config knows nothing about this ATS's confirmation, and
-  // nothing is recorded as applied without one — so teach it, then reload so the
-  // watcher arms. This is the setup step a real handoff destination now needs.
-  await teachConfirmation(atsUrl, '#ats-success');
-  await dest.reload();
-  await expect(dest.locator('#ats-first')).toHaveValue('Ada', { timeout: 30_000 });
-
-  // Submitting on the ATS marks the application AND the posting it came from.
-  await dest.locator('#ats-submit').click();
-  await expect(dest.locator('#ats-success')).toBeVisible();
-  await waitForJobUrl(atsUrl, (e) => e.status === 'applied');
-  await waitForJobUrl(boardUrl, (e) => e.status === 'applied');
-
-  // The archive's hard case. Both ends are applied, but this was one application
-  // and the two halves hold different things: the board has the description, the
-  // ATS has the outcome. It exports once, as the page it was sent from, carrying
-  // the board's text — not twice, and not without a description.
-  const rows = (await exportedJobs()).filter((j) => j.url === atsUrl || j.url === boardUrl);
-  expect(rows.map((j) => j.url)).toEqual([atsUrl]);
-  expect(rows[0].sourceUrl).toBe(boardUrl);
-  expect(rows[0].title).toContain('Senior Widget Engineer');
-  expect(rows[0].description.length).toBeGreaterThan(0);
-
-  await dest.close();
-  await board.close();
-});
-
-/**
- * The other half of the re-apply guard, and the one with a side effect: following
- * is automatic, so without a check on the stored status, re-opening an applied
- * board posting would open the employer's form all over again — and under the
- * default `newTabCloseSource` it would close the posting the user just opened.
- *
- * Runs straight after the spec above, which is what leaves this URL applied.
- */
-test('MixedBoard: an applied two-step posting is not handed off a second time', async () => {
-  test.setTimeout(60_000);
-  await patchSettings({ redirectTarget: 'newTab' });
-
-  const boardUrl = urlFor('mixed-external');
-  await waitForJobUrl(boardUrl, (e) => e.status === 'applied');
-
-  const before = context.pages().length;
-  const board = await context.newPage();
-  await board.goto(boardUrl);
-  await expect(board.locator('.cf-card')).toBeVisible({ timeout: 20_000 });
-
-  // Still on the board, with the receipt rather than the handoff notice.
-  expect(board.url()).toBe(boardUrl);
-  await expect(board.locator('.cf-applied')).toContainText(/already applied/i);
-  await expect(board.locator('.cf-footer button.cf-btn', { hasText: 'Applied' })).toBeVisible();
-  // "Open application" is still reachable, just no longer the thing being done
-  // for you — it moves into the overflow.
-  await expect(board.locator('.cf-footer-actions > button.cf-btn', { hasText: 'Open application' }))
-    .toHaveCount(0);
-
-  // Nothing was opened. The handoff would have produced a page by now — the spec
-  // above sees one within 30s, and the board's own prep steps have already run.
-  await board.waitForTimeout(2_000);
-  expect(context.pages().length).toBe(before + 1);
-
-  await board.close();
-});
-
-test('MixedBoard: the posting tab closes once the handoff lands (default setting)', async () => {
-  test.setTimeout(60_000);
-  await patchSettings({ redirectTarget: 'newTabCloseSource' });
-
-  const board = await context.newPage();
-  const opened = context.waitForEvent('page', { timeout: 30_000 });
-  const closed = board.waitForEvent('close', { timeout: 30_000 });
-  await board.goto(`${urlFor('mixed-external')}&posting=2`);
-
-  const dest = await opened;
-  await dest.waitForLoadState();
-  await closed;
-  await dest.close();
-});
-
-test('MixedBoard: the quick-apply posting on the same site still fills in place', async () => {
-  const board = await context.newPage();
-  // Armed after our own tab exists, so only a handoff would register here.
-  let newTabs = 0;
-  const countTab = () => { newTabs++; };
-  context.on('page', countTab);
-
-  await board.goto(urlFor('mixed-quick'));
-
-  await expect(board.locator('#first_name')).toHaveValue('Ada');
-  await expect(board.locator('#email')).toHaveValue('ada@example.com');
-  expect(newTabs, 'a quick-apply posting must not hand off anywhere').toBe(0);
-
-  context.off('page', countTab);
-  await board.close();
-});
-
-/** Open a posting and return the tab the handoff lands in. */
-async function followHandoff(postingUrl: string): Promise<{ board: Page; dest: Page }> {
-  const board = await context.newPage();
-  const opened = context.waitForEvent('page', { timeout: 30_000 });
-  await board.goto(postingUrl);
-  const dest = await opened;
-  await dest.waitForLoadState();
-  return { board, dest };
-}
-
-test('ExternalBoard: the configured apply link is followed even though its label says nothing', async () => {
-  test.setTimeout(90_000);
-  await patchSettings({ redirectTarget: 'newTab', closeTabOnSubmit: false });
-
-  const boardUrl = urlFor('external-link');
-  const { board, dest } = await followHandoff(boardUrl);
-
-  // The verdict came from the config, not the text: "Apply for this role" matches
-  // no label pattern, so a heuristic-only run would have stayed and filled.
-  await expect(board.locator('.cf-why')).toContainText('configured external apply link');
-  await expect(board.locator('#save-job')).toHaveAttribute('data-saved', '1');
-
-  expect(dest.url()).toBe(`${ALT}/sites/ats-form.html?src=link`);
-  await expect(dest.locator('#ats-first')).toHaveValue('Ada', { timeout: 30_000 });
-
-  const source = await waitForJobUrl(boardUrl, (e) => e.status === 'redirected');
-  expect(source.redirectUrl).toBe(dest.url());
-
-  await dest.close();
-  await board.close();
-});
-
-test('ExternalBoard: an apply button with no href is clicked, and the tab the PAGE opens is tracked', async () => {
-  test.setTimeout(90_000);
-  await patchSettings({ redirectTarget: 'newTab', closeTabOnSubmit: false });
-
-  // Nothing to open: the background answers `click`, the posting opens its own
-  // tab, and the watch has to be inherited through openerTabId — otherwise the
-  // landing is attributed to nothing and the posting is never marked redirected.
-  const boardUrl = urlFor('external-js');
-  const { board, dest } = await followHandoff(boardUrl);
-
-  expect(dest.url()).toBe(`${ALT}/sites/ats-form.html?src=js`);
-  await expect(dest.locator('#ats-email')).toHaveValue('ada@example.com', { timeout: 30_000 });
-
-  const source = await waitForJobUrl(boardUrl, (e) => e.status === 'redirected');
-  expect(source.redirectUrl).toBe(dest.url());
-  const landed = await waitForJobUrl(dest.url(), (e) => !!e.sourceUrl);
-  expect(landed.sourceUrl).toBe(boardUrl);
-
-  await dest.close();
-  await board.close();
-});
-
-test('MixedBoard: a bare "Apply now" is followed on new-tab + cross-origin alone', async () => {
-  test.setTimeout(90_000);
-  await patchSettings({ redirectTarget: 'newTab', closeTabOnSubmit: false });
-
-  // No label pattern matches "Apply now" — a board that words its button this
-  // plainly is only recognisable by where it goes and how it opens.
-  const boardUrl = urlFor('mixed-blank');
-  const { board, dest } = await followHandoff(boardUrl);
-
-  await expect(board.locator('.cf-why')).toContainText('Apply now');
-  expect(dest.url()).toBe(`${ALT}/sites/ats-form.html?src=blank`);
-  await expect(dest.locator('#ats-first')).toHaveValue('Ada', { timeout: 30_000 });
-  await waitForJobUrl(boardUrl, (e) => e.redirectUrl === dest.url());
-
-  await dest.close();
-  await board.close();
-});
-
-test('ExternalBoard: an "External posting" badge classifies a link that reads "Continue"', async () => {
-  test.setTimeout(90_000);
-  await patchSettings({ redirectTarget: 'newTab', closeTabOnSubmit: false });
-
-  const boardUrl = urlFor('external-marker');
-  const { board, dest } = await followHandoff(boardUrl);
-
-  await expect(board.locator('.cf-why')).toContainText('external marker on the page');
-  expect(dest.url()).toBe(`${ALT}/sites/ats-form.html?src=marker`);
-  await waitForJobUrl(boardUrl, (e) => e.redirectUrl === dest.url());
-
-  await dest.close();
-  await board.close();
-});
-
-test('MixedBoard: a tracker chain records where it LANDED, not the hop it started with', async () => {
-  test.setTimeout(90_000);
-  await patchSettings({ redirectTarget: 'newTab', closeTabOnSubmit: false });
-
-  // 302 → interstitial (700ms) → the real form. The settle timer has to restart
-  // on every hop, or the tracker URL is what ends up in the database.
-  const boardUrl = urlFor('mixed-tracked');
-  const finalUrl = `${ALT}/sites/ats-form.html?via=chain`;
-  const { board, dest } = await followHandoff(boardUrl);
-
-  await expect(async () => expect(dest.url()).toBe(finalUrl)).toPass({ timeout: 20_000 });
-  await expect(dest.locator('#ats-first')).toHaveValue('Ada', { timeout: 30_000 });
-
-  const source = await waitForJobUrl(boardUrl, (e) => e.status === 'redirected');
-  expect(source.redirectUrl).toBe(finalUrl);
-  expect(source.redirectUrl).not.toContain('/r/302');
-  expect(source.redirectUrl).not.toContain('redirect-hop');
-
-  await dest.close();
-  await board.close();
-});
-
-test('MixedBoard: an intent:// apply link is followed at the web address it carries', async () => {
-  test.setTimeout(90_000);
-  await patchSettings({ redirectTarget: 'newTab', closeTabOnSubmit: false });
-
-  const boardUrl = urlFor('mixed-applink');
-  const { board, dest } = await followHandoff(boardUrl);
-
-  // The whole point: the tab went to the fallback URL, over http, and not to the
-  // `intent://acme.example/…` the link actually said. The posting carries no
-  // `scheme=`, so nothing but the fallback could have produced this.
-  expect(dest.url()).toBe(`${ALT}/sites/ats-form.html?src=applink`);
-  await expect(dest.locator('#ats-first')).toHaveValue('Ada', { timeout: 30_000 });
-
-  // And it is an ordinary handoff from there on — both ends linked, as recorded
-  // for any two-step posting.
-  const source = await waitForJobUrl(boardUrl, (e) => e.status === 'redirected');
-  expect(source.redirectUrl).toBe(dest.url());
-
-  await dest.close();
-  await board.close();
-});
-
-test('MixedBoard: a linkedin:// apply link opens nothing and says why', async () => {
-  const board = await context.newPage();
-  // Armed after our own tab exists, so only a handoff would register here.
-  let newTabs = 0;
-  const countTab = () => { newTabs++; };
-  context.on('page', countTab);
-
-  await board.goto(urlFor('mixed-appscheme'));
-
-  // No web address to reach, so the extension stays put. This is the assertion
-  // that matters: nothing was ever handed to the browser that could leave it.
-  await expect(board.locator('.cf-card')).toBeVisible({ timeout: 20_000 });
-  await expect(board.locator('.cf-flow')).toContainText('applies in an app');
-  expect(newTabs, 'an app-scheme apply link must never open a tab').toBe(0);
-
-  // Still on the board: the same-tab variant of the leak would show up here.
-  expect(board.url()).toBe(urlFor('mixed-appscheme'));
-
-  context.off('page', countTab);
-  await board.close();
-});
-
-test('QuickBoard: the decoy "Apply on company website" link is not followed', async () => {
-  const page = await context.newPage();
-  // Armed after our own tab exists, so only a handoff would register here.
-  let newTabs = 0;
-  const countTab = () => { newTabs++; };
-  context.on('page', countTab);
-
-  await page.goto(urlFor('quick-plain'));
-
-  await expect(page.locator('#first_name')).toHaveValue('Ada');
-  await expect(page.locator('#email')).toHaveValue('ada@example.com');
-  await expect(page.locator('#cover')).toHaveValue('I love building widgets.');
-  expect(newTabs, 'the quick-apply marker must beat the sidebar decoy').toBe(0);
-
-  context.off('page', countTab);
-  await page.close();
-});
-
-test('ListingBoard: several apply links are ambiguous, so nothing is followed', async () => {
-  const page = await context.newPage();
-  let newTabs = 0;
-  const countTab = () => { newTabs++; };
-  context.on('page', countTab);
-
-  await page.goto(urlFor('listing'));
-
-  // It stays on the page and reports honestly: no form here, so every row is red.
-  await expect(page.locator('.cf-card')).toBeVisible({ timeout: 20_000 });
-  await expect(page.locator('.cf-view .cf-dot.none').first()).toBeVisible();
-  expect(newTabs, 'a listing page must never pick one of its postings').toBe(0);
-
-  context.off('page', countTab);
-  await page.close();
-});
-
-test('NavATS: a destination that submits by navigating still counts as applied', async () => {
-  test.setTimeout(90_000);
-  // The tab has to survive the navigation for us to see where it went.
-  await patchSettings({ redirectTarget: 'newTab', closeTabOnSubmit: false });
-
-  const { board, dest } = await followHandoff(urlFor('external-nav'));
-  const navUrl = `${TRACKER}/sites/ats-nav.html`;
-  expect(dest.url()).toBe(navUrl);
-
-  // A third origin with no config of its own: one is created on landing.
-  await expect(dest.locator('#nav-first')).toHaveValue('Ada', { timeout: 30_000 });
-  await expect(dest.locator('#nav-email')).toHaveValue('ada@example.com');
-
-  // The confirmation is on a *different page* — this form navigates to
-  // thanks.html, exactly as Greenhouse lands on its own `/confirmation` URL. The
-  // content script that sees it is a fresh one with no memory of the posting, so
-  // this asserts the background attributed it to the posting rather than to the
-  // page showing the message. Without that, `navUrl` would sit at "opened"
-  // forever and a junk entry for thanks.html would be marked applied instead.
-  await dest.locator('#nav-submit').click();
-  await dest.waitForURL(/thanks\.html/, { timeout: 20_000 });
-  await waitForJobUrl(navUrl, (e) => e.status === 'applied');
-
-  const thanksUrl = `${TRACKER}/sites/thanks.html`;
-  const stray = (await readJobUrls()).find((e) => e.url.startsWith(thanksUrl));
-  expect(stray, 'the confirmation page must not be recorded as a posting').toBeUndefined();
-
-  await dest.close();
-  await board.close();
-});
-
-test('HiddenSuccess: a pre-rendered confirmation only counts once it is visible', async () => {
-  test.setTimeout(60_000);
-  // Closing on submit is exactly what must NOT happen while the request is in
-  // flight: an AJAX submission fires `submit` before the server has agreed.
-  await patchSettings({ closeTabOnSubmit: true, closeTabDelayMs: 200 });
-
-  const url = urlFor('hidden-success');
-  await onExtensionPage((page) => page.evaluate(async (u) => {
-    const now = Date.now();
-    await chrome.storage.local.set({
-      jobUrls: [{
-        id: 'hidden-1', url: u, status: 'opened', addedAt: now, updatedAt: now,
-        history: [{ status: 'opened', at: now }],
-      }],
-    });
-  }, url));
-
-  const page = await context.newPage();
-  await page.goto(url);
-  await expect(page.locator('#first_name')).toHaveValue('Ada');
-
-  await page.locator('#submit').click({ force: true });
-  await page.waitForTimeout(3000);
-  expect(page.isClosed(), 'an unconfirmed submit must not close the tab').toBe(false);
-  const stillPending = (await readJobUrls()).find((e) => e.url === url);
-  expect(stillPending?.status, 'presence of a hidden success node is not "sent"').toBe('opened');
-
-  // The server answers: the banner is revealed, and NOW it is an application.
-  const closed = page.waitForEvent('close', { timeout: 15_000 });
-  await page.locator('#confirm-server').click();
-  await waitForJobUrl(url, (e) => e.status === 'applied');
-  await closed;
-});
-
-/* ---------------- Queue session ---------------- */
-
-test('Session: holds the batch size and opens the next posting as one closes', async () => {
+test('Session: the queue marks its tabs, and closing one finishes it and opens the next', async () => {
   test.setTimeout(120_000);
-  // The point of the session is that a big import never becomes a wall of tabs:
-  // at most `batchSize` exist at once, and finishing one is what opens the next.
-  await patchSettings({ closeTabOnSubmit: false, redirectTarget: 'newTab' });
-
-  const BATCH = 3;
-  // The same list the fixture server hands out at /queue-seed.txt, so a session
-  // driven by hand in the browser and one driven here are the same session.
+  const BATCH = 2;
   const urls = queueSeedUrls();
   await onExtensionPage((page) => page.evaluate(async (list) => {
     const now = Date.now();
@@ -1120,14 +494,6 @@ test('Session: holds the batch size and opens the next posting as one closes', a
   }, urls));
 
   const jobTabs = (): Page[] => context.pages().filter((p) => p.url().includes('quick-board.html?job=plain&n='));
-  const seen = new Set<string>();
-  let peak = 0;
-  const watch = setInterval(() => {
-    const open = jobTabs();
-    peak = Math.max(peak, open.length);
-    open.forEach((p) => seen.add(p.url()));
-  }, 100);
-
   const waitFor = async (predicate: () => boolean, what: string, timeoutMs = 30_000) => {
     const deadline = Date.now() + timeoutMs;
     while (Date.now() < deadline) {
@@ -1142,33 +508,34 @@ test('Session: holds the batch size and opens the next posting as one closes', a
       ([type, batchSize]) => chrome.runtime.sendMessage({ type, batchSize }),
       [MSG.SESSION_START, BATCH] as [string, number],
     ));
-
     await waitFor(() => jobTabs().length === BATCH, `${BATCH} job tabs`);
-    expect(peak, 'the session must never exceed its batch size').toBeLessThanOrEqual(BATCH);
 
-    // Closing one frees a slot; the next waiting posting takes it.
-    const closing = jobTabs()[0];
-    const closedUrl = closing.url();
-    await closing.close();
+    // A queue tab carries the chip, and opens on the card.
+    const first = jobTabs()[0];
+    await first.waitForLoadState();
+    await expect(first.locator('#chromium-filler-queue-chip .cf-qchip')).toContainText('Queue', { timeout: 20_000 });
+    await expect(first.locator('.cf-card')).toBeVisible({ timeout: 20_000 });
+    await expect(first.locator('#email')).toHaveValue('ada@example.com');
 
-    await waitFor(() => seen.size > BATCH, 'a replacement posting to open');
-    expect(peak, 'refilling must not overshoot the batch size').toBeLessThanOrEqual(BATCH);
-    expect(jobTabs().length).toBe(BATCH);
-
-    // A tab closed without submitting is not lost — it stays `opened`, so it is
-    // still visible in the dashboard rather than silently dropped or re-queued.
-    const closed = (await readJobUrls()).find((e) => e.url === closedUrl);
-    expect(closed?.status).toBe('opened');
+    // Closing it finishes the posting and opens the next.
+    const closedUrl = first.url();
+    await first.close();
+    await waitFor(() => jobTabs().length === BATCH && !jobTabs().some((p) => p.url() === closedUrl), 'a replacement posting');
+    await waitForJobUrl(closedUrl, (e) => e.status === 'markedDone');
   } finally {
-    clearInterval(watch);
     await onExtensionPage((page) => page.evaluate(
       (type) => chrome.runtime.sendMessage({ type }), MSG.SESSION_STOP as string,
     ));
     await Promise.all(jobTabs().map((p) => p.close()));
   }
-});
 
-/* ---------------- The archive ---------------- */
+  // A page the queue did not open has no chip.
+  const plain = await context.newPage();
+  await plain.goto(urlFor('quick-uploads'));
+  await expect(plain.locator('#email')).toHaveValue('ada@example.com', { timeout: 20_000 });
+  await expect(plain.locator('#chromium-filler-queue-chip')).toHaveCount(0);
+  await plain.close();
+});
 
 test('Options: the archive exports what was ticked, and the ticks survive a reload', async () => {
   // The whole feature in one pass: the checkboxes drive the file, and the choice
@@ -1259,7 +626,7 @@ test('Options: a checklist “Go →” lands on the section it names, not just 
   // checklist is already on — those two used to be visible no-ops. The sticky
   // topbar is the other half of it, so the assertion is not "in the viewport"
   // but "below the bar", which is the part a bare scrollIntoView gets wrong.
-  const KEYS = ['profile', 'cv', 'jobUrls', 'settings'];
+  const KEYS = ['profile', 'cv', 'jobUrls', 'gettingStartedDismissed'];
   const saved = await onExtensionPage((p) => p.evaluate(
     (keys) => chrome.storage.local.get(keys), KEYS,
   ));
@@ -1269,7 +636,6 @@ test('Options: a checklist “Go →” lands on the section it names, not just 
     // A first-run store: every step undone, so every Go button renders.
     await onExtensionPage((p) => p.evaluate(async (keys) => {
       await chrome.storage.local.remove(keys);
-      await chrome.storage.local.set({ settings: { helpSeen: false } });
     }, KEYS));
 
     await page.setViewportSize({ width: 1100, height: 720 });
@@ -1327,7 +693,7 @@ test('Options: a settings row keeps its disclosure inside the card, on either sh
     await page.waitForFunction(() => document.body.dataset.ready === '1');
     await page.locator('#tab-settings').click();
 
-    for (const id of ['redirect-target', 'auto-run']) {
+    for (const id of ['close-delay', 'fill-auto']) {
       const row = page.locator(`#${id}`).locator('xpath=ancestor::*[contains(@class,"setrow")][1]');
       await row.locator('.cf-help-btn').click();
       const panel = row.locator('.cf-help');
@@ -1359,7 +725,7 @@ test('Options: a switch sits on its title line, not below it', async () => {
     await page.waitForFunction(() => document.body.dataset.ready === '1');
     await page.locator('#tab-settings').click();
 
-    const row = page.locator('#auto-run').locator('xpath=ancestor::*[contains(@class,"setrow")][1]');
+    const row = page.locator('#fill-auto').locator('xpath=ancestor::*[contains(@class,"setrow")][1]');
     await expect(row.locator('.setrow-caption')).toBeVisible();
     const [title, control] = await Promise.all([
       row.locator('.setrow-text').boundingBox(),
@@ -1445,7 +811,7 @@ test('Modal: dragging the card on a posting moves it for that page only', async 
     await page.setViewportSize({ width: 1280, height: 900 });
     await page.goto(urlFor('quick-plain'));
     const card = page.locator('.cf-card');
-    await expect(card).toBeVisible({ timeout: 20_000 });
+    await openCard(page);
 
     const box = async () => (await card.boundingBox())!;
     const before = await box();
@@ -1466,8 +832,7 @@ test('Modal: dragging the card on a posting moves it for that page only', async 
 
     // Re-run rebuilds `ModalData` in the controller — the path that used to read
     // the stored default back and throw the drag away.
-    await page.locator('.cf-more button').first().click();
-    await page.getByRole('button', { name: 'Re-run' }).click();
+    await page.getByRole('button', { name: ACTION_LABELS.fillAgain }).click();
     await expect(card).toBeVisible({ timeout: 20_000 });
     await page.waitForTimeout(500);
 
@@ -1484,79 +849,19 @@ test('Modal: dragging the card on a posting moves it for that page only', async 
   }
 });
 
-/**
- * The review modal used to be a dead end. Everything it offered acted on the
- * posting, so a site that filled the wrong field could only be fixed by closing
- * the card (losing the report), opening the toolbar popup and finding Site setup
- * there. The two ways out now lead the overflow, ahead of Re-run.
- */
-test('Modal: the overflow menu reaches setup and the options page', async () => {
+test('Modal: the overflow reaches the options page and pointing at a field', async () => {
   const page = await context.newPage();
   try {
     await page.goto(urlFor('quick-plain'));
-    await expect(page.locator('.cf-card')).toBeVisible({ timeout: 20_000 });
-
-    const openMenu = () => page.locator('.cf-more button').first().click();
-
-    // Site setup runs in *this* tab — the panel is in the same content script,
-    // and taking the user to a new page to configure the one they are looking at
-    // would defeat a picker that works by tapping the real element.
-    await openMenu();
-    await page.getByRole('button', { name: 'Site setup', exact: true }).click();
-    await expect(page.locator('.cf-card[data-sheet="setup"]')).toBeVisible({ timeout: 20_000 });
-    // One slot, two sheets: opening the panel folds the review card away — and
-    // folds it, never destroys it, so the report it holds survives the trip.
-    await expect(page.locator('.cf-card[data-sheet="review"]')).toHaveCount(0);
-
-    // Bring the review card back. Minimize first: while a card is expanded no
-    // pill shows at all, because both pills dock where the expanded card is.
-    await page.locator('.cf-card[data-sheet="setup"] .cf-close').click();
-    await page.locator('.cf-pill[data-sheet="review"]').click();
-    await expect(page.locator('.cf-card[data-sheet="review"]')).toBeVisible({ timeout: 10_000 });
-
-    // The other exit. Queueing up more postings is not one of them: it is the one
-    // errand here with nothing to do with the posting on screen, and the popup's
-    // Queue button reaches the importer without a job page open at all.
-    await openMenu();
-    await expect(page.getByRole('button', { name: 'Add links', exact: true }))
-      .toHaveCount(0);
+    await openCard(page);
+    await page.locator('.cf-more button').first().click();
+    await expect(page.locator('.cf-more-menu button')).toHaveText(['Options', 'Point at a field']);
 
     const opts = context.waitForEvent('page');
     await page.getByRole('button', { name: 'Options', exact: true }).click();
     const optsPage = await opts;
     await optsPage.waitForLoadState();
     await expect(optsPage.locator('.topbar')).toBeVisible();
-    await optsPage.close();
-  } finally {
-    await page.close();
-  }
-});
-
-/**
- * "Advanced (JSON)" is about the config the wizard is editing, so it has to land
- * on the editor holding it. With no hash at all it opened the options page on the
- * default tab — the queue — and left the user to go and find the JSON.
- */
-test('Setup: “Advanced (JSON)” lands on the Sites tab, at the config editor', async () => {
-  const page = await context.newPage();
-  try {
-    await page.goto(urlFor('quick-plain'));
-    await expect(page.locator('.cf-card')).toBeVisible({ timeout: 20_000 });
-
-    await page.locator('.cf-more button').first().click();
-    await page.getByRole('button', { name: 'Site setup', exact: true }).click();
-    await enterWizard(page);
-    // Step 1 is where the raw config lives; the rail is how to get there without
-    // pressing Next five times.
-    await page.locator('.cf-rail-node').first().click();
-
-    const opened = context.waitForEvent('page');
-    await page.getByRole('button', { name: 'Advanced (JSON)' }).click();
-    const optsPage = await opened;
-    await optsPage.waitForLoadState();
-
-    await expect(optsPage.locator('#tab-sites')).toHaveAttribute('aria-selected', 'true');
-    await expect(optsPage.locator('#configs-json')).toBeFocused();
     await optsPage.close();
   } finally {
     await page.close();
@@ -1577,7 +882,7 @@ test('Modal: fullscreen fills the window and stays on for the next posting', asy
     await page.setViewportSize({ width: 1280, height: 900 });
     await page.goto(urlFor('quick-plain'));
     const card = page.locator('.cf-card');
-    await expect(card).toBeVisible({ timeout: 20_000 });
+    await openCard(page);
 
     const box = async () => (await card.boundingBox())!;
     expect((await box()).width, 'starts at the configured size').toBeCloseTo(420, 0);
@@ -1598,8 +903,7 @@ test('Modal: fullscreen fills the window and stays on for the next posting', asy
 
     // Re-run rebuilds `ModalData` from controller state — the path a per-instance
     // flag would be thrown away by.
-    await page.locator('.cf-more button').first().click();
-    await page.getByRole('button', { name: 'Re-run' }).click();
+    await page.getByRole('button', { name: ACTION_LABELS.fillAgain }).click();
     await expect(card).toBeVisible({ timeout: 20_000 });
     await expect.poll(async () => (await box()).width).toBeCloseTo(1280, 0);
   } finally {
@@ -1610,9 +914,9 @@ test('Modal: fullscreen fills the window and stays on for the next posting', asy
   const next = await context.newPage();
   try {
     await next.setViewportSize({ width: 1280, height: 900 });
-    await next.goto(urlFor('quick-nolink'));
+    await next.goto(urlFor('quick-uploads'));
     const card = next.locator('.cf-card');
-    await expect(card).toBeVisible({ timeout: 20_000 });
+    await openCard(next);
     const box = async () => (await card.boundingBox())!;
     await expect.poll(async () => (await box()).width, {
       message: 'the next posting opens fullscreen without being asked',
@@ -1634,368 +938,34 @@ test('Modal: fullscreen fills the window and stays on for the next posting', asy
   }
 });
 
-/* ---------------- One slot, two sheets ---------------- */
+
 
 /**
- * Open the on-page setup panel on `page`, the way the popup does — `MSG.SETUP`
- * addressed at that tab. There is no other entry point, and driving the real
- * popup would need a extension-page → tab hop for one message.
+ * Pointing at a field: a click selects, clicking the same spot again goes one
+ * level in, and Confirm opens the card on that input's Teach chooser.
  */
-async function openSetupPanel(page: Page, opts: { home?: boolean } = {}): Promise<void> {
-  const url = page.url();
-  await onExtensionPage((ext) => ext.evaluate(async ([type, target]) => {
-    const [tab] = await chrome.tabs.query({ url: target });
-    await chrome.tabs.sendMessage(tab.id!, { type });
-  }, [MSG.SETUP, url] as [string, string]));
-  if (opts.home) return;
-  // Site setup opens on the two passes now, on every site — so the six-step wizard
-  // is a deliberate press rather than where anyone lands. It used to route here for
-  // anything with a single saved selector, which one Pick from the review modal's
-  // report is enough to produce, and that made the manual surface the default on
-  // every site anyone had ever touched.
-  await enterWizard(page);
-}
-
-/** Home → the wizard, through the footer's one way into it. */
-async function enterWizard(page: Page): Promise<void> {
-  const setup = page.locator('.cf-card[data-sheet="setup"]');
-  await expect(setup).toBeVisible({ timeout: 20_000 });
-  await setup.locator('.cf-footer .cf-btn').first().click();
-  await expect(setup.locator('.cf-rail')).toBeVisible({ timeout: 10_000 });
-}
-
-test('Sheets: only one is expanded at a time, and both open in the same place', async () => {
-  // The two used to be unrelated products sharing a stylesheet: the modal at the
-  // user's rectangle bottom-right, the panel hardcoded top-right at 400px. Under
-  // 640px they were the same rectangle with nothing but DOM order deciding which
-  // one you could see.
-  const chosen = { right: 40, bottom: 40, width: 420, height: 520 };
-  await patchSettings({ modalLayout: chosen, modalFullscreen: false });
-
-  const page = await context.newPage();
-  try {
-    await page.setViewportSize({ width: 1280, height: 900 });
-    await page.goto(urlFor('quick-plain'));
-
-    const review = page.locator('.cf-card[data-sheet="review"]');
-    const setup = page.locator('.cf-card[data-sheet="setup"]');
-    await expect(review).toBeVisible({ timeout: 20_000 });
-    const reviewBox = (await review.boundingBox())!;
-
-    await openSetupPanel(page);
-    await expect(setup).toBeVisible({ timeout: 20_000 });
-
-    // The slot is exclusive: the review card folds away rather than sitting
-    // underneath, and no pill shows while a card is expanded — both pills dock
-    // where the expanded card already is.
-    await expect(review).toHaveCount(0);
-    await expect(page.locator('.cf-pill')).toHaveCount(0);
-
-    const setupBox = (await setup.boundingBox())!;
-    expect(setupBox, 'both sheets render the one configured rectangle').toEqual(reviewBox);
-
-    // Minimizing frees the slot, so both sheets show a pill — stacked, not on top
-    // of each other. Two pills on one pixel is the failure this rail prevents.
-    await page.locator('.cf-card[data-sheet="setup"] .cf-close').click();
-    await expect(page.locator('.cf-pill')).toHaveCount(2);
-    const pills = await page.locator('.cf-pill').all();
-    const boxes = await Promise.all(pills.map(async (p) => (await p.boundingBox())!));
-    expect(Math.abs(boxes[0].y - boxes[1].y), 'the pills stack').toBeGreaterThan(20);
-
-    // The report is intact behind its pill — never destroyed, so no fill is lost.
-    await page.locator('.cf-pill[data-sheet="review"]').click();
-    await expect(review).toBeVisible();
-    await expect(page.locator('.cf-pill')).toHaveCount(0);
-    expect((await review.boundingBox())!).toEqual(reviewBox);
-  } finally {
-    await page.close();
-  }
-});
-
-/**
- * The wizard's one load-bearing piece of state, tested against the real thing.
- *
- * `refreshSetup` re-renders the whole panel after every edit — a Pick, a prep
- * change, a rename — and the step lives on the `SetupPanel` instance rather than
- * in the data precisely so that survives. A unit test can assert two `render`
- * calls in a row; only this can assert it across a genuine storage round-trip
- * through the background, which is the path a real edit actually takes.
- */
-test('Setup: an edit re-renders the panel without losing your place in the wizard', async () => {
-  const page = await context.newPage();
-  try {
-    await page.setViewportSize({ width: 390, height: 780 });
-    await page.goto(urlFor('quick-plain'));
-    await expect(page.locator('.cf-card[data-sheet="review"]')).toBeVisible({ timeout: 20_000 });
-
-    await openSetupPanel(page);
-    const setup = page.locator('.cf-card[data-sheet="setup"]');
-    await expect(setup).toBeVisible({ timeout: 20_000 });
-
-    // Walk to "Page actions" — step 2 of 6 — whatever the panel opened on.
-    await setup.locator('.cf-rail-node').nth(1).click();
-    await expect(setup.locator('.cf-step-count')).toHaveText('Step 2 of 6');
-
-    // A real edit: "+ Delay" writes a prep step to the site config and comes
-    // back through `refreshSetup`, rebuilding the card from scratch. The step
-    // carries two prep lists, so this is the first list's add bar — the one that
-    // runs before filling.
-    const steps = () => setup.locator('.cf-step-body .cf-row');
-    const before = await steps().count();
-    await setup.getByRole('button', { name: '+ Delay' }).first().click();
-    await expect(steps()).toHaveCount(before + 1);
-
-    // Still on step 2. Before the step lived on the instance this would have
-    // been step 1, and every Pick would have thrown the user back to the start.
-    await expect(setup.locator('.cf-step-count')).toHaveText('Step 2 of 6');
-  } finally {
-    await page.close();
-  }
-});
-
-/**
- * The Send row must say which selector actually found the button.
- *
- * `findSubmitControl` falls through to the label heuristic when a saved
- * `submitSelector` stops resolving — a site changing its markup under a
- * selector the user picked months ago is the ordinary way there. The row used
- * to key its note off whether a selector was *saved* rather than whether it was
- * *used*, so it read `saved · button.gone` — naming a selector that had matched
- * nothing and crediting it with a button the guessing had found. Nothing in the
- * panel then said the save had stopped applying.
- *
- * Only a real browser can see it: the note is built in `refreshSetup` against a
- * live document, and it takes a page whose heuristic genuinely finds a Send
- * button for the fall-through to have anything to fall through to.
- */
-test('Setup: a saved Send selector that stopped matching says so, and credits the guess', async () => {
-  const setSubmitSelector = (selector: string | null) =>
-    onExtensionPage((opts) => opts.evaluate(async (sel) => {
-      const { siteConfigs } = await chrome.storage.local.get('siteConfigs');
-      const half = (c: Record<string, any>) => ('desktop' in c || 'mobile' in c) ? (c.desktop ??= { extract: {} }) : c;
-      for (const c of siteConfigs) {
-        if (c.id !== 'quick-board') continue;
-        if (sel) half(c).submitSelector = sel;
-        else delete half(c).submitSelector;
-      }
-      await chrome.storage.local.set({ siteConfigs });
-    }, selector));
-
-  const page = await context.newPage();
-  try {
-    await setSubmitSelector('#a-button-this-page-does-not-have');
-    await page.setViewportSize({ width: 390, height: 780 });
-    await page.goto(urlFor('quick-plain'));
-    await expect(page.locator('.cf-card[data-sheet="review"]')).toBeVisible({ timeout: 20_000 });
-
-    await openSetupPanel(page);
-    const setup = page.locator('.cf-card[data-sheet="setup"]');
-    await expect(setup).toBeVisible({ timeout: 20_000 });
-
-    // Step 6 — "Sending" — whatever the panel opened on.
-    await setup.locator('.cf-rail-node').nth(5).click();
-    await expect(setup.locator('.cf-step-count')).toHaveText('Step 6 of 6');
-
-    // By its Pick button's key, not by its position: `send:submitSelector` is
-    // what the row *is*, and the step carries two rows of the same shape.
-    const row = setup.locator('.cf-row', { has: page.locator('[data-k="send:submitSelector"]') });
-    const note = row.locator('.cf-field small');
-
-    await expect(note).toContainText('saved selector · no match');
-    // The heuristic found the real button, and the row credits it rather than
-    // the selector that missed.
-    await expect(note).toContainText('auto ·');
-    expect(await note.textContent()).not.toMatch(/^saved · /);
-    // Yellow, as it already was — found, but not settled.
-    await expect(row.locator('.cf-dot')).toHaveClass(/warn/);
-  } finally {
-    await setSubmitSelector(null);
-    await page.close();
-  }
-});
-
-/**
- * Drive the click-to-pick toolbar the way a person does now: a click *selects*
- * and Confirm saves, and because the run of elements at a point starts on the box
- * around the thing, reaching the element itself means stepping inward until the
- * toolbar names it. Reads the toolbar's own readout rather than counting presses,
- * so a fixture growing a wrapper does not silently pick the wrapper.
- */
-async function pickOnPage(page: Page, target: Locator): Promise<void> {
-  const bar = page.locator('[data-cf-picker="bar"]');
-  const readout = page.locator('[data-cf-picker="readout"]');
-  await expect(bar).toBeVisible({ timeout: 10_000 });
-
-  const want = await target.evaluate((el) =>
-    (el.id ? `${el.tagName.toLowerCase()}#${el.id}` : el.tagName.toLowerCase()));
-  await target.click();
-  for (let i = 0; i < 6; i += 1) {
-    if (((await readout.textContent()) ?? '').trim() === want) break;
-    await bar.getByRole('button', { name: 'Deeper', exact: true }).click();
-  }
-  await expect(readout).toHaveText(want);
-  await bar.getByRole('button', { name: 'Confirm', exact: true }).click();
-  await expect(bar).toHaveCount(0);
-}
-
-/**
- * The rest of "an edit does not start fresh", and the half only a real browser
- * can see: jsdom does no layout, so `scrollTop` there never leaves 0.
- *
- * Two things destroy it and both happen on one Pick. `paint` replaces the whole
- * `.cf-card`, and the picker sets the host to `display: none` to keep itself
- * from picking the panel — which throws the layout box away with the scroll
- * offset in it. So picking the last of a dozen field rows used to land you back
- * at the first one, every single time, on the step where the list is longest.
- */
-test('Setup: picking a field leaves you where you were in the list', async () => {
-  const page = await context.newPage();
-  try {
-    await page.setViewportSize({ width: 390, height: 780 });
-    await page.goto(urlFor('quick-plain'));
-    await expect(page.locator('.cf-card[data-sheet="review"]')).toBeVisible({ timeout: 20_000 });
-
-    await openSetupPanel(page);
-    const setup = page.locator('.cf-card[data-sheet="setup"]');
-    await expect(setup).toBeVisible({ timeout: 20_000 });
-
-    // "Form fields" — the long step, and the reason this matters at all.
-    await setup.locator('.cf-rail-node').nth(4).click();
-    await expect(setup.locator('.cf-step-count')).toHaveText('Step 5 of 6');
-
-    const body = setup.locator('.cf-body');
-    await body.evaluate((el) => { el.scrollTop = el.scrollHeight; });
-    const before = await body.evaluate((el) => el.scrollTop);
-    // A step with nothing to scroll would pass this test without testing it.
-    expect(before).toBeGreaterThan(0);
-
-    // A real edit through the picker: the panel hides, the page is clicked, the
-    // selector is saved, and the panel comes back rebuilt from storage.
-    const lastPick = setup.locator('.cf-step-body .cf-row [data-k^="field:"]').last();
-    await lastPick.click();
-    await pickOnPage(page, page.locator('input').first());
-    await expect(setup).toBeVisible();
-    await expect(setup.locator('.cf-step-count')).toHaveText('Step 5 of 6');
-
-    // Same place in the list. Allow a row of slack: the picked row gains a
-    // "Clear" button, which can change the content height slightly.
-    const after = await body.evaluate((el) => el.scrollTop);
-    expect(Math.abs(after - before)).toBeLessThan(60);
-  } finally {
-    await page.close();
-  }
-});
-
-/**
- * The picker's toolbar has to name the field the way the row that launched it
- * does. The review modal's Pick passed the bare `FieldKey`, so the one surface
- * the user is looking at while they aim at an input read `Click the
- * "coverLetter" field` — the storage key, in the only place in the extension
- * that ever spelled a field that way. The setup panel's Pick has always used
- * `FIELD_LABELS`; the two are the same gesture and must read the same.
- *
- * Asserted against the row's own label rather than a literal, so renaming a
- * field in `FIELD_LABELS` cannot make this pass while the two disagree.
- */
-test('Modal: the picker names the field the way the report row does', async () => {
+test('Modal: pointing at a field selects, steps in, and opens its chooser', async () => {
   const page = await context.newPage();
   try {
     await page.goto(urlFor('quick-plain'));
-    const card = page.locator('.cf-card[data-sheet="review"]');
-    await expect(card).toBeVisible({ timeout: 20_000 });
-
-    // The report lives behind the Fields tab; Job is the default.
-    await card.locator('.cf-view').nth(1).click();
-    const row = card.locator('.cf-report .cf-row').first();
-    const label = (await row.locator('.cf-field b').textContent())!.trim();
-    // A key would be one lower-case word; every real label is capitalised.
-    expect(label).toMatch(/^[A-ZÉ]/);
-
-    await row.getByRole('button', { name: 'Pick', exact: true }).click();
-
-    // The toolbar is drawn on the host page's own light DOM, not in the sheet.
-    const bar = page.locator('[data-cf-picker="bar"]');
-    await expect(bar).toBeVisible();
-    await expect(bar).toContainText(`"${label}"`);
-
-    await bar.getByRole('button', { name: 'Cancel' }).click();
-  } finally {
-    await page.close();
-  }
-});
-
-/**
- * The two halves of what a pick is now, and neither is visible to jsdom.
- *
- * A click used to commit outright on a mouse, so a stray press wrote a selector
- * into the site config with nothing in between. And it could only ever offer one
- * element per point — `elementFromPoint` hands back a single node, and on a real
- * board the thing the user means is the box around it. So a point gives a run of
- * elements, outermost first, and clicking the same spot again steps inward.
- *
- * `#email` sits directly in `#application-form` on this fixture, so the run is
- * exactly two long: the form, then the input. That is the shape being asserted —
- * the first click naming something that is *not* what was clicked.
- */
-test('Modal: a click selects, clicking again goes one level in, and Confirm saves', async () => {
-  const page = await context.newPage();
-  try {
-    await page.goto(urlFor('quick-plain'));
-    const card = page.locator('.cf-card[data-sheet="review"]');
-    await expect(card).toBeVisible({ timeout: 20_000 });
-
-    await card.locator('.cf-view').nth(1).click();
-    await card.locator('.cf-report .cf-row').first()
-      .getByRole('button', { name: 'Pick', exact: true }).click();
+    await openCard(page);
+    await page.locator('.cf-more button').first().click();
+    await page.getByRole('button', { name: 'Point at a field' }).click();
 
     const bar = page.locator('[data-cf-picker="bar"]');
     const readout = page.locator('[data-cf-picker="readout"]');
     await expect(bar).toBeVisible();
+    await expect(bar).toContainText('field to teach');
 
-    // One click on the page commits nothing: the toolbar is still up, waiting.
     await page.click('#email');
     await expect(bar).toBeVisible();
-    // And what it proposes is the form around the input, not the input.
     await expect(readout).toHaveText('form#application-form');
-    await expect(bar).toContainText('1 / 2');
-
-    // The same spot again steps in. This is the whole feature: the element under
-    // the pointer is reachable, and so is every box around it.
     await page.click('#email');
     await expect(readout).toHaveText('input#email');
-    await expect(bar).toContainText('2 / 2');
-
-    // Back out again, so the run is walkable in both directions.
-    await bar.getByRole('button', { name: 'Wider', exact: true }).click();
-    await expect(readout).toHaveText('form#application-form');
 
     await bar.getByRole('button', { name: 'Confirm', exact: true }).click();
     await expect(bar).toHaveCount(0);
-  } finally {
-    await page.close();
-  }
-});
-
-test('Sheets: the setup panel is a bottom sheet on a phone, like the modal', async () => {
-  // The regression that hid in the cascade: `setupPanel.css` is inlined after
-  // `primitives.css` at equal specificity, so its own `.cf-card { top; width }`
-  // beat the narrow media query and the panel came out a 400px column hanging
-  // off the top of a 390px screen. No DOM assertion could see it — jsdom does not
-  // evaluate media queries — so it has to be measured in a real browser.
-  const page = await context.newPage();
-  try {
-    await page.setViewportSize({ width: 390, height: 780 });
-    await page.goto(urlFor('quick-plain'));
-    await expect(page.locator('.cf-card[data-sheet="review"]')).toBeVisible({ timeout: 20_000 });
-
-    await openSetupPanel(page);
-    const setup = page.locator('.cf-card[data-sheet="setup"]');
-    await expect(setup).toBeVisible({ timeout: 20_000 });
-
-    const box = (await setup.boundingBox())!;
-    expect(box.width, 'full width').toBeCloseTo(390, 0);
-    expect(box.x, 'flush left').toBeCloseTo(0, 0);
-    expect(box.y + box.height, 'anchored to the bottom, not hanging from the top').toBeCloseTo(780, 0);
+    await expect(page.locator('.cf-teach select')).toHaveValue('email');
   } finally {
     await page.close();
   }
@@ -2036,7 +1006,7 @@ test('Modal: the two view segments are the same width, at one tap size', async (
   try {
     await page.setViewportSize({ width: 1280, height: 900 });
     await page.goto(urlFor('quick-plain'));
-    await expect(page.locator('.cf-card')).toBeVisible({ timeout: 20_000 });
+    await openCard(page);
 
     const views = page.locator('.cf-view');
     const job = (await views.nth(0).boundingBox())!;
@@ -2053,50 +1023,6 @@ test('Modal: the two view segments are the same width, at one tap size', async (
     await page.close();
   }
 });
-
-test("Setup: the verdict's dot lines up with the rows it argues about", async () => {
-  // The `kind` step is a verdict banner and, directly beneath it, the rows that
-  // verdict is drawn from — the same 14px dot against the same two-line block.
-  // `.cf-flow-head` centres the dot on the *title's* row, which is right in the
-  // modal (the `?` on that line changes height with the pointer) and wrong here,
-  // where there is no `?` and the mark sat ~10px above every other one in the
-  // section. Only a browser can see it: jsdom lays nothing out.
-  const page = await context.newPage();
-  try {
-    await page.setViewportSize({ width: 390, height: 780 });
-    await page.goto(urlFor('quick-plain'));
-    await expect(page.locator('.cf-card[data-sheet="review"]')).toBeVisible({ timeout: 20_000 });
-
-    await openSetupPanel(page);
-    const setup = page.locator('.cf-card[data-sheet="setup"]');
-    await expect(setup).toBeVisible({ timeout: 20_000 });
-
-    // "Application type" — step 3 of 6, the one step that states a conclusion.
-    await setup.locator('.cf-rail-node').nth(2).click();
-    await expect(setup.locator('.cf-step-count')).toHaveText('Step 3 of 6');
-
-    const banner = setup.locator('.cf-verdict');
-    await expect(banner).toBeVisible();
-    const head = (await banner.locator('.cf-flow-head').boundingBox())!;
-    const dot = (await banner.locator('.cf-dot').boundingBox())!;
-    expect(dot.y + dot.height / 2, 'the dot centres on the whole banner').toBeCloseTo(
-      head.y + head.height / 2,
-      0,
-    );
-  } finally {
-    await page.close();
-  }
-});
-
-/* ==================================================================
- * Surfaces that had no coverage at all.
- *
- * The Sync tab's network half is proved against a fake Google in
- * `src/background/*.test.ts`; what belongs here is everything reachable
- * *without* Google — which is the whole of the setup the user has to get right
- * before Connect will work, and the backup file that exists for people who
- * would rather not connect anything.
- * ================================================================== */
 
 /** Press an anchor-download button and read the blob instead of writing a file. */
 async function downloadedText(page: Page, buttonId: string): Promise<string> {
@@ -2406,1042 +1332,47 @@ test('Options: the profile saves, and only the fields it owns', async () => {
   }));
 });
 
-test('Options: a broken site config is named and refused, not saved', async () => {
+test('Options: a field of your own is added, answered, and worded', async () => {
   await onExtensionPage(async (page) => {
-    await page.click('#tab-sites');
-    const before = await page.evaluate(async () =>
-      (await chrome.storage.local.get('siteConfigs')).siteConfigs.length);
+    await page.click('#tab-profile');
+    const before = await page.locator('.custom-card').count();
+    await page.click('#custom-add');
+    const card = page.locator('.custom-card').nth(before);
+    await card.locator('.custom-name').fill('Notice period');
+    await card.locator('.custom-name').press('Tab');
+    await card.locator('.custom-value').fill('1 month');
+    await card.locator('.custom-value').press('Tab');
+    await card.locator('.chipedit-input').fill('availability');
+    await card.locator('.chipedit-input').press('Enter');
+    await expect(card.locator('.chipedit-chip')).toHaveText(['availability×']);
 
-    await page.fill('#configs-json', '[{ "urlPatterns": ["*://x/*"], "extract": {} }]');
-    await page.click('#save-configs');
-    // A config with no id cannot be matched, saved against, or explained.
-    await expect(page.locator('#configs-status')).toContainText('id');
+    const stored = await page.evaluate(async () => (await chrome.storage.local.get('profile')).profile.customFields);
+    const field = stored.find((f: { label: string }) => f.label === 'Notice period');
+    expect(field).toMatchObject({ value: '1 month', keywords: ['availability'] });
 
-    await page.fill('#configs-json', 'not json');
-    await page.click('#save-configs');
-    await expect(page.locator('#configs-status')).not.toHaveText('Saved');
-
-    const after = await page.evaluate(async () =>
-      (await chrome.storage.local.get('siteConfigs')).siteConfigs.length);
-    expect(after).toBe(before);
+    // Put it back.
+    await page.evaluate(async (count) => {
+      const { profile } = await chrome.storage.local.get('profile');
+      profile.customFields = profile.customFields.slice(0, count);
+      await chrome.storage.local.set({ profile });
+    }, before);
   });
 });
 
-/**
- * Every site keeps a desktop and a mobile setup, and neither stands in for the
- * other. Driven through a real mobile user agent rather than a narrow viewport,
- * because the UA is what decides the half (`shared/formFactor.ts`) — and it is
- * also what decides the page a real board sends.
- */
-test('Mobile: a site set up on desktop reads as not set up on a phone', async () => {
-  // The fixtures are seeded flat, the shape from before the split, and a flat
-  // config is read as the half of whichever device reads it. Store them as the
-  // desktop halves they are — what the service worker's update migration does on
-  // a desktop install.
-  await onExtensionPage((ext) => ext.evaluate(async () => {
-    const { siteConfigs } = await chrome.storage.local.get('siteConfigs');
-    await chrome.storage.local.set({
-      siteConfigs: siteConfigs.map((c: Record<string, unknown>) => {
-        if ('desktop' in c || 'mobile' in c) return c;
-        const { id, name, urlPatterns, autoDetect, ...desktop } = c;
-        return { id, name, urlPatterns, autoDetect, desktop };
-      }),
-    });
-  }));
-
-  const page = await context.newPage();
-  try {
-    const cdp = await context.newCDPSession(page);
-    await cdp.send('Emulation.setUserAgentOverride', {
-      userAgent: 'Mozilla/5.0 (Linux; Android 14; Pixel 8) AppleWebKit/537.36 '
-        + '(KHTML, like Gecko) Chrome/129.0 Mobile Safari/537.36',
-      userAgentMetadata: {
-        mobile: true, platform: 'Android', platformVersion: '14',
-        architecture: '', model: 'Pixel 8', brands: [],
-      },
-    });
-    await page.goto(urlFor('quick-plain'));
-    await expect(page.locator('.cf-card')).toBeVisible({ timeout: 20_000 });
-
-    await page.locator('.cf-more button').first().click();
-    await page.getByRole('button', { name: 'Site setup', exact: true }).click();
-    const setup = page.locator('.cf-card[data-sheet="setup"]');
-    await expect(setup).toBeVisible({ timeout: 20_000 });
-    await expect(setup.locator('.cf-step-count').first()).toHaveText('Mobile setup');
-    await expect(setup.locator('.cf-step-title')).toHaveText('Teach the extension this site');
-
-    // And the desktop half is exactly as it was.
-    expect((await configFor(urlFor('quick-plain')))?.successSelector).toBe('#quick-success');
-  } finally {
-    await page.close();
-  }
+test('Options: what it has learned is listed by field, and can be forgotten', async () => {
+  await setLessons([{
+    id: 'l1', signature: { question: 'given name', kind: 'text' }, target: { field: 'firstName' },
+    label: 'Given name', taughtOn: 'jobs.example', createdAt: Date.now(), hits: 3,
+  }]);
+  await onExtensionPage(async (page) => {
+    await page.click('#tab-profile');
+    const group = page.locator('.learned-group', { hasText: 'First name' });
+    await expect(group.locator('.learned-q')).toHaveText('“Given name”');
+    await expect(group).toContainText('used 3 times');
+    await group.getByRole('button', { name: /Forget/ }).click();
+    await expect(page.locator('.learned-group')).toHaveCount(0);
+    await expect(page.locator('#learned-empty')).toBeVisible();
+  });
+  expect(await readLessons()).toEqual([]);
 });
 
-/* ---------------- Recording a site by applying to one job ---------------- */
-
-/**
- * Read the site config that matches a URL — what a recording is judged by. The whole
- * point of the feature is the config that comes out, so these assert that and not
- * what the panel looked like on the way.
- */
-async function configFor(url: string): Promise<Record<string, unknown> | undefined> {
-  return onExtensionPage((ext) => ext.evaluate(async (u) => {
-    const { siteConfigs = [] } = await chrome.storage.local.get('siteConfigs');
-    const glob = (p: string) => new RegExp(`^${p.replace(/[.+?^${}()|[\]\\]/g, '\\$&')
-      .replace(/\*/g, '.*')}$`).test(u);
-    const c = siteConfigs.find((c: { urlPatterns: string[] }) => c.urlPatterns.some(glob));
-    // Flattened to this browser's (desktop) half, which is what a recording here wrote.
-    return c && ('desktop' in c || 'mobile' in c) ? { ...c, ...(c.desktop ?? {}) } : c;
-  }, url));
-}
-
-/** Forget every config, so a recording is judged on what it wrote and nothing else. */
-async function clearConfigs(): Promise<void> {
-  await onExtensionPage((ext) => ext.evaluate(async () => {
-    await chrome.storage.local.set({ siteConfigs: [] });
-  }));
-}
-
-const bar = (page: Page) => page.locator('[data-cf-recorder="host"] .cf-bar');
-
-/**
- * The chips naming each mark on the page. They are `aria-hidden` — the panel's rows
- * are the accessible surface and these are the sighted shortcut to them — so they are
- * found by attribute and text rather than by role.
- */
-const mark = (page: Page, name: string) =>
-  page.locator('[data-cf-tag]').filter({ hasText: new RegExp(`^${name}`) });
-
-/**
- * Arm one page action. The page is inert while a recording runs, so *every* gesture
- * in these specs has to be paid for first — which is the feature, and what makes an
- * unarmed click below a real assertion rather than a formality.
- */
-async function interact(page: Page): Promise<void> {
-  await bar(page).getByRole('button', { name: 'Interact', exact: true }).click();
-}
-
-/** Arm, then press something on the page. */
-async function press(page: Page, selector: string): Promise<void> {
-  await interact(page);
-  await page.click(selector);
-}
-
-/**
- * Arm, click into a field, type, and tab out. `fill()` cannot be used here: it sets
- * the value without a click, so the arm is never spent on the control and the page
- * never goes live for it — which is exactly the protection being tested.
- */
-async function type(page: Page, selector: string, value: string): Promise<void> {
-  await interact(page);
-  await page.click(selector);
-  await page.keyboard.type(value);
-  await page.keyboard.press('Tab');
-}
-
-/** Say what something on the page is, then point at it. */
-async function declare(page: Page, item: string): Promise<void> {
-  await bar(page).getByRole('button', { name: 'Declare', exact: true }).click();
-  await bar(page).getByRole('menuitem', { name: item, exact: true }).click();
-}
-
-/** How many steps the bar says it is holding. */
-async function stepCount(page: Page): Promise<string> {
-  return (await bar(page).locator('.cf-rec-count').textContent()) ?? '';
-}
-
-/** The escape hatch behind a held send: "that was not the Send button, press it". */
-async function forceSend(page: Page): Promise<void> {
-  await bar(page).getByRole('button', { name: 'Not the Send button — press it' }).click();
-}
-
-/**
- * Press something the hold will refuse, refuse the refusal, and press it again.
- *
- * The shape of every "Apply now" that *opens* a form rather than sending one:
- * `looksLikeSend` matches the label and the control is a real button, so the first
- * pass holds it, and the user is the only one who can say it was not the Send button.
- */
-async function pressThroughHold(page: Page, selector: string): Promise<void> {
-  await press(page, selector);
-  await forceSend(page);
-  await page.click(selector);
-}
-
-/** Throw the recording away: press Reset, then answer the warning behind it. */
-async function startOver(page: Page): Promise<void> {
-  await bar(page).getByRole('button', { name: 'Reset', exact: true }).click();
-  await bar(page).getByRole('button', { name: 'Start over', exact: true }).click();
-}
-
-test('Recording: one application on this site becomes the whole config', async () => {
-  await clearConfigs();
-  const page = await context.newPage();
-  try {
-    await page.setViewportSize({ width: 1280, height: 900 });
-    await page.goto(urlFor('record-internal'));
-    await openSetupPanel(page, { home: true });
-
-    const setup = page.locator('.cf-card[data-sheet="setup"]');
-    await expect(setup).toBeVisible({ timeout: 20_000 });
-
-    // Site setup opens on the two passes, not on the wizard — and on a site nobody
-    // has taught anything the only way off this screen is to record. There is no
-    // footer at all: the six-step form is where a recording is *corrected*, so it is
-    // not on offer until one has produced something, and "Done" would close the panel
-    // having taught the extension nothing. The header × still minimizes, which is the
-    // way to get the card out of the way.
-    await expect(setup.locator('.cf-rail')).toHaveCount(0);
-    await expect(setup.locator('.cf-pass')).toHaveCount(2);
-    await expect(setup.locator('.cf-footer')).toHaveCount(0);
-    // The second pass has no control at all yet: there is nothing to confirm the
-    // landing of until the site can fill and send.
-    await expect(setup.locator('.cf-pass').nth(1).locator('.cf-btn')).toHaveCount(0);
-    // And it says what it can already read, so "teach me this site" is a concrete ask
-    // rather than a blank one. `not on this page` and never "unmatched": detection
-    // returns a row per *wanted* field, so most of the sixteen are grey on any form.
-    await expect(setup.locator('.cf-detected .cf-summary')).toContainText('not on this page');
-    await expect(setup.locator('.cf-detected .cf-summary')).not.toContainText('unmatched');
-    await expect(setup.locator('.cf-detected-chips .chip').filter({ hasText: 'Email' }))
-      .toBeVisible();
-
-    // One button, and it does not ask where the application happens: that is worked
-    // out from what really happens, and the classifier on the page supplies the hint.
-    await setup.getByRole('button', { name: RECORD_PASS_TEXT.beforeSend.action }).click();
-    await expect(bar(page)).toBeVisible({ timeout: 10_000 });
-
-    // The page is marked up by name for the whole recording. The panel is a pill by
-    // now, so this is the only thing on screen saying which control is which — and a
-    // coloured outline alone never could.
-    await expect(mark(page, 'Email')).toBeVisible();
-    const chip = (await mark(page, 'Email').boundingBox())!;
-    const field = (await page.locator('#email').boundingBox())!;
-    // Above the control and aligned to its right-hand edge. Right, because the gap
-    // above a form control is where the form's own <label> lives — a chip pinned
-    // above-left sits on top of the very words it is echoing, on every field of
-    // every form. Labels are short and controls are wide, so the right end is free.
-    expect(chip.y + chip.height).toBeLessThanOrEqual(field.y + 1);
-    expect(Math.abs((chip.x + chip.width) - (field.x + field.width))).toBeLessThan(4);
-
-    // The page is held still until something is armed. Reading a posting means
-    // pressing things, and `prep` replays on every later visit — so a press nobody
-    // asked to record must leave nothing behind and do nothing.
-    const before = await stepCount(page);
-    await page.click('#first_name');
-    await page.click('#submit');
-    await expect(page.locator('#quick-success')).toBeHidden();
-    expect(await stepCount(page)).toBe(before);
-
-    // Apply the way a person would, saying so each time.
-    await type(page, '#email', 'ada@example.com');
-    await type(page, '#first_name', 'Ada');
-
-    /*
-     * The seam. Pressing Send is how anyone would finish an application, and the
-     * first pass will not let it: the only moment that button can be pointed at is
-     * before it is pressed, and pressing it is what ends the page it lives on. So the
-     * press is held and the control is marked instead.
-     *
-     * The assertion that matters is the *negative* one — no application went in.
-     */
-    await press(page, '#submit');
-    await expect(page.locator('#quick-success')).toBeHidden();
-    await expect(bar(page).locator('.cf-rec-notice')).toContainText('Send button');
-
-    await bar(page).getByRole('button', { name: 'Done' }).click();
-    await expect(setup.getByText('Check what was recorded')).toBeVisible({ timeout: 10_000 });
-    await setup.getByRole('button', { name: 'Save setup' }).click();
-
-    // Save reports, it does not become the wizard. This used to drop the user four
-    // steps into the manual surface with nothing saying the recording had worked.
-    await expect(setup.getByText('Site setup saved')).toBeVisible({ timeout: 10_000 });
-    await expect(setup.locator('.cf-rail')).toHaveCount(0);
-    await expect(setup.getByRole('button', { name: 'Review configuration' })).toBeVisible();
-    // And the two passes say where the site has got to: the first is in, the second
-    // is what is left — and the coral has moved onto it, which is the whole argument
-    // of the screen. Nothing else here says the second pass exists.
-    const passes = setup.locator('.cf-pass');
-    await expect(passes.first().locator('.cf-dot.ok')).toBeVisible();
-    await expect(passes.nth(1).locator('.cf-dot.none')).toBeVisible();
-    const markBtn = setup.getByRole('button', { name: 'Mark the confirmation' });
-    await expect(markBtn).toBeVisible();
-    await expect(markBtn).toHaveClass(/primary/);
-    await expect(setup.locator('.cf-btn.primary')).toHaveCount(1);
-
-    const config = await configFor(urlFor('record-internal'));
-    // The Send button, which the wizard buried at the end of a queue of twenty-five
-    // and which almost nobody ever set — captured here by the press that would have
-    // used it.
-    expect(config?.submitSelector).toBeTruthy();
-    expect(config?.fieldOverrides).toMatchObject({ email: expect.any(String) });
-    // And *not* the confirmation: it does not exist until an application has really
-    // gone in, which is the whole reason there is a second pass.
-    expect(config?.successSelector).toBeFalsy();
-
-    // The rule the whole compiler is built around: `prep` runs automatically on every
-    // later visit, so the click that sent this application must not be in it.
-    const prep = JSON.stringify(config?.prep ?? []);
-    expect(prep).not.toContain(config?.submitSelector as string);
-    expect(prep).not.toContain('#submit');
-
-    // …and Done is the way out of the panel, not a way further into it.
-    await setup.getByRole('button', { name: 'Done' }).click();
-    await expect(page.locator('.cf-card[data-sheet="setup"]')).toHaveCount(0);
-
-    // Done destroys the panel, so Site setup has to be able to build a new one — the
-    // sequence this screen created and the one nothing else covers. It opens on home
-    // again, configured or not: the wizard is behind the footer's one deliberate
-    // press, and never where anyone lands.
-    await openSetupPanel(page, { home: true });
-    await expect(page.locator('.cf-card[data-sheet="setup"]')).toBeVisible({ timeout: 20_000 });
-    await expect(page.locator('.cf-rail')).toHaveCount(0);
-    await expect(page.locator('.cf-pass')).toHaveCount(2);
-    await enterWizard(page);
-
-    // And the wizard is left the way it was entered. The footer's Back walks steps
-    // and is dead on the first of them; Done only replaces Next on the last — so
-    // without the header's own way back, `Review configuration` was a one-way door
-    // and getting out meant five taps of Next or minimizing to a pill.
-    await setup.getByRole('button', { name: 'Back to Site setup' }).click();
-    await expect(setup.locator('.cf-rail')).toHaveCount(0);
-    await expect(setup.locator('.cf-pass')).toHaveCount(2);
-  } finally {
-    await page.close();
-  }
-});
-
-test('Recording: a handoff is saved as two configs, one per site', async () => {
-  await clearConfigs();
-  const page = await context.newPage();
-  try {
-    await page.setViewportSize({ width: 1280, height: 900 });
-    await page.goto(urlFor('record-external'));
-    await openSetupPanel(page, { home: true });
-
-    const setup = page.locator('.cf-card[data-sheet="setup"]');
-    await expect(setup).toBeVisible({ timeout: 20_000 });
-    await setup.getByRole('button', { name: RECORD_PASS_TEXT.beforeSend.action }).click();
-    await expect(bar(page)).toBeVisible({ timeout: 10_000 });
-
-    // The board's own courtesy first, then the handoff the user performs themselves —
-    // `run()` stands down while recording, so nothing follows this on our behalf.
-    await press(page, '#save-job');
-    await press(page, '#apply-external');
-    await page.waitForURL(/ats-form/, { timeout: 15_000 });
-
-    // The recording survived the navigation to another origin, where the content
-    // script is a brand-new one that has never heard of the posting.
-    await expect(bar(page)).toBeVisible({ timeout: 15_000 });
-
-    // And the employer's form is marked up too — the leg that used to have nothing at
-    // all, because nothing here had ever run detection. It is also the leg with no
-    // site config: `findMatchingConfig` finds none on this origin and
-    // `ensureConfigForUrl` deliberately does not run until Save, so the sweep has to
-    // mean "the heuristics, and nothing saved" rather than throw.
-    await expect(mark(page, 'Email')).toBeVisible({ timeout: 10_000 });
-
-    await type(page, '#ats-email', 'ada@example.com');
-    // Held here too. The employer's leg is where the application really goes, so it
-    // is the leg where letting the press through would send one during setup.
-    await press(page, '#ats-submit');
-    await expect(page.locator('#ats-success')).toBeHidden();
-
-    await bar(page).getByRole('button', { name: 'Done' }).click();
-    const atsSetup = page.locator('.cf-card[data-sheet="setup"]');
-    await expect(atsSetup.getByText('Check what was recorded')).toBeVisible({ timeout: 10_000 });
-    await atsSetup.getByRole('button', { name: 'Save setup' }).click();
-
-    // The board learns how to leave; the employer learns how to be filled and sent.
-    const board = await configFor(urlFor('record-external'));
-    expect((board?.redirect as { applySelector?: string })?.applySelector).toBeTruthy();
-    expect(board?.submitSelector).toBeFalsy();
-
-    const employer = await configFor(ATS_URL);
-    expect(employer?.submitSelector).toBeTruthy();
-    expect(employer?.fieldOverrides).toMatchObject({ email: expect.any(String) });
-    // The confirmation belongs to the second pass on this leg as much as on any
-    // other — rule 10 puts both marks on the leg that sends, and only one of them
-    // can be made before it does.
-    expect(employer?.successSelector).toBeFalsy();
-  } finally {
-    await page.close();
-  }
-});
-
-/**
- * The hold has to be refusable, and this is why.
- *
- * `looksLikeSend` matches "apply", and on most boards the button that *opens* the
- * application form says exactly that — ModalLever's does. Held with no way past it,
- * the first pass could not be run on those sites at all: the form never opens, so
- * there is nothing to record.
- */
-test('Recording: a held press that was not the Send button can be pressed anyway', async () => {
-  await clearConfigs();
-  const page = await context.newPage();
-  try {
-    await beginRecording(page, 'record-apply-lever');
-
-    // "Apply for this role" opens the modal. It reads like a send, so it is held.
-    await press(page, '#apply-btn');
-    await expect(page.locator('#modal-form')).toBeHidden();
-
-    // One press to say so, and the same button now works. The mark the hold made is
-    // dropped with it — keeping it would put the control that opens the form into
-    // `submitSelector`, which is the wrong button in the one slot that must be right.
-    await forceSend(page);
-    await page.click('#apply-btn');
-    await expect(page.locator('#modal-form')).toBeVisible({ timeout: 10_000 });
-
-    // Once. The user said that one control was not the Send button, which is not a
-    // standing permission to submit — the real one is held like any other.
-    await press(page, '#lever-submit');
-    await expect(page.locator('#lever-success')).toBeHidden();
-
-    const setup = page.locator('.cf-card[data-sheet="setup"]');
-    await bar(page).getByRole('button', { name: 'Done' }).click();
-    await expect(setup.getByText('Check what was recorded')).toBeVisible({ timeout: 10_000 });
-    await setup.getByRole('button', { name: 'Save setup' }).click();
-
-    const config = await configFor(urlFor('record-apply-lever'));
-    expect(config?.submitSelector).toContain('lever-submit');
-    // The button that opened the form is a step to replay, not the button that sends.
-    expect(JSON.stringify(config?.prep ?? [])).toContain('apply-btn');
-
-    /*
-     * And Save hands the user on, rather than stopping at the panel.
-     *
-     * A first pass ends with the site able to fill and knowing what sends it, and
-     * exactly one thing outstanding: the message it shows once an application has
-     * really gone in, which does not exist until one has. The panel said so and
-     * offered "Mark the confirmation" — a control that waits over a page where
-     * nothing has been sent and nothing is going to be. So the card that *can* do
-     * something about it is put in front of the user, filled, with the question and
-     * both of its answers on it.
-     *
-     * Asserted on this site rather than on QuickBoard because the offer is withheld
-     * wherever the classifier reads a handoff, and QuickBoard's decoy sidebar link
-     * makes it one as soon as `clearConfigs` takes its quick-apply marker away.
-     */
-    const review = page.locator('.cf-card[data-sheet="review"]');
-    await expect(review).toBeVisible({ timeout: 20_000 });
-    await expect(review.locator('.cf-flow.accent')).toContainText('Site setup saved');
-    await expect(review.getByRole('button', { name: ACTION_LABELS.applyFinishSetup }))
-      .toBeVisible();
-    // The other answer, and it has to be *visible*: a user who would rather press the
-    // site's own button has no way to learn that doing so finishes the setup too if
-    // that route is behind the overflow.
-    await expect(review.getByRole('button', { name: ACTION_LABELS.sendItMyself }))
-      .toBeVisible();
-    // Two buttons and the `⋯`, as on every other branch — Skip is what moved.
-    await expect(review.locator('.cf-footer-actions > .cf-btn')).toHaveCount(2);
-    // Filled, too: a recording leaves the page with only the fields the user
-    // declared in it, and the question above is about the application that would go.
-    await expect(page.locator('#modal-form input[aria-label="Full name"]'))
-      .toHaveValue('Ada Lovelace');
-
-    // And the panel is one press away, holding the same report.
-    await openSetupPanel(page, { home: true });
-    await expect(page.locator('.cf-card[data-sheet="setup"]').getByText('Site setup saved'))
-      .toBeVisible({ timeout: 10_000 });
-  } finally {
-    await page.close();
-  }
-});
-
-/**
- * The second pass, from the end the user actually reaches it: Apply.
- *
- * This is the half that was unreachable. Apply refused to send without a confirmation
- * element and the element does not exist until an application has been sent, so
- * `successSelector` went unset on nearly every site — and a greyed Apply with no way
- * forward is what that looked like. Here Apply sends, because it was pressed, and
- * then asks where the site's answer is.
- */
-test('Apply finishes the setup on a site that has never been applied to', async () => {
-  const page = await context.newPage();
-  try {
-    await page.setViewportSize({ width: 1280, height: 900 });
-    // The first pass has already run: this posting's config knows how to fill and
-    // which button sends, and knows nothing about the reply.
-    await rewindToBeforeSend(urlFor('record-internal'), '#submit');
-    await page.goto(urlFor('record-internal'));
-    expect((await configFor(urlFor('record-internal')))?.successSelector).toBeFalsy();
-
-    const modal = page.locator('.cf-card[data-sheet="review"]');
-    await expect(modal).toBeVisible({ timeout: 20_000 });
-
-    // Live, and saying what else the press is about to start. It was greyed here.
-    const apply = modal.getByRole('button', { name: 'Apply · finish setup' });
-    await expect(apply).toBeVisible();
-    await expect(apply).not.toHaveAttribute('aria-disabled', 'true');
-    await expect(modal.locator('.cf-flow.accent')).toContainText('point at');
-
-    await apply.click();
-
-    // The application really went in — that is the price, and the point.
-    await expect(page.locator('#quick-success')).toBeVisible({ timeout: 10_000 });
-    await expect(bar(page)).toBeVisible({ timeout: 10_000 });
-
-    await bar(page).getByRole('button', { name: 'Mark the confirmation' }).click();
-    await pickOnPage(page, page.locator('#quick-success'));
-
-    // Written, and read back by the machinery that has always read it: the element is
-    // visible, so the ordinary success observer fires and files the posting applied.
-    await expect.poll(async () => (await configFor(urlFor('record-internal')))?.successSelector,
-      { timeout: 15_000 }).toBeTruthy();
-    await expect.poll(async () => statusOf(urlFor('record-internal')), { timeout: 15_000 })
-      .toBe('applied');
-    await expect(bar(page)).toContainText('Saved');
-
-    /*
-     * And the receipt is on screen, on this page-load.
-     *
-     * Apply folds the card to its pill before pressing Send — the user is about to be
-     * asked to point at the page — so the `applied` repaint drew a *pill*, and the
-     * green banner, the `Sent` chip and `Applied ✓` were only ever seen by someone who
-     * reloaded the posting. The confirmation landing is the one moment the card has
-     * something to say, and it now says it.
-     */
-    const review = page.locator('.cf-card[data-sheet="review"]');
-    await expect(review).toBeVisible({ timeout: 15_000 });
-    await expect(review.locator('.cf-flow.ok.cf-applied')).toContainText(/confirmed it/i);
-    await expect(review.getByRole('button', { name: ACTION_LABELS.applied })).toBeVisible();
-  } finally {
-    await page.close();
-  }
-});
-
-/**
- * The other answer to the same question: the user presses the site's own Send button.
- *
- * The second pass had exactly one door that reached it with anything sent — Apply —
- * and the by-hand door (the panel's `Mark the confirmation`, and now this) raised a
- * bar that said "Your application went in" over a page where nothing had. So the one
- * sentence the bar carries was, on that route, untrue; and from the review card there
- * was no way to say "I will send this one myself" at all.
- */
-test('“I’ll send it myself” waits for a send the user makes, and finishes the setup', async () => {
-  const page = await context.newPage();
-  try {
-    await page.setViewportSize({ width: 1280, height: 900 });
-    // A posting of its own: the specs around this one apply to the others, and an
-    // applied posting retires every decision on the card.
-    const url = `${urlFor('record-internal')}&n=myself`;
-    await rewindToBeforeSend(url, '#submit');
-    await page.goto(url);
-
-    const review = page.locator('.cf-card[data-sheet="review"]');
-    await expect(review).toBeVisible({ timeout: 20_000 });
-    await review.getByRole('button', { name: ACTION_LABELS.sendItMyself }).click();
-
-    // The bar comes up over a live page and says what is true of it: nothing has been
-    // sent. The card gets out of the way, exactly as it does for Apply.
-    await expect(bar(page)).toBeVisible({ timeout: 10_000 });
-    await expect(bar(page).locator('.cf-rec-ask')).toHaveText(AFTER_SEND_ASK.unsent);
-    await expect(page.locator('#quick-success')).toBeHidden();
-
-    // The page really is live — this pass installs no suppression, because the user
-    // is applying for real.
-    await page.click('#submit');
-    await expect(page.locator('#quick-success')).toBeVisible({ timeout: 10_000 });
-
-    await bar(page).getByRole('button', { name: RECORD_PASS_TEXT.afterSend.action }).click();
-    await pickOnPage(page, page.locator('#quick-success'));
-
-    await expect.poll(async () => (await configFor(url))?.successSelector, { timeout: 15_000 })
-      .toBeTruthy();
-    await expect.poll(async () => statusOf(url), { timeout: 15_000 }).toBe('applied');
-    await expect(review.locator('.cf-flow.ok.cf-applied')).toBeVisible({ timeout: 15_000 });
-  } finally {
-    await page.close();
-  }
-});
-
-/**
- * Nothing is recorded as applied until the user points at something.
- *
- * The whole justification for letting Apply send here is that the outcome is still
- * read back — by the person looking at it. If they cannot find a confirmation, or the
- * form came back with an error instead, the posting must not be filed as applied on
- * the strength of a button having been pressed. That is the failure the strict rule
- * existed to prevent, and it still is.
- */
-test('Apply · finish setup files nothing when no confirmation is marked', async () => {
-  const page = await context.newPage();
-  try {
-    await page.setViewportSize({ width: 1280, height: 900 });
-    // A different posting on the same site — the spec above applied to the other one,
-    // and an applied posting retires Apply. `&n=…` is ignored by the fixture and
-    // exists to make one posting distinct from another.
-    const url = `${urlFor('record-internal')}&n=nomark`;
-    await rewindToBeforeSend(url, '#submit');
-    await page.goto(url);
-
-    const modal = page.locator('.cf-card[data-sheet="review"]');
-    await expect(modal).toBeVisible({ timeout: 20_000 });
-    await modal.getByRole('button', { name: 'Apply · finish setup' }).click();
-    await expect(bar(page)).toBeVisible({ timeout: 10_000 });
-
-    await bar(page).getByRole('button', { name: 'Not yet' }).click();
-    await expect(bar(page)).toHaveCount(0);
-
-    expect((await configFor(url))?.successSelector).toBeFalsy();
-    expect(await statusOf(url)).not.toBe('applied');
-  } finally {
-    await page.close();
-  }
-});
-
-test('Recording: the Declare menu holds its place while the clock ticks', async () => {
-  // The bar repainted itself once a second to advance the elapsed time, which
-  // rebuilt the open menu with it — so scrolling down to a profile field, or to
-  // the description, was a race against a one-second timer. Scroll is layout, and
-  // layout is invisible to vitest; this is the half that has to be measured in a
-  // real browser.
-  await clearConfigs();
-  const page = await context.newPage();
-  try {
-    await beginRecording(page, 'record-internal');
-
-    // The page is marked up by name for the whole recording. The panel is a pill by
-    // now, so this is the only thing on screen saying which control is which — and a
-    // coloured outline alone never could.
-    await expect(mark(page, 'Email')).toBeVisible();
-    const chip = (await mark(page, 'Email').boundingBox())!;
-    const field = (await page.locator('#email').boundingBox())!;
-    // Above the control and aligned to its right-hand edge. Right, because the gap
-    // above a form control is where the form's own <label> lives — a chip pinned
-    // above-left sits on top of the very words it is echoing, on every field of
-    // every form. Labels are short and controls are wide, so the right end is free.
-    expect(chip.y + chip.height).toBeLessThanOrEqual(field.y + 1);
-    expect(Math.abs((chip.x + chip.width) - (field.x + field.width))).toBeLessThan(4);
-
-    await bar(page).getByRole('button', { name: 'Declare', exact: true }).click();
-    const menu = bar(page).locator('.cf-rec-menu');
-    await expect(menu).toBeVisible();
-
-    // The list is ~28 marks in a 60vh box, so there is genuinely somewhere to go.
-    const scrolled = await menu.evaluate((el) => {
-      el.scrollTop = 200;
-      return el.scrollTop;
-    });
-    expect(scrolled).toBeGreaterThan(0);
-
-    // A mark on the element itself, so "the same list" is a fact about the node and
-    // not just about what it happens to be showing. A repaint would leave it behind.
-    await menu.evaluate((el) => el.setAttribute('data-probe', '1'));
-
-    const clock = await bar(page).locator('.cf-rec-clock').textContent();
-    await page.waitForTimeout(2200);
-
-    expect(await bar(page).locator('.cf-rec-clock').textContent()).not.toBe(clock);
-    expect(await menu.getAttribute('data-probe')).toBe('1');
-    expect(await menu.evaluate((el) => el.scrollTop)).toBe(scrolled);
-
-    /*
-     * And the boxed pair keeps both halves of what `overflow: clip` buys it.
-     *
-     * The heads are `position: sticky`, which makes them *positioned* — so they paint
-     * after their parent's background **and its border**, and with no inline padding
-     * on `.cf-rec-menu-decides` their square top corners painted a wedge of
-     * `--surface` over a 14px curve: the box's rounded corner with a bite out of it,
-     * on the first thing the menu shows.
-     *
-     * `clip` fixes the paint. `hidden` would fix it too and break the heads, by
-     * making the box a scroll container the sticky heads would resolve against — a
-     * box that never scrolls, so they would stop following the list. That swap is the
-     * tidy-up this guards: paint is invisible to a DOM assertion, so what is pinned
-     * here is the behaviour the wrong answer costs.
-     */
-    const boxed = menu.locator('.cf-rec-menu-decides');
-    expect(await boxed.evaluate((el) => getComputedStyle(el).overflow)).toBe('clip');
-
-    // Measured as a *lag*, which is what sticky means, rather than against a fixed
-    // offset: scroll by less than the first group is tall, and its head must move
-    // less far than the list did. A head that keeps up with the scroll exactly is one
-    // that has stopped sticking. (Scrolled back to the top first — 200px is already
-    // past this group, and a head whose group has left is meant to leave with it.)
-    const headLag = await menu.evaluate((el) => {
-      const head = el.querySelector('.cf-rec-menu-decides .cf-rec-menu-head')!;
-      const top = () => head.getBoundingClientRect().y - el.getBoundingClientRect().y;
-      el.scrollTop = 0;
-      const rest = top();
-      el.scrollTop = 40;
-      const after = top();
-      return { rest: Math.round(rest), after: Math.round(after), moved: Math.round(rest - after) };
-    });
-    expect(headLag.moved).toBeLessThan(40);
-    expect(headLag.after).toBeGreaterThanOrEqual(0);
-  } finally {
-    await page.close();
-  }
-});
-
-
-test('Recording: Reset throws the steps away and puts the page back', async () => {
-  // Undo can only take a step out of the *list*; it cannot take back what the step
-  // did. So Reset reloads — a clean list against a page still carrying the effects of
-  // six recorded clicks is the half-fix, and the one that quietly compiles a `prep`
-  // list for a state no later visit ever reaches. The reload is the assertion.
-  await clearConfigs();
-  const page = await context.newPage();
-  try {
-    await beginRecording(page, 'record-internal');
-
-    // The page is marked up by name for the whole recording. The panel is a pill by
-    // now, so this is the only thing on screen saying which control is which — and a
-    // coloured outline alone never could.
-    await expect(mark(page, 'Email')).toBeVisible();
-    const chip = (await mark(page, 'Email').boundingBox())!;
-    const field = (await page.locator('#email').boundingBox())!;
-    // Above the control and aligned to its right-hand edge. Right, because the gap
-    // above a form control is where the form's own <label> lives — a chip pinned
-    // above-left sits on top of the very words it is echoing, on every field of
-    // every form. Labels are short and controls are wide, so the right end is free.
-    expect(chip.y + chip.height).toBeLessThanOrEqual(field.y + 1);
-    expect(Math.abs((chip.x + chip.width) - (field.x + field.width))).toBeLessThan(4);
-
-    // What the discarded steps did to the page, which is the half Undo cannot take
-    // back. Not a press of Send: the first pass holds that, so the change a recording
-    // leaves behind is what was typed and where the form got to.
-    await type(page, '#email', 'ada@example.com');
-    await type(page, '#first_name', 'Ada');
-    expect(await stepCount(page)).not.toContain('0 steps');
-
-    await startOver(page);
-
-    // A fresh content script on a fresh page, holding a recording with nothing in it.
-    await expect(bar(page)).toBeVisible({ timeout: 15_000 });
-    await expect(bar(page).locator('.cf-rec-count')).toContainText('0 steps');
-    expect(page.url()).toBe(urlFor('record-internal'));
-    // The page really was reloaded, so what the discarded steps did to it is gone too.
-    await expect(page.locator('#email')).toHaveValue('');
-    await expect(page.locator('#first_name')).toHaveValue('');
-  } finally {
-    await page.close();
-  }
-});
-
-test('Recording: Reset from the employer’s site goes back to the posting', async () => {
-  // The half that cannot be seen on one page: on the destination leg "start again"
-  // means leaving the page you are looking at. `RECORD_START` is re-sent with the
-  // recording's *own* postingUrl rather than `location.href`, or resetting here would
-  // quietly redefine the posting as the employer's form and the handoff could never
-  // be recorded again. The synthesized `navigate` step going with it is what says
-  // `destinationUrl` was really cleared.
-  await clearConfigs();
-  const page = await context.newPage();
-  try {
-    await page.setViewportSize({ width: 1280, height: 900 });
-    await page.goto(urlFor('record-external'));
-    await openSetupPanel(page, { home: true });
-
-    const setup = page.locator('.cf-card[data-sheet="setup"]');
-    await expect(setup).toBeVisible({ timeout: 20_000 });
-    await setup.getByRole('button', { name: RECORD_PASS_TEXT.beforeSend.action }).click();
-    await expect(bar(page)).toBeVisible({ timeout: 10_000 });
-
-    await press(page, '#apply-external');
-    await page.waitForURL(/ats-form/, { timeout: 15_000 });
-    await expect(bar(page)).toBeVisible({ timeout: 15_000 });
-    await type(page, '#ats-email', 'ada@example.com');
-
-    await startOver(page);
-
-    await page.waitForURL(urlFor('record-external'), { timeout: 15_000 });
-    await expect(bar(page)).toBeVisible({ timeout: 15_000 });
-    // Zero, not one: the `navigate` step a resumed recording synthesizes on arrival
-    // would still be here if `destinationUrl` had survived the reset.
-    await expect(bar(page).locator('.cf-rec-count')).toContainText('0 steps');
-  } finally {
-    await page.close();
-  }
-});
-
-/**
- * Start a recording on a scenario the way the panel offers it. The three specs
- * below are about what happens *during* one, so the walk in is scaffolding.
- */
-async function beginRecording(page: Page, scenario: string): Promise<void> {
-  await clearConfigs();
-  await page.setViewportSize({ width: 1280, height: 900 });
-  await page.goto(urlFor(scenario));
-  await openSetupPanel(page, { home: true });
-
-  const setup = page.locator('.cf-card[data-sheet="setup"]');
-  await expect(setup).toBeVisible({ timeout: 20_000 });
-  await setup.getByRole('button', { name: RECORD_PASS_TEXT.beforeSend.action }).click();
-  await expect(bar(page)).toBeVisible({ timeout: 10_000 });
-}
-
-/**
- * Immediately above the control and aligned to its right-hand edge — the placement
- * rule, asserted as a *gap* rather than as "somewhere above". A chip left behind by
- * a page that moved under it is still above the field it names, several hundred
- * pixels above, which is exactly the bug: only the distance can tell them apart.
- */
-async function expectMarkOn(page: Page, name: string, selector: string): Promise<void> {
-  await expect(async () => {
-    const chip = (await mark(page, name).boundingBox())!;
-    const field = (await page.locator(selector).boundingBox())!;
-    const gap = field.y - (chip.y + chip.height);
-    expect(gap).toBeGreaterThanOrEqual(-1);
-    expect(gap).toBeLessThan(8);
-    expect(Math.abs((chip.x + chip.width) - (field.x + field.width))).toBeLessThan(4);
-  }).toPass({ timeout: 5_000 });
-}
-
-test('Recording: a name follows its field when the page moves under it', async () => {
-  // The chip is the only extrinsic half of a mark — the outline is an inline style
-  // on the element and moves with it whatever happens, while a `position: fixed`
-  // chip is right only for as long as the number it was given is. It was re-placed
-  // on `scroll` and `resize` and on nothing else, so opening a description left
-  // every name on the page behind and the mark visibly came apart. Layout is
-  // invisible to vitest; this is the half that has to be measured in a browser.
-  const page = await context.newPage();
-  try {
-    await beginRecording(page, 'record-internal');
-    await expect(mark(page, 'Email')).toBeVisible();
-    await expectMarkOn(page, 'Email', '#email');
-    const was = (await page.locator('#email').boundingBox())!;
-
-    // Long enough for the follow loop drawing the marks to have given up: without
-    // this the shift below lands inside the tail that every fresh chip opens, and
-    // the chip follows for a reason that has nothing to do with the fix.
-    await page.waitForTimeout(1500);
-    // Something above the form opens. Not a gesture — the page is inert and a click
-    // would have to be armed, which is a step, which repaints — so this is the pure
-    // case: the page moved and nothing told the extension.
-    await page.evaluate(() => {
-      const spacer = document.createElement('div');
-      spacer.style.height = '260px';
-      document.body.prepend(spacer);
-    });
-
-    const now = (await page.locator('#email').boundingBox())!;
-    expect(now.y).toBeGreaterThan(was.y + 200);
-    // And no scroll anywhere, which is what used to be the only way to fix this.
-    expect(await page.evaluate(() => window.scrollY)).toBe(0);
-    await expectMarkOn(page, 'Email', '#email');
-  } finally {
-    await page.close();
-  }
-});
-
-test('Recording: fields that appear mid-recording are named, and marks already made survive', async () => {
-  // ModalLever has no form at all until Apply is pressed. The sweep ran once, when
-  // the recorder attached, so on exactly the sites this exists for — a form behind a
-  // modal, page two of a wizard — the fields appeared unnamed and stayed that way
-  // for the rest of the recording. The other half is the cost of fixing it:
-  // `markDetectedFields` opens with `clearHighlights`, so a second sweep must not
-  // quietly unname what the user has already declared.
-  const page = await context.newPage();
-  try {
-    await beginRecording(page, 'modal-lever');
-    await expect(mark(page, 'Full name')).toHaveCount(0);
-
-    await declare(page, 'Description');
-    await pickOnPage(page, page.locator('#posting-body'));
-    await expect(mark(page, 'Description')).toBeVisible();
-
-    // Wait the pick's own sweep window out. A mark being made opens one too, and
-    // inside it the modal below would be swept up by that rather than by the press —
-    // which is the thing being tested.
-    await page.waitForTimeout(4_000);
-
-    // The click that reveals the form. It reads like a send — "Apply for this role" —
-    // so it is held first and has to be refused, which is the whole reason the hold
-    // is escapable. The modal is injected in the click handler, so the sweep has to
-    // wait for the page to settle rather than read it as the step is recorded.
-    await pressThroughHold(page, '#apply-btn');
-
-    await expect(mark(page, 'Full name')).toBeVisible({ timeout: 10_000 });
-    await expectMarkOn(page, 'Full name', 'input[aria-label="Full name"]');
-    // Named on the page, not merely outlined: a form of nine coloured boxes says
-    // nine things were found and never which one is Email.
-    await expect(mark(page, 'Email')).toBeVisible();
-    // And what was declared before the sweep is still declared after it.
-    await expect(mark(page, 'Description')).toBeVisible();
-  } finally {
-    await page.close();
-  }
-});
-
-test('Recording: naming a field fills it, so a wrong box is obvious at once', async () => {
-  // The mark alone is a green outline on a box, and whether it is the *right* box was
-  // only ever answered on a later visit — after the recording had been compiled and
-  // saved. Putting the real value in settles it in the only terms that can.
-  const page = await context.newPage();
-  try {
-    await beginRecording(page, 'record-internal');
-    // Emptied first, or the assertion below passes on whatever was already there.
-    await page.locator('#first_name').evaluate((el) => { (el as HTMLInputElement).value = ''; });
-
-    await declare(page, 'First name');
-    // Pointed at the label, which is what a user does — and what the fill needs
-    // resolving past before it has a control to write into at all.
-    await pickOnPage(page, page.locator('#first_name'));
-
-    await expect(page.locator('#first_name')).toHaveValue('Ada');
-    await expect(mark(page, 'First name')).toBeVisible();
-
-    // The CV is the one field the whole surface exists to get right, and the one the
-    // page cannot show any other way — `run()` stands down while a recording is live,
-    // so the documents had to be loaded for this moment specifically.
-    await declare(page, 'Résumé / CV');
-    await pickOnPage(page, page.locator('#resume-file'));
-    await expect(async () => {
-      const files = await page.locator('#resume-file').evaluate(
-        (el) => [...((el as HTMLInputElement).files ?? [])].map((f) => f.name),
-      );
-      expect(files).toEqual(['cv.pdf']);
-    }).toPass({ timeout: 5_000 });
-  } finally {
-    await page.close();
-  }
-});
-
-test('Recording: a field with nothing in the profile to put there says so', async () => {
-  // The failure this feature could introduce: an outlined box that stays empty with
-  // nothing said about it reads as the pick having failed rather than as the profile
-  // being short a detail. The mark is saved either way, which is the part worth saying.
-  const page = await context.newPage();
-  try {
-    await beginRecording(page, 'record-internal');
-
-    // Nothing in `PROFILE` for LinkedIn, so there is nothing to write.
-    await declare(page, 'LinkedIn');
-    await pickOnPage(page, page.locator('#phone'));
-
-    await expect(bar(page).locator('.cf-rec-notice')).toContainText('LinkedIn');
-    await expect(bar(page).locator('.cf-rec-notice')).toContainText('profile');
-    // Saved regardless: the mark is a fact about the page, not about the profile.
-    await expect(mark(page, 'LinkedIn')).toBeVisible();
-  } finally {
-    await page.close();
-  }
-});
-
-test('Recording: choosing a mark closes the Declare menu before the picker opens', async () => {
-  // The menu closed its flag and left its markup: nothing on the way to the picker
-  // repainted the bar, so a 240px-wide, 60vh-tall list stayed hanging over the very
-  // page the picker was asking the user to point at.
-  const page = await context.newPage();
-  try {
-    await beginRecording(page, 'record-internal');
-
-    await bar(page).getByRole('button', { name: 'Declare', exact: true }).click();
-    await expect(bar(page).locator('.cf-rec-menu')).toBeVisible();
-
-    await bar(page).getByRole('menuitem', { name: 'Send button', exact: true }).click();
-
-    // Gone by the time the picker is up, which is when it would be in the way.
-    await expect(page.locator('[data-cf-picker="bar"]')).toBeVisible({ timeout: 10_000 });
-    await expect(bar(page).locator('.cf-rec-menu')).toHaveCount(0);
-
-    // Including down the path where nothing else was ever going to repaint the bar.
-    await page.keyboard.press('Escape');
-    await expect(page.locator('[data-cf-picker="bar"]')).toHaveCount(0);
-    await expect(bar(page).locator('.cf-rec-menu')).toHaveCount(0);
-  } finally {
-    await page.close();
-  }
-});
-
-/**
- * Armed is a mode the whole toolbar is in, and the only place that can be checked is
- * a real browser.
- *
- * jsdom evaluates neither the cascade nor layout, which is exactly how the armed
- * treatment came to be almost entirely absent without a single test going red:
- * `.cf-rec-armed` is (0,1,0) and `button.cf-btn` in primitives.css is (0,1,1), and
- * the shadow root inlines primitives *first* — so the fill, the border and the colour
- * all lost, and the ring was the only declaration in the block that could land. The
- * class was on the button the whole time, so every DOM assertion agreed it was fine.
- *
- * Computed colour, therefore, and both halves of the claim: the bar itself changes,
- * and the one live control still reads as a control against the blocked one beside it.
- */
-test('Recording: arming says so with the whole bar, not one button', async () => {
-  const page = await context.newPage();
-  try {
-    await beginRecording(page, 'record-internal');
-
-    const declare = bar(page).getByRole('button', { name: ACTION_LABELS.declare, exact: true });
-    const fill = (l: Locator) => l.evaluate((el) => getComputedStyle(el).backgroundColor);
-    const edge = (l: Locator) => l.evaluate((el) => getComputedStyle(el).borderTopColor);
-
-    const restingBar = await fill(bar(page));
-    const restingDeclare = await edge(declare);
-
-    await interact(page);
-    const armedButton = bar(page).getByRole('button', { name: ACTION_LABELS.interactArmed });
-    await expect(armedButton).toBeVisible();
-
-    // The toolbar wears it.
-    expect(await fill(bar(page))).not.toBe(restingBar);
-    // And the one control that is still live is told from the blocked one beside it —
-    // which is the half a bare `.cf-rec-armed` class assertion could never see.
-    expect(await edge(armedButton)).not.toBe(await edge(declare));
-    // Blocked, not merely quiet: Declare cannot be pressed while a gesture is out.
-    await expect(declare).toHaveAttribute('aria-disabled', 'true');
-    expect(await edge(declare)).not.toBe(restingDeclare);
-
-    // And it all goes away again when the page is handed back.
-    await armedButton.click();
-    await expect(bar(page).getByRole('button', { name: 'Interact', exact: true })).toBeVisible();
-    expect(await fill(bar(page))).toBe(restingBar);
-    await expect(declare).not.toHaveAttribute('aria-disabled', 'true');
-  } finally {
-    await page.close();
-  }
-});
-
-test('Recording: the bar can be moved off the page’s own header', async () => {
-  /*
-   * Geometry, so it belongs here: jsdom evaluates neither the cascade nor layout, and
-   * where this bar sits used to be a `@media (pointer: coarse)` rule nothing could
-   * see or change. On a mouse that put it at the top of the viewport — which on a job
-   * board is where the nav is, and routinely where "Apply now" is, i.e. the one
-   * control the recording is about.
-   *
-   * The popovers have to come with it. They open *away* from the edge the bar is
-   * docked to, and that rule used to be keyed off the same media query rather than
-   * off where the bar actually is.
-   */
-  const page = await context.newPage();
-  try {
-    await page.setViewportSize({ width: 1280, height: 900 });
-    await beginRecording(page, 'record-internal');
-
-    const move = bar(page).locator('.cf-rec-place');
-    const before = (await bar(page).boundingBox())!;
-    expect(before.y).toBeLessThan(450);
-
-    await move.click();
-
-    const after = (await bar(page).boundingBox())!;
-    expect(after.y).toBeGreaterThan(450);
-
-    // The menu now opens upward, out of the bar rather than off the bottom of the
-    // screen. Measured against the toggle it hangs from, which is what it is anchored
-    // to — the bar's own padding sits between that and the card's edge.
-    const declare = bar(page).getByRole('button', { name: 'Declare', exact: true });
-    await declare.click();
-    const toggle = (await declare.boundingBox())!;
-    const list = (await bar(page).locator('.cf-rec-menu').boundingBox())!;
-    expect(list.y + list.height).toBeLessThanOrEqual(toggle.y + 1);
-
-    // And a press that is neither the list nor the toggle puts it away. The page
-    // underneath is inert, so without this the only way out is the button the list
-    // is very likely covering.
-    await bar(page).locator('.cf-rec-state').click();
-    await expect(bar(page).locator('.cf-rec-menu')).toHaveCount(0);
-
-    await move.click();
-    expect((await bar(page).boundingBox())!.y).toBeLessThan(450);
-  } finally {
-    await page.close();
-  }
-});

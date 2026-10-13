@@ -1,0 +1,52 @@
+/**
+ * The queue chip. Bottom-left on a wide screen, the corner the card's pill never
+ * uses (the pill rail is bottom-right). On a phone the pill is centred along the
+ * bottom edge, so the chip rises one row above it rather than sharing the line.
+ */
+.cf-qchip {
+  position: fixed;
+  left: var(--space-6);
+  bottom: var(--space-6);
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-height: var(--tap);
+  padding: 0 var(--space-4);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-pill);
+  background: var(--bg);
+  color: var(--fg);
+  box-shadow: var(--shadow-2);
+  font: 500 var(--text-sm) / 1 var(--font);
+  cursor: pointer;
+  z-index: 2147483644;
+}
+
+.cf-qchip:hover {
+  background: var(--surface-2);
+}
+
+.cf-qchip:focus-visible {
+  outline: none;
+  box-shadow: var(--ring);
+}
+
+/* The accent, as a mark rather than a fill: the chip says where the tab came
+   from, it is not something the page is asking the user to do. */
+.cf-qchip-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--accent);
+  flex: none;
+}
+
+@media (max-width: 640px) {
+  .cf-qchip {
+    left: var(--space-4);
+    bottom: calc(var(--space-6) + env(safe-area-inset-bottom, 0px) + var(--tap) + var(--space-2));
+  }
+  .cf-qchip.cf-card-open {
+    display: none;
+  }
+}

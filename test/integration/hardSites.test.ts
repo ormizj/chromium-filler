@@ -1,25 +1,20 @@
 /**
  * Integration tests for the three hard test sites. These reconstruct each
- * site's *loaded* form DOM (post slow-load / post prep) and assert the matcher +
- * field detector behave correctly on nasty markup: late injection, modal forms
- * with no id/name (accessible-name only), hashed ids, and an unmappable field
- * that must surface as unmatched so it can be fixed via Pick.
+ * site's *loaded* form DOM (after the slow load, after the modal opens) and
+ * assert detection behaves on nasty markup: late injection, modal forms with no
+ * id/name (accessible-name only), hashed ids, and an unmappable field that must
+ * surface as a question to teach — and then be filled by the lesson.
  *
  * The full click/wait timing is covered by the Playwright E2E suite; here we
  * lock down the matching logic deterministically.
  */
 import { describe, it, expect, afterEach } from 'vitest';
-import { detectFields } from '../../src/content/fieldDetect';
-import { findMatchingConfig } from '../../src/shared/matcher';
-import type { FieldKey, SiteConfig } from '../../src/shared/types';
-import configsJson from '../fixtures/test-site-configs.json';
+import { classify, collectCandidates, type Classified } from '../../src/content/fieldDetect';
+import type { Lesson, Profile } from '../../src/shared/types';
+import { isDisplayed } from '../../src/shared/visible';
 
-const CONFIGS = configsJson as SiteConfig[];
 const HID = (s: string) => `fld-${s}-a1b2c3d4e5f6`;
-
-const PROFILE_FIELDS: FieldKey[] = [
-  'firstName', 'lastName', 'fullName', 'email', 'phone', 'city', 'coverLetter', 'resume',
-];
+const PROFILE: Profile = { values: {}, keywords: {}, customFields: [] };
 
 function mount(html: string): HTMLElement {
   const root = document.createElement('div');
@@ -28,22 +23,17 @@ function mount(html: string): HTMLElement {
   return root;
 }
 
-function detect(fields: FieldKey[], overrides?: Partial<Record<FieldKey, string>>) {
-  const detected = detectFields({ root: document, fields, overrides });
-  return new Map(detected.map((d) => [d.field, d]));
+/** Every input on the page, classified at once, keyed by the field each became. */
+function detect(lessons: Lesson[] = []): Map<string, Classified> & { unknown: Classified[] } {
+  const all = collectCandidates(document, { visible: isDisplayed });
+  const rows = classify(all, all, { profile: PROFILE, lessons, host: 'chaos.test' });
+  const by = new Map(rows.filter((r) => r.field).map((r) => [r.field!, r])) as Map<string, Classified> & { unknown: Classified[] };
+  by.unknown = rows.filter((r) => !r.field && !r.ignored);
+  return by;
 }
 
 afterEach(() => {
   document.body.innerHTML = '';
-});
-
-describe('config URL matching', () => {
-  it('matches each site by its served and file URLs', () => {
-    expect(findMatchingConfig('http://localhost:5199/sites/slow-boards.html', CONFIGS)?.id).toBe('slow-boards');
-    expect(findMatchingConfig('file:///x/y/modal-lever.html', CONFIGS)?.id).toBe('modal-lever');
-    expect(findMatchingConfig('https://host/sites/chaos-form.html', CONFIGS)?.id).toBe('chaos-form');
-    expect(findMatchingConfig('https://example.com/other', CONFIGS)).toBeUndefined();
-  });
 });
 
 describe('SlowBoards — standard fields injected late', () => {
@@ -56,18 +46,18 @@ describe('SlowBoards — standard fields injected late', () => {
         <label for="phone">Phone</label><input id="phone" name="phone" placeholder="+1 555" />
         <label for="resume-file">Résumé (PDF)</label><input id="resume-file" type="file" />
       </form>`);
-    const by = detect(['firstName', 'lastName', 'email', 'phone', 'resume']);
+    const by = detect();
     expect(by.get('firstName')?.confidence).toBe('high');
     expect(by.get('lastName')?.confidence).toBe('high');
     expect(by.get('email')?.confidence).toBe('high');
     expect(by.get('phone')?.confidence).toBe('high');
-    expect(by.get('resume')?.element?.id).toBe('resume-file');
+    expect(by.get('resume')?.cand.el.id).toBe('resume-file');
     expect(by.get('resume')?.confidence).toBe('high');
   });
 });
 
-describe('ModalLever — modal form, accessible-name only, override CV input', () => {
-  it('detects name/email/phone from aria-label + wrapping label; CV via override', () => {
+describe('ModalLever — modal form, accessible-name only, hidden CV input', () => {
+  it('detects name/email/phone from aria-label + wrapping label, and the hidden upload', () => {
     mount(`
       <form id="modal-form">
         <label>Full name <input aria-label="Full name" /></label>
@@ -78,19 +68,17 @@ describe('ModalLever — modal form, accessible-name only, override CV input', (
                  style="position:absolute;width:1px;height:1px;opacity:0" />
         </div>
       </form>`);
-    const config = CONFIGS.find((c) => c.id === 'modal-lever')!;
-    const by = detect(['fullName', 'email', 'phone', 'resume'], config.fieldOverrides);
-    // Resume override lives on cvUpload, applied like the orchestrator does.
-    const resumeEl = document.querySelector(config.cvUpload!);
-
+    const by = detect();
     expect(by.get('fullName')?.confidence).toBe('high');
     expect(by.get('email')?.confidence).toBe('high');
     expect(by.get('phone')?.confidence).toBe('high');
-    expect(resumeEl?.id).toBe('resume-hidden'); // override target exists even though hidden
+    // An invisible file input is still the control that takes the file.
+    expect(by.get('resume')?.cand.el.id).toBe('resume-hidden');
+    expect(by.get('resume')?.confidence).toBe('high');
   });
 });
 
-describe('ChaosForm — hashed ids, unmappable field, Pick recovery', () => {
+describe('ChaosForm — hashed ids, an unmappable field, and teaching it', () => {
   function mountChaos(): void {
     mount(`
       <form id="chaos-form">
@@ -109,26 +97,29 @@ describe('ChaosForm — hashed ids, unmappable field, Pick recovery', () => {
 
   it('matches by accessible name despite hashed ids, and coverLetter/CV on step 2', () => {
     mountChaos();
-    const by = detect(PROFILE_FIELDS);
+    const by = detect();
     expect(by.get('firstName')?.confidence).toBe('high'); // wrapping label "Given name"
     expect(by.get('lastName')?.confidence).toBe('high');  // label + placeholder "Family name"
     expect(by.get('email')?.confidence).toBe('high');     // aria-label
     expect(by.get('coverLetter')?.confidence).toBe('high');
-    expect(by.get('resume')?.element?.id).toBe(HID('cv'));
+    expect(by.get('resume')?.cand.el.id).toBe(HID('cv'));
   });
 
-  it('leaves the disguised city field unmatched (must be Picked)', () => {
+  it('lists the disguised city field as a question to teach', () => {
     mountChaos();
-    const by = detect(PROFILE_FIELDS);
-    expect(by.get('city')?.element).toBeNull();
-    expect(by.get('city')?.confidence).toBe('none');
+    const by = detect();
+    expect(by.has('city')).toBe(false);
+    expect(by.unknown.map((r) => r.cand.question)).toContain('Where are you located?');
   });
 
-  it('a Pick override then resolves the city field', () => {
+  it('a lesson then fills the city field — by its wording, not its hashed id', () => {
     mountChaos();
-    const by = detect(PROFILE_FIELDS, { city: `#${HID('loc')}` });
-    expect(by.get('city')?.element?.id).toBe(HID('loc'));
-    expect(by.get('city')?.source).toBe('override');
+    const by = detect([{
+      id: 'l1', signature: { question: 'where are you located', kind: 'text' }, target: { field: 'city' },
+      label: 'Where are you located?', createdAt: 0, hits: 0,
+    }]);
+    expect(by.get('city')?.cand.el.id).toBe(HID('loc'));
+    expect(by.get('city')?.source).toBe('lesson');
     expect(by.get('city')?.confidence).toBe('high');
   });
 });

@@ -1,321 +1,152 @@
 /**
- * Content-script orchestrator. On a matching page it waits for the form, runs
- * prep, extracts the job info, detects + fills fields (high-confidence only),
- * and shows the review modal. It never sends anything on its own: the modal's
- * Apply presses the site's Send button, and only because the user pressed Apply.
- * Handles popup messages, the modal's actions, and click-to-pick overrides.
+ * Content-script orchestrator, on every page.
+ *
+ * The fill engine (`fillEngine.ts`) does the work: every input on the page goes
+ * past it, and keeps going past it as the page changes. This file connects it to
+ * everything else — the profile, the lessons and the documents in storage, the
+ * review card, the queue chip, the popup's messages — and owns the one decision
+ * the engine cannot make: whether to show anything at all.
+ *
+ * It never sends anything. Nothing in this file presses a site's button; the user
+ * does that, on the site, when they are ready.
  */
 
-import type {
-  FieldKey, FieldMatch, JobUrlEntry, MatchConfidence, ModalLayout, PrepAction, PrepStep,
-  Profile, Settings, SiteConfig,
-} from '../shared/types';
+import type { FieldId, Lesson, ModalLayout, Profile, Settings } from '../shared/types';
 import { statusForUrl } from '../shared/jobUrls';
-import { findMatchingConfig } from '../shared/matcher';
-import { currentFormFactor } from '../shared/formFactor';
-import { generateSelector, pickSelector } from '../shared/selector';
-import { query } from '../shared/query';
-import { isExternalUrl } from '../shared/redirect';
-import { webUrl } from '../shared/appLink';
-import { DEFAULT_SETTINGS } from '../shared/defaults';
-import {
-  getState, getSettings, patchSettings, saveFieldOverride, clearFieldOverride,
-  saveExtractSelector, clearExtractSelector, ensureConfigForUrl, mutateSiteConfig,
-  saveRedirectSelector, clearRedirectSelector, type RedirectSelectorKey,
-  saveSubmitSelector, clearSubmitSelector, saveSuccessSelector, clearSuccessSelector,
-  mutateJobDetails, applyConfigPatch, getSiteConfigs,
-} from '../shared/storage';
+import { DEFAULT_PROFILE, DEFAULT_SETTINGS } from '../shared/defaults';
+import { getState, mutateJobDetails, mutateLessons, mutateProfile, patchSettings } from '../shared/storage';
 import { captureDetails, type JobDetails } from '../shared/jobDetails';
-import {
-  compileRecording, fieldOf, isFieldBind,
-  type BindKey, type CompiledSetup, type RecordFlow, type RecordLeg,
-  type Recording, type RecordPhase, type RecordedStep,
-} from '../shared/recording';
 import { BUILD_ID } from '../shared/buildId';
 import { getDoc, cvFileToFile } from '../shared/cvStore';
-import { FIELD_LABELS, orderFields } from '../shared/fieldKeys';
-import { matchStatus, orderReport } from '../shared/fieldStatus';
-import { BIND_LABELS, emptyProfileNotice, heldSendNotice } from '../shared/labels';
-import {
-  MSG, type FollowRedirectResponse, type Message, type RecordingResponse,
-  type SessionState, type StatusResponse,
-} from '../shared/messages';
-import { clip } from '../shared/jobText';
+import { fieldChoices, newCustomField } from '../shared/profileFields';
+import { newLessonId, recordHits, teach } from '../shared/lessons';
+import { uniqueSignature } from '../shared/inputSignature';
 import { hostOf } from '../shared/url';
-import { isRendered } from '../shared/visible';
-import { findSubmitControl } from '../shared/submitDetect';
-import { waitForSelector } from './waitForForm';
-import { runPrepSteps } from './prep';
-import { extractJob, previewContainer, type ExtractedJob } from './extract';
-import { detectForConfig, DETECTABLE_FIELDS } from './fieldDetect';
-import { detectRedirect, type RedirectDetection } from './redirectDetect';
-import { fillTextField, fillFileInput, highlight, clearHighlights } from './fill';
+import { MSG, type Message, type QueueTabState, type StatusResponse } from '../shared/messages';
+import { extractJob, type ExtractedJob } from './extract';
+import { FillEngine } from './fillEngine';
 import { startPicker } from './picker';
-import { labelFor, startRecording, type RecorderHandle } from './recorder';
-import { watchPageChange } from './pageChange';
-import { RecorderBar, bindLabel } from './recorderBar';
-import { FillerModal, type ApplyState } from './modal/modal';
-import {
-  SetupPanel,
-  type ContainerKey, type SetupRow, type PrepRow, type PrepListKey, type SetupVerdict,
-} from './setupPanel';
-
-const CONTAINER_LABELS: Record<ContainerKey, string> = {
-  jobTitle: 'Job title',
-  jobDescription: 'Description',
-  jobRequirements: 'Requirements',
-};
-
-/**
- * Redirect-classification selectors. This is the row *set*, not the order they
- * appear in — the panel regroups them by the verdict each argues for
- * (`REDIRECT_GROUPS` in `setupPanel.ts`), and quick apply leads there.
- */
-const REDIRECT_ROWS: Array<{ key: RedirectSelectorKey; label: string }> = [
-  { key: 'applySelector', label: 'External apply link' },
-  { key: 'quickApplySelector', label: 'Quick-apply marker' },
-  { key: 'markerSelector', label: 'External marker' },
-];
+import { FillerModal, type TeachChoice } from './modal/modal';
+import { QueueChip } from './queueChip';
 
 const LOG = '[chromium-filler]';
 
-/**
- * How long the page has to hold still after a recorded gesture before the field
- * sweep runs again, and how long after the last gesture the watch stays up at all.
- * The first is "the burst has ended"; the second is "nobody has done anything for a
- * while, so anything still moving is the page's own doing, not an answer to a press".
- */
-const SWEEP_SETTLE_MS = 300;
-const SWEEP_WINDOW_MS = 3_000;
+/** Lesson hits are counted in storage at most this often — a long form fills in bursts. */
+const HITS_FLUSH_MS = 2_000;
+
+const DOC_KEYS = ['cv', 'coverLetterFile'];
+
+/** How long after load the page asks a second time whether the queue opened it. */
+const QUEUE_RECHECK_MS = 1_500;
 
 class Controller {
-  private config?: SiteConfig;
-  private profile: Profile = { values: {}, custom: {} };
-  private cvFile: File | null = null;
-  /** The cover letter as a file, for sites that ask for one instead of prose. */
-  private coverFile: File | null = null;
-  private matches: FieldMatch[] = [];
-  /**
-   * The rows Confirm has been pressed on since the last fill.
-   *
-   * An acknowledgement of a press, deliberately *not* a status: `matches` is the
-   * record of what the fill did, and a Confirm does not rewrite that record. All
-   * this buys is a retired button on the row, so the control is not silent.
-   */
-  private confirmedFields = new Set<FieldKey>();
-  private elements = new Map<FieldKey, HTMLElement>();
-  private modal?: FillerModal;
-  private setupPanel?: SetupPanel;
-  private cancelPicker?: () => void;
-  private hasRun = false;
-  private submitReported = false;
-  private submitArmed = false;
-  /** The site's own confirmation appeared: this posting really was sent. */
-  private applied = false;
-  /**
-   * The job database already had this URL down as `applied` when the page opened.
-   *
-   * The record was write-only from the page's point of view until this existed:
-   * `applied` above only ever means "a confirmation appeared during *this*
-   * page-load", so re-opening a posting handed the user a live Apply and the
-   * extension would press the site's Send button a second time.
-   *
-   * Read straight from `getState()`, which was already fetching `jobUrls` on every
-   * run and throwing them away — no new message and no new storage key.
-   */
-  private alreadyApplied = false;
-  /** When that record says it went in, for the modal's banner. */
-  private appliedAt?: number;
-  private successObserver?: MutationObserver;
-  /** Latest quick-apply vs. external-redirect verdict for this page. */
-  private detection?: RedirectDetection;
-  /** The handoff has been triggered once; don't fire it again on a re-run. */
-  private followed = false;
-  /** The user overrode a redirect verdict and wants this page filled. */
-  private fillAnyway = false;
-  /** Board posting this page was reached from, when it is a tracked destination. */
-  private landedFrom?: string;
-  /** Queue-session snapshot, refreshed per run so the modal can show progress. */
-  private session?: SessionState;
-  /** User settings; the modal's default size and position live here. */
+  private profile: Profile = DEFAULT_PROFILE;
+  private lessons: Lesson[] = [];
   private settings: Settings = DEFAULT_SETTINGS;
-  /**
-   * Where the user dragged the card *on this page*. Deliberately never persisted:
-   * `settings.modalLayout` is the default, and only the Options simulator may
-   * change it. Nudging the card aside to read the field underneath it is a
-   * one-off gesture, not a preference, and it used to redefine where the modal
-   * opened on every posting after it. Lives exactly as long as the page does.
-   */
+  private cvFile: File | null = null;
+  private coverFile: File | null = null;
+  private engine: FillEngine;
+  private modal?: FillerModal;
+  private chip?: QueueChip;
+  private queue: QueueTabState = { inQueue: false };
+  /** The job database has this URL down as applied. Re-read on every storage change. */
+  private alreadyApplied = false;
+  private appliedAt?: number;
+  /** The URL is in the job database at all — its posting text is worth keeping. */
+  private tracked = false;
+  /** Rows Confirm has been pressed on — an acknowledgement, never a status. */
+  private confirmed = new Set<string>();
+  private cancelPicker?: () => void;
+  /** Where the user dragged the card *on this page*. Never persisted. */
   private draggedLayout?: ModalLayout;
-  /** The last posting text written to the archive, so re-renders don't rewrite it. */
+  /** The user asked for the card (popup Fill, Teach, the chip) — show it whatever it holds. */
+  private wanted = false;
+  private job?: ExtractedJob;
   private capturedSignature?: string;
+  private pendingHits: string[] = [];
+  private hitsTimer?: ReturnType<typeof setTimeout>;
 
-  /* --- Recording a site by applying to one job --- */
-
-  /** The recording in progress or awaiting review; the background holds the truth. */
-  private recording?: Recording;
-  /** What it compiled to — computed once on stop, then again after every review edit. */
-  private compiled?: CompiledSetup;
-  private recorder?: RecorderHandle;
-  private recorderBar?: RecorderBar;
-  /** Which page of the recording this one is — the bar orders its menu by it. */
-  private recordingLeg: RecordLeg = 'posting';
-  /**
-   * The one thing the bar has to say about the press that just happened, when it was
-   * not simply recorded. Cleared by the next step, because it is about *that* press.
-   */
-  private recorderNotice?: string;
-  /**
-   * Whether the after-sending pass was reached by actually sending something.
-   *
-   * Apply presses the site's Send button and *then* opens the bar; the panel's
-   * `Mark the confirmation` and the review card's `I’ll send it myself` open it over
-   * a page where nothing has gone in yet. The bar's one sentence is a different
-   * sentence in each case, and through the second door the first one is untrue.
-   */
-  private confirmationPassSent = false;
-  /**
-   * A recording's first pass was saved a moment ago and the card in front of the user
-   * is the report of it.
-   *
-   * One render only — `detectAndFill` clears it, the same rule `confirmedFields`
-   * follows: it is a fact about the press that got here, not about the site, so a
-   * Re-run must not still be claiming it. All it changes is which of the two
-   * `finishSetup` wordings the banner uses.
-   */
-  private setupJustSaved = false;
-  /**
-   * What happened when a declared field was filled, so the field sweep can redraw it.
-   *
-   * `markBoundSteps` runs a few hundred milliseconds after every recorded gesture and
-   * paints each bound step green; without this, "there is nothing in your profile for
-   * this" would be told to the user once and then quietly contradicted by the page.
-   * Per recording, because a new one carries no memory of the last one's fills — the
-   * same rule `confirmedFields` follows for the report.
-   */
-  private declaredFills = new Map<FieldKey, MatchConfidence>();
-  /** The bounded page watch that re-sweeps after a gesture — see `scheduleFieldSweep`. */
-  private sweepWatch?: () => void;
-  private sweepWindow?: ReturnType<typeof setTimeout>;
+  constructor() {
+    this.engine = new FillEngine({
+      profile: () => this.profile,
+      lessons: () => this.lessons,
+      docs: () => ({ cv: this.cvFile, cover: this.coverFile }),
+      onReport: () => this.onReport(),
+      onLessonHits: (ids) => this.countHits(ids),
+      showLabels: () => this.wanted || this.queue.inQueue,
+    });
+  }
 
   async init(): Promise<void> {
     console.info(`${LOG} content script ready — v${chrome.runtime.getManifest().version} · build ${BUILD_ID}`);
-    const state = await getState();
-    this.profile = state.profile;
-    this.settings = state.settings;
-    this.config = findMatchingConfig(location.href, state.siteConfigs);
-    this.readAppliedRecord(state.jobUrls);
+    await this.loadState();
+    await this.loadDocs();
 
     chrome.runtime.onMessage.addListener((msg: Message, _sender, sendResponse) => {
       this.handleMessage(msg, sendResponse);
       return true; // async response
     });
+    chrome.storage.onChanged.addListener((changes, area) => {
+      if (area === 'local') void this.onStorageChanged(Object.keys(changes));
+    });
 
-    // A recording may already be under way — this page could be the employer's
-    // site, reached by a handoff, in a tab that was opened seconds ago. Resuming
-    // before anything else matters: `run()` must not fill a form the user is about
-    // to fill themselves.
-    await this.resumeRecording();
+    this.queue = (await this.ask<QueueTabState>({ type: MSG.QUEUE_TAB })) ?? { inQueue: false };
+    if (this.queue.inQueue) this.showChip();
+    // Asked once more a moment later: a fast page can load before the session has
+    // finished writing down that it opened this tab.
+    else setTimeout(() => void this.recheckQueue(), QUEUE_RECHECK_MS);
 
-    if (this.config) {
-      this.setupSubmitDetection();
-      if (state.settings.autoRunOnLoad) {
-        this.run().catch((e) => console.error(LOG, 'auto-run failed', e));
-      }
+    if (this.settings.fillAutomatically) {
+      this.engine.start();
+      this.engine.sweep();
     }
   }
 
-  /**
-   * Detects that the application was *actually sent*. `successSelector` becoming
-   * VISIBLE is the only thing that counts, and that is a deliberate narrowing:
-   *
-   *  - A `submit` event proves nothing. It fires before the server answers, and
-   *    a site that validates in JS sees it in the capture phase *and then*
-   *    rejects the form — which recorded an application that never happened.
-   *  - Presence in the DOM proves nothing either: sites routinely pre-render a
-   *    hidden thank-you node and only reveal it once the server confirms.
-   *
-   * The consequence is that Apply is greyed out until a site has a
-   * `successSelector` (see `applyState`), rather than sending something whose
-   * outcome cannot be read back.
-   *
-   * The confirmation is often on a *different page* — Greenhouse lands on
-   * `…/jobs/<id>/confirmation`. That is fine: this arms on every matching page,
-   * so the fresh content script there reports, and the background attributes it
-   * to the posting this tab was filling.
-   */
-  private setupSubmitDetection(): void {
-    if (this.submitArmed) return;
-    const selector = this.config?.successSelector;
-    if (!selector) return;
-    this.submitArmed = true;
-
-    const report = () => {
-      if (this.submitReported) return;
-      this.submitReported = true;
-      this.successObserver?.disconnect();
-      chrome.runtime.sendMessage({ type: MSG.SUBMITTED, url: location.href });
-      // Say so on screen. The site's own confirmation is often below the fold,
-      // or behind this very modal, so "did that go through?" is otherwise a
-      // question the user answers by scrolling around the page they just sent.
-      //
-      // Unfolded first, and that is the whole of the receipt appearing at all on the
-      // path that most needs it. `apply()` folds the card to its pill before pressing
-      // Send — the user is about to be asked to point at the page — so `showModal`
-      // alone repainted a *pill*, and the green banner, the `Sent` chip and
-      // `Applied ✓` were only ever seen by someone who reloaded. `restore` is a no-op
-      // on a card that is already expanded, so the ordinary Apply is untouched.
-      this.applied = true;
-      if (this.modal) {
-        this.modal.restore();
-        this.showModal();
-      }
-    };
-
-    // Wait for the confirmation element to be VISIBLE, not merely present.
-    const check = () => {
-      const el = query(document, selector);
-      if (el && isRendered(el)) { report(); return true; }
-      return false;
-    };
-    if (check()) return;
-    this.successObserver = new MutationObserver(() => check());
-    // Observe both structure and the attributes that flip visibility, since the
-    // reveal is often a style/class/hidden change on an existing element.
-    this.successObserver.observe(document.documentElement, {
-      childList: true,
-      subtree: true,
-      attributes: true,
-      attributeFilter: ['style', 'class', 'hidden'],
-    });
-  }
-
-  /**
-   * Ask the database what it already knows about the page in front of the user.
-   *
-   * Only this exact URL. `applyStatusChain` marks both ends of a two-step posting
-   * when one is applied, so the board posting and the employer's form each carry
-   * their own `applied` entry and there is no `sourceUrl` chain left to walk.
-   */
-  private readAppliedRecord(urls: JobUrlEntry[]): void {
-    this.alreadyApplied = statusForUrl(urls, location.href) === 'applied';
+  private async loadState(): Promise<void> {
+    const state = await getState();
+    this.profile = state.profile;
+    this.lessons = state.lessons;
+    this.settings = state.settings;
+    const status = statusForUrl(state.jobUrls, location.href);
+    this.tracked = status !== undefined;
+    this.alreadyApplied = status === 'applied';
     this.appliedAt = this.alreadyApplied
-      ? urls.find((e) => e.url === location.href)?.appliedAt
+      ? state.jobUrls.find((e) => e.url === location.href)?.appliedAt
       : undefined;
   }
 
+  /** The CV and the cover letter as real `File`s. */
+  private async loadDocs(): Promise<void> {
+    const [cv, cover] = await Promise.all([getDoc('resume'), getDoc('coverLetter')]);
+    this.cvFile = cv ? cvFileToFile(cv) : null;
+    this.coverFile = cover ? cvFileToFile(cover) : null;
+  }
+
+  /**
+   * Something changed in Options, or on another tab: a new detail, a new field, a
+   * lesson taught elsewhere. Every open row on this page gets another look — the
+   * engine never moves a row, and never writes into a box that already has an answer.
+   */
+  private async onStorageChanged(keys: string[]): Promise<void> {
+    const relevant = keys.some((k) => ['profile', 'lessons', 'settings', 'jobUrls', ...DOC_KEYS].includes(k));
+    if (!relevant) return;
+    // A lesson hit is a write this page made; reading it back is not news.
+    if (keys.length === 1 && keys[0] === 'lessons' && this.hitsInFlight) return;
+    await this.loadState();
+    if (keys.some((k) => DOC_KEYS.includes(k))) await this.loadDocs();
+    if (this.engine.hasRun) this.engine.reconsider();
+    else this.render();
+  }
+
   private status(): StatusResponse {
+    const rows = this.engine.rows;
     return {
-      siteMatched: !!this.config,
-      siteName: this.config?.name,
-      configId: this.config?.id,
-      filledCount: this.matches.filter((m) => m.filled).length,
-      reportedCount: this.matches.length,
-      hasRun: this.hasRun,
-      postingKind: this.detection?.kind,
-      redirectHref: this.detection?.href,
-      landedFrom: this.landedFrom,
+      filledCount: rows.filter((r) => r.filled).length,
+      reportedCount: rows.length,
+      toTeach: rows.filter((r) => !r.field && !r.ignored).length,
+      hasRun: this.engine.hasRun,
       modalMinimized: this.modal?.isMinimized ?? false,
+      inQueue: this.queue.inQueue,
     };
   }
 
@@ -325,27 +156,21 @@ class Controller {
         sendResponse(this.status());
         return;
       case MSG.RUN:
-        await this.run();
+        await this.fillNow();
         sendResponse(this.status());
         return;
       case MSG.RESET:
         this.reset();
         sendResponse(this.status());
         return;
-      case MSG.PICK:
-        this.pick(msg.field);
-        sendResponse(this.status());
-        return;
-      case MSG.SETUP:
-        await this.openSetup();
+      case MSG.TEACH:
+        this.point();
         sendResponse(this.status());
         return;
       case MSG.SHOW_REPORT:
+        this.wanted = true;
+        this.render();
         this.modal?.restore();
-        sendResponse(this.status());
-        return;
-      case MSG.REDIRECT_LANDED:
-        await this.onRedirectLanded(msg.sourceUrl);
         sendResponse(this.status());
         return;
       default:
@@ -354,288 +179,245 @@ class Controller {
   }
 
   /**
-   * Full flow: wait -> prep -> classify -> (follow handoff | detect -> fill) -> modal.
-   *
-   * Boards mix two shapes of posting, so the branch is per page: a posting whose
-   * apply button leaves for the employer's own ATS has no form to fill here, and
-   * gets handed off (and recorded) instead.
+   * The popup's Fill and the card's Fill again: sweep now, whatever the setting
+   * says, and show the card. With `fillAutomatically` off this is the only way a
+   * page is ever filled, so it also starts the watch — the user has asked for this
+   * page, and a form that opens a moment later is part of what they asked for.
    */
-  async run(): Promise<void> {
-    // While a recording is live the user is applying by hand. Filling the form
-    // underneath them would rewrite the answers they are typing, click prep steps
-    // they are in the middle of, and record a sequence that mixes their gestures
-    // with ours — so the whole flow stands down until the recording stops.
-    // The after-sending pass has no recorder handle — the page is live and nothing is
-    // being watched — but it is still a page the user is applying on, and re-filling
-    // the confirmation they are being asked to point at is the same failure.
-    if (this.recorder || this.recordingPhase() === 'afterSend') return;
-    if (!this.config) return;
-    const config = this.config;
-    // A fresh run is a fresh record, so the report of the save that led here goes
-    // with the last one — `Re-run` is the press that most obviously ends it.
-    this.setupJustSaved = false;
-
-    // Refresh profile + CV each run (user may have edited them).
-    const state = await getState();
-    this.profile = state.profile;
-    this.config = findMatchingConfig(location.href, state.siteConfigs) ?? config;
-    // Re-read per run, not once at startup: a status corrected in Options → Queue
-    // has to reach the card that Re-run rebuilds, and this is the only moment the
-    // page looks at the database.
-    this.readAppliedRecord(state.jobUrls);
-
+  private async fillNow(): Promise<void> {
+    await this.loadState();
     await this.loadDocs();
-    this.session = await this.fetchSession();
-
-    if (config.waitFor) await waitForSelector(config.waitFor, config.waitTimeoutMs ?? 15000);
-    await runPrepSteps(config.prep);
-
-    const detection = detectRedirect({
-      root: document,
-      pageUrl: location.href,
-      config: this.config!.redirect,
-      keepInBrowser: this.settings.keepInBrowser,
-    });
-    this.detection = detection;
-
-    if (this.shouldFollow(detection)) {
-      this.hasRun = true;
-      await this.followRedirect(detection);
-      return;
-    }
-
-    this.detectAndFill();
-    // Picking a confirmation element mid-session has to arm the watcher now,
-    // not on the next page load — `setupSubmitDetection` is a no-op until the
-    // config has a `successSelector`, so the run at startup may have skipped it.
-    this.setupSubmitDetection();
-    this.noteApplying();
-    this.showModal();
-    this.hasRun = true;
+    this.wanted = true;
+    this.engine.start();
+    // A fresh look at everything still open, then anything new.
+    this.engine.reconsider();
+    this.engine.sweep();
+    this.job = undefined;
+    this.render();
+    this.modal?.restore();
   }
+
+  /* ---------------- Showing it ---------------- */
 
   /**
-   * Tell the background which posting this tab is working on, so a confirmation
-   * that renders on a *different* URL is still attributed here. Only once a
-   * field was actually filled: a confirmation page that happens to match a
-   * config would otherwise overwrite the posting with its own URL.
+   * The engine reported. Whether to show anything is this file's call:
+   *
+   *   - something was filled, or the user asked → the card exists (folded, unless…)
+   *   - a queue tab, with `openCardOnQueueTabs` → it opens expanded, once
+   *   - otherwise → nothing at all. A page with a search box and a newsletter field
+   *     the extension did not recognise is not a page to put a pill on.
    */
-  private noteApplying(): void {
-    if (!this.matches.some((m) => m.filled)) return;
-    chrome.runtime.sendMessage({ type: MSG.APPLYING, url: location.href })
-      .catch(() => {});
+  private onReport(): void {
+    this.render();
   }
 
-  /* ---------------- Two-step (redirect) postings ---------------- */
-
-  private shouldFollow(det: RedirectDetection): boolean {
-    if (det.kind !== 'redirect' || this.fillAnyway) return false;
-    // Already applied for: following would re-open the employer's form for a job
-    // that is finished, and on `redirectTarget: newTabCloseSource` it would close
-    // the posting the user just opened to look at.
-    if (this.alreadyApplied) return false;
-    // An apply control that hands off to a phone app is not followable: with no
-    // href the background answers `{ click: true }`, and clicking it is precisely
-    // the app launch `settings.keepInBrowser` exists to prevent. Falling through
-    // fills the page instead, and the modal's `appLink` banner says why.
-    if (det.appLink) return false;
-    // Setup mode is for inspecting the page, not leaving it.
-    if (this.setupPanel) return false;
-    // Never bounce straight back to the board that sent us here.
-    if (this.landedFrom && det.href && !isExternalUrl(this.landedFrom, det.href)) return false;
-    return true;
+  private shouldShow(): boolean {
+    if (this.wanted || this.modal) return true;
+    const rows = this.engine.rows;
+    if (this.queue.inQueue) return rows.length > 0 || this.settings.openCardOnQueueTabs;
+    return rows.some((r) => r.filled);
   }
 
-  /**
-   * Hand off to the external application: do the board's own bookkeeping first
-   * (typically clicking "Save job" so the site records the application on its
-   * side), then let the background open + track the destination.
-   */
-  private async followRedirect(det: RedirectDetection): Promise<void> {
-    this.showModal();
-    if (this.followed) return;
-    this.followed = true;
-    console.info(LOG, 'external application —', det.reason);
-
-    // Board-side bookkeeping must never block the handoff: a missing Save button
-    // (not signed in, markup changed) is a warning, not a dead end.
-    const steps = this.config?.redirect?.beforeFollow ?? [];
-    await runPrepSteps(steps.map((s) => ({ ...s, optional: true })));
-
-    let resp: FollowRedirectResponse | undefined;
-    try {
-      resp = await chrome.runtime.sendMessage({
-        type: MSG.FOLLOW_REDIRECT, sourceUrl: location.href, href: det.href,
+  private render(): void {
+    if (!this.shouldShow()) return;
+    const first = !this.modal;
+    if (!this.modal) {
+      this.modal = new FillerModal({
+        onRerun: () => void this.fillNow(),
+        onConfirm: (id) => this.confirm(id),
+        onTeach: (id, choice) => void this.teach(id, choice),
+        onPoint: () => this.point(),
+        onSkip: () => this.skipPosting(),
+        onOpenOptions: () => chrome.runtime.sendMessage({ type: MSG.OPEN_OPTIONS }),
+        onClose: () => this.modal?.minimize(),
+        onFold: () => this.chip?.setCardOpen(!this.modal?.isMinimized),
+        onLayoutChange: (layout) => { this.draggedLayout = layout; },
+        onFullscreen: (on) => {
+          this.settings.modalFullscreen = on;
+          void patchSettings({ modalFullscreen: on });
+        },
       });
-    } catch (e) {
-      console.warn(LOG, 'follow-redirect message failed', e);
+      // A queue tab opens on the posting; anywhere else the card is about the form.
+      this.modal.setView(this.queue.inQueue ? 'job' : 'fields');
+      const expand = this.wanted || (this.queue.inQueue && this.settings.openCardOnQueueTabs);
+      if (!expand) this.modal.minimize();
     }
-    // Nothing was opened, so the banner must not say it was. `followed` is what
-    // picks `externalOpened` over `external`, and that state promises "the form
-    // there is filled on arrival" — on an undelivered message (an MV3 worker
-    // that had gone to sleep) or a refusal (`no tab`, `app link`) there is
-    // neither a form nor an arrival. Dropping back to `external` also leaves the
-    // footer's "Open application" live, which is the one thing that recovers it.
-    if (!resp || resp.error) this.followed = false;
-    this.showModal();
 
-    if (resp?.navigate) { location.href = resp.navigate; return; }
-    if (resp?.click) det.element?.click();
-  }
-
-  /** The user disagrees with the redirect verdict: fill this page after all. */
-  private async fillHere(): Promise<void> {
-    this.fillAnyway = true;
-    await this.run();
-  }
-
-  /**
-   * The fill a freshly-saved recording hands to the review card.
-   *
-   * A recording leaves the page half-filled — `pickForBind` fills the fields the user
-   * *declared* and nothing else — and `run()` stands down for the whole of one, so
-   * the form behind the setup panel has never seen a real fill. This is that fill,
-   * and then the card, so the question the card is about to ask ("send this
-   * application?") is asked over the application it would send.
-   *
-   * A near-copy of the tail of `run()` rather than a call to it, for two reasons:
-   *
-   * - **It must not replay `prep`.** Those steps are the clicks the user has just
-   *   made by hand — that is where they came from — so the page is already where they
-   *   would take it, and running them again re-presses "Show more" and re-toggles the
-   *   disclosure that opened the form.
-   * - **It must not follow a handoff.** `run()` decides `shouldFollow` before
-   *   anything else, and a two-step config saved a second ago would navigate straight
-   *   off the page the recording was made on.
-   */
-  private async fillForSend(): Promise<void> {
-    const state = await getState();
-    this.profile = state.profile;
-    this.config = findMatchingConfig(location.href, state.siteConfigs) ?? this.config;
-    this.readAppliedRecord(state.jobUrls);
-    await this.loadDocs();
-    this.session = await this.fetchSession();
-    if (!this.config) return;
-
-    this.detectAndFill();
-    this.setupSubmitDetection();
-    this.noteApplying();
-    this.showModal();
-    this.hasRun = true;
-  }
-
-  /**
-   * This tab is where a tracked handoff landed. Adopt the provenance, and if the
-   * destination ATS has no config of its own, create one so the ordinary
-   * heuristics can fill it now and the site is set up for next time.
-   */
-  private async onRedirectLanded(sourceUrl: string): Promise<void> {
-    this.landedFrom = sourceUrl;
-    if (!this.config) {
-      this.config = await ensureConfigForUrl(location.href);
-      this.setupSubmitDetection();
-      console.info(LOG, 'redirect destination — created config', this.config.id);
+    if (!this.job) {
+      this.job = extractJob();
+      this.captureJob(this.job);
     }
-    if (!this.hasRun) await this.run();
-    else this.showModal();
-  }
-
-  /**
-   * The fields there is something to fill *with*. Order does not matter here —
-   * `detectFields` uses it as a tie-break and the report is sorted afterwards —
-   * but membership does: a field with no value would report as unmatched on
-   * every posting, which is noise about the profile, not about the page.
-   */
-  private wantedFields(): FieldKey[] {
-    const text = Object.entries(this.profile.values)
-      .filter(([, v]) => v != null && v !== '')
-      .map(([k]) => k as FieldKey);
-    if (this.cvFile) text.push('resume');
-    // A cover-letter *file* is reason enough on its own: the upload it fills is
-    // a different control from the textarea the text fills.
-    if (this.coverFile && !text.includes('coverLetter')) text.push('coverLetter');
-    return text;
-  }
-
-  private detectAndFill(): void {
-    const config = this.config!;
-    clearHighlights();
-    this.elements.clear();
-    // A new fill is a new record, so the acknowledgements from the last one go
-    // with it — the rows they sat on may not even exist in what follows.
-    this.confirmedFields.clear();
-
-    const detected = detectForConfig({ root: document, fields: this.wantedFields(), config });
-
-    this.matches = detected.map((d) => {
-      const value = d.field === 'resume' ? undefined : this.profile.values[d.field];
-      const selectorUsed = d.selectorUsed ?? (d.element ? generateSelector(d.element) : undefined);
-      const required = d.element
-        ? d.element.hasAttribute('required') || d.element.getAttribute('aria-required') === 'true'
-        : false;
-      const match: FieldMatch = {
-        field: d.field,
-        source: d.source,
-        confidence: d.confidence,
-        selectorUsed,
-        valueToFill: value,
-        filled: false,
-        required,
-      };
-      if (d.element) {
-        this.elements.set(d.field, d.element);
-        if (d.confidence === 'high') match.filled = this.applyFill(d.field, d.element);
-        highlight(d.element, matchStatus(match));
-      }
-      return match;
+    const job = this.job;
+    this.modal.render({
+      siteName: hostOf(location.href),
+      jobTitle: job.title,
+      jobDescription: job.description,
+      jobRequirements: job.requirements,
+      meta: job.meta,
+      matches: this.engine.rows,
+      confirmed: [...this.confirmed],
+      alreadyApplied: this.alreadyApplied,
+      appliedAt: this.appliedAt,
+      profileEmpty: this.profileEmpty(),
+      choices: fieldChoices(this.profile),
+      queue: this.queue.inQueue && this.queue.progress
+        ? { active: true, batchSize: 0, progress: this.queue.progress }
+        : undefined,
+      layout: this.draggedLayout ?? this.settings.modalLayout,
+      fullscreen: this.settings.modalFullscreen,
     });
-    // Reading order, not detection order — and settled *here*, once, because this
-    // is the moment the report is a record of: unmatched, then to check, then
-    // filled, `FIELD_ORDER` deciding ties. The modal used to run this per render,
-    // which meant the list re-sorted itself under the user as they worked it.
-    // Detection is left to run in its own order because it uses that order as a
-    // tie-break.
-    this.matches = orderReport(this.matches);
+    if (first) this.chip?.setCardOpen(!this.modal.isMinimized);
   }
 
-  /** Whether the *profile* can supply this field — the split `orderFields` sorts on. */
-  private hasValueFor(field: FieldKey): boolean {
-    if (field === 'resume') return !!this.cvFile;
-    if (field === 'coverLetter') return !!this.coverFile || !!this.profile.values.coverLetter;
-    return !!this.profile.values[field];
+  private profileEmpty(): boolean {
+    const p = this.profile;
+    return !Object.values(p.values).some((v) => v)
+      && !(p.customFields ?? []).some((f) => f.value)
+      && !this.cvFile && !this.coverFile;
+  }
+
+  private async recheckQueue(): Promise<void> {
+    const state = await this.ask<QueueTabState>({ type: MSG.QUEUE_TAB });
+    if (!state?.inQueue || this.queue.inQueue) return;
+    this.queue = state;
+    this.showChip();
+    // A queue tab opens on the card, as it would have done had the first answer been yes.
+    if (this.settings.openCardOnQueueTabs) {
+      this.wanted = true;
+      this.render();
+      this.modal?.setView('job');
+      this.modal?.restore();
+    }
+  }
+
+  private showChip(): void {
+    this.chip = new QueueChip(() => {
+      this.wanted = true;
+      this.render();
+      this.modal?.restore();
+    });
+    this.chip.render(this.queue.progress);
   }
 
   /**
-   * Fill a single field's element from the profile. Returns whether it filled.
-   *
-   * The cover letter is the one field that can go either way: the page decides,
-   * by whether the control it offers is an upload or something to type into.
+   * Keep what this page said, so the posting can be judged after the tab is gone —
+   * but only for a page the job database knows: the queue opened it, or it was
+   * imported. The engine runs on every site, and a shop's product page is not a
+   * job posting to archive.
    */
-  private applyFill(field: FieldKey, el: HTMLElement): boolean {
-    const fileInput = el instanceof HTMLInputElement && el.type === 'file' ? el : null;
-    if (field === 'resume') {
-      if (!this.cvFile || !fileInput) return false;
-      return fillFileInput(fileInput, this.cvFile);
-    }
-    if (field === 'coverLetter' && fileInput) {
-      if (!this.coverFile) return false;
-      return fillFileInput(fileInput, this.coverFile);
-    }
-    const value = this.profile.values[field];
-    if (value == null || value === '') return false;
-    return fillTextField(el, value);
+  private captureJob(job: ExtractedJob): void {
+    if (!this.tracked && !this.queue.inQueue) return;
+    const details: JobDetails = {
+      url: this.queue.url ?? location.href,
+      title: job.title,
+      site: hostOf(location.href),
+      description: job.description,
+      requirements: job.requirements,
+      meta: job.meta,
+      capturedAt: Date.now(),
+    };
+    const signature = JSON.stringify([details.url, details.title, details.description, details.requirements, details.meta]);
+    if (signature === this.capturedSignature) return;
+    this.capturedSignature = signature;
+    void mutateJobDetails((map) => captureDetails(map, details))
+      .catch((e) => console.warn(LOG, 'capture failed', e));
   }
 
-  /** Ask the background where this posting sits in the queue session, if any. */
-  private async fetchSession(): Promise<SessionState | undefined> {
-    return this.ask<SessionState>({ type: MSG.SESSION_STATE });
+  /* ---------------- The card's actions ---------------- */
+
+  private confirm(id: string): void {
+    if (this.engine.confirm(id)) this.confirmed.add(id);
+    this.render();
   }
 
   /**
-   * Ask the background something and tolerate it not answering. The worker can be
-   * asleep, mid-restart, or gone entirely on an extension reload while a page is
-   * still open — none of which is a reason for the page to throw.
+   * Teach one row. A new field is made first, so the lesson has something to point
+   * at; then the lesson is keyed on the shortest signature that names this input
+   * alone among every input on the page (`uniqueSignature`), stored, and applied —
+   * which fills the row in place.
    */
+  private async teach(id: string, choice: TeachChoice): Promise<void> {
+    const cand = this.engine.candidateFor(id);
+    if (!cand) return;
+
+    let target: { field: FieldId } | { ignore: true };
+    if ('newField' in choice) {
+      const field = newCustomField(choice.newField.label, 'text', choice.newField.value);
+      this.profile = await mutateProfile((p) => ({ ...p, customFields: [...(p.customFields ?? []), field] }));
+      target = { field: field.id };
+    } else {
+      target = choice;
+    }
+
+    const all = this.engine.allCandidates();
+    const index = all.findIndex((c) => c.el === cand.el);
+    if (index < 0) return;
+    const host = hostOf(location.href);
+    const signature = uniqueSignature(all.map((c) => c.parts), index, host);
+    const lessonId = newLessonId();
+    this.lessons = await mutateLessons((list) => teach(list, {
+      signature,
+      target,
+      label: cand.question || 'Unlabelled field',
+      taughtOn: host,
+    }, Date.now(), lessonId));
+    this.engine.applyTeaching(id, target, lessonId);
+    // The same lesson may answer other open rows here — the second "Given name" on
+    // page two, say. Nothing filled moves.
+    this.engine.reconsider();
+  }
+
+  /**
+   * Point at a field the report did not list, then teach it. The card gets out of
+   * the way first: the picker reads `elementFromPoint`, which would land on it.
+   */
+  private point(): void {
+    this.cancelPicker?.();
+    this.modal?.setHidden(true);
+    const restore = () => this.modal?.setHidden(false);
+    this.cancelPicker = startPicker((el) => {
+      restore();
+      const control = resolveControl(el) as HTMLElement;
+      this.wanted = true;
+      if (!this.engine.hasRun) this.engine.sweep({ fill: false });
+      const row = this.engine.rowForElement(control);
+      this.render();
+      if (row) this.modal?.openTeach(row.id);
+      else this.modal?.restore();
+    }, 'field to teach', restore);
+  }
+
+  /**
+   * Mark this posting skipped; the background closes the tab and opens the next.
+   * Refuses on a posting already applied to: `recordStatus` is a blunt overwrite,
+   * so a skip here would file "skipped" over "applied" — and sync would carry it.
+   */
+  private skipPosting(): void {
+    if (this.alreadyApplied) return;
+    chrome.runtime.sendMessage({ type: MSG.SESSION_SKIP, url: this.queue.url ?? location.href })
+      .catch((e) => console.warn(LOG, 'skip failed', e));
+  }
+
+  /* ---------------- Lesson hits ---------------- */
+
+  private hitsInFlight = false;
+
+  private countHits(ids: string[]): void {
+    this.pendingHits.push(...ids);
+    if (this.hitsTimer) return;
+    this.hitsTimer = setTimeout(() => {
+      this.hitsTimer = undefined;
+      const batch = this.pendingHits.splice(0);
+      this.hitsInFlight = true;
+      void mutateLessons((list) => recordHits(list, batch))
+        .then((list) => { this.lessons = list; })
+        .catch((e) => console.warn(LOG, 'lesson hits not counted', e))
+        .finally(() => { setTimeout(() => { this.hitsInFlight = false; }, 0); });
+    }, HITS_FLUSH_MS);
+  }
+
+  /* ---------------- Helpers ---------------- */
+
   private async ask<T>(message: Message): Promise<T | undefined> {
     try {
       return await chrome.runtime.sendMessage(message);
@@ -645,1536 +427,37 @@ class Controller {
   }
 
   /**
-   * Mark this posting skipped; the background closes the tab and opens the next.
-   *
-   * Refuses on a posting already applied to, and the reason is not tidiness: this
-   * ends in `recordStatus`, which is a blunt overwrite rather than a promote, so a
-   * skip here would file "skipped" over "applied" and lose the record of an
-   * application that really was sent — and, because the sync merge derives status
-   * from the newest history event, would carry that loss to the other device. The
-   * modal retires the button; this is what makes it true.
-   */
-  private skipPosting(): void {
-    if (this.applied || this.alreadyApplied) return;
-    chrome.runtime.sendMessage({ type: MSG.SESSION_SKIP, url: location.href })
-      .catch((e) => console.warn(LOG, 'skip failed', e));
-  }
-
-  private showModal(): void {
-    if (!this.modal) {
-      this.modal = new FillerModal({
-        onRerun: () => this.run(),
-        onApply: () => void this.apply(),
-        onConfirm: (field) => this.confirmField(field),
-        onPick: (field) => this.pick(field),
-        onFollow: () => { this.followed = false; void this.followRedirect(this.detection!); },
-        onFillAnyway: () => this.fillHere(),
-        onSkip: () => this.skipPosting(),
-        // The other answer to `finishSetup`: the user presses the site's own Send
-        // button, and the extension stands by to ask where the reply is. It is the
-        // same second pass Apply reaches — only the finger that sends is different,
-        // which is why it goes to the same method the panel's own offer does.
-        onSendMyself: () => {
-          // The card folds first, for the same reason it does under Apply: what
-          // happens next happens on the page — the user has to reach the site's own
-          // Send button, and then point at whatever it answers with.
-          this.modal?.minimize();
-          void this.startConfirmationPass(false);
-        },
-        // The two ways out of a posting, from the overflow menu. Setup is a
-        // direct call and not a message: the panel lives in this same content
-        // script, and `openSetup` already folds the modal to its pill through
-        // `arbitrateSheets`.
-        onOpenSetup: () => void this.openSetup(),
-        onOpenOptions: () => chrome.runtime.sendMessage({ type: MSG.OPEN_OPTIONS }),
-        // Collapse to the pill rather than destroying the report: the fills stay
-        // in place and the modal is one tap away, instead of only reachable
-        // through a Reset that would wipe them.
-        onClose: () => this.modal?.minimize(),
-        onFold: () => this.arbitrateSheets('modal'),
-        onLayoutChange: (layout) => { this.draggedLayout = layout; },
-        // The opposite of a drag, and the only setting a content script writes:
-        // "give this posting the whole window" is a preference, decided while
-        // looking at a posting, and it is meant to hold for the ones after it.
-        // Mutating the snapshot as well keeps one source of truth — the next
-        // `showModal` reads `this.settings` and renders the same answer.
-        onFullscreen: (on) => {
-          this.settings.modalFullscreen = on;
-          void patchSettings({ modalFullscreen: on });
-        },
-      });
-    }
-    const job = extractJob(this.config!);
-    this.captureJob(job);
-    const det = this.detection;
-    // An app-handoff apply link is deliberately *not* a redirect here, even when
-    // a config marked the site two-step: the redirect branch of the footer leads
-    // with "Open application", and there is nothing this can open. The `appLink`
-    // banner replaces it and outranks it in `flowBanner` for the same reason.
-    const appLink = !!det?.appLink;
-    const isRedirect = det?.kind === 'redirect' && !this.fillAnyway && !appLink;
-    this.modal.render({
-      siteName: this.config!.name,
-      jobTitle: job.title,
-      jobDescription: job.description,
-      jobRequirements: job.requirements,
-      meta: job.meta,
-      matches: this.matches,
-      confirmed: [...this.confirmedFields],
-      applyState: this.applyState(isRedirect),
-      applied: this.applied,
-      alreadyApplied: this.alreadyApplied,
-      appliedAt: this.appliedAt,
-      setupSaved: this.setupJustSaved,
-      redirect: isRedirect
-        ? { host: det!.href ? hostOf(det!.href) : undefined, reason: det!.reason, followed: this.followed }
-        : undefined,
-      appLink: appLink && !this.fillAnyway,
-      via: this.landedFrom ? hostOf(this.landedFrom) : undefined,
-      session: this.session,
-      // The drag wins for this page. `render` rebuilds `ModalData` from scratch,
-      // and `showModal` is re-entered by confirmField, pick, apply and the
-      // message handlers — without this the card would snap back to the stored
-      // default the moment any of them ran.
-      layout: this.draggedLayout ?? this.settings.modalLayout,
-      fullscreen: this.settings.modalFullscreen,
-    });
-    this.arbitrateSheets('modal');
-  }
-
-  /**
-   * There is one slot on this page, and this is what enforces it.
-   *
-   * The two sheets are one object with two renderings — same stored rectangle,
-   * same drag, same bottom-sheet breakpoint — so two of them expanded is two cards
-   * fighting over the same pixels, which under 640px is literally the same
-   * rectangle with nothing but DOM order deciding the winner. `who` is the sheet
-   * that just claimed the slot; everything else folds to its pill.
-   *
-   * Folding, never destroying: a destroyed review modal takes the fill report with
-   * it, and the only route back used to be a Reset that wiped every field it
-   * had just filled.
-   *
-   * Then the pills. A collapsed sheet shows one only when *nothing* is expanded —
-   * both pills dock bottom-right, which is where an expanded card already is, and
-   * on mobile that is underneath the sheet itself. With the slot free they stack,
-   * and the rail index has to come from here because the two pills live in
-   * separate shadow roots and neither stylesheet can see the other's.
-   */
-  private arbitrateSheets(who?: 'modal' | 'setup'): void {
-    if (who === 'modal' && !this.modal?.isMinimized) this.setupPanel?.minimize();
-    if (who === 'setup' && !this.setupPanel?.isMinimized) this.modal?.minimize();
-
-    const sheets = [this.modal, this.setupPanel].filter((s) => !!s);
-    const expanded = sheets.some((s) => !s.isMinimized);
-    let slot = 0;
-    for (const sheet of sheets) sheet.setSlot(expanded ? null : slot++);
-  }
-
-  /**
-   * Keep what this page said, so the posting can be judged after the tab is gone.
-   *
-   * Every posting the extension reads is recorded, applied or not — a decision to
-   * skip is only worth anything later if the thing skipped is still legible. The
-   * export in Options is what reads this back.
-   *
-   * Extraction already happens once per render, and `showModal` is re-entered by
-   * every confirmation, pick, apply and message; the signature guard turns that
-   * into one storage write per distinct reading of the page rather than one per
-   * render. Fire-and-forget, like `skipPosting`: nothing on screen waits for it.
-   */
-  private captureJob(job: ExtractedJob): void {
-    const details: JobDetails = {
-      url: location.href,
-      title: job.title,
-      site: this.config?.name,
-      description: job.description,
-      requirements: job.requirements,
-      meta: job.meta,
-      capturedAt: Date.now(),
-    };
-    const signature = JSON.stringify([details.title, details.description, details.requirements, details.meta]);
-    if (signature === this.capturedSignature) return;
-    this.capturedSignature = signature;
-    void mutateJobDetails((map) => captureDetails(map, details))
-      .catch((e) => console.warn(LOG, 'capture failed', e));
-  }
-
-  /**
-   * Fill one row's control on the user's say-so.
-   *
-   * It deliberately does **not** write back into `this.matches`. The report is the
-   * record of the last fill, and the whole overview — the dots, the tag words, the
-   * count line, the Job view's tiles, the Fields tab's dot and the row order — is
-   * established by `detectAndFill` and by nothing else. Rewriting one row's
-   * `filled` here re-coloured all of that and moved the row down out from under
-   * the finger that pressed it.
-   *
-   * The page still answers: the field fills and its highlight goes green. On the
-   * card the acknowledgement is the row's retired `Confirmed ✓`, which is what
-   * `confirmedFields` is for. A failed fill records nothing, so the live Confirm
-   * stays there to be pressed again.
-   */
-  private confirmField(field: FieldKey): void {
-    const el = this.elements.get(field);
-    if (!el) return;
-    const ok = this.applyFill(field, el);
-    if (ok) this.confirmedFields.add(field);
-    highlight(el, ok ? 'high' : 'low');
-    this.showModal();
-  }
-
-  /**
-   * Pick a field's control from the review modal's report.
-   *
-   * The modal gets out of the way for the same reason the setup panel does in
-   * `pickInto`: the picker reads `document.elementFromPoint`, which happily lands
-   * on the sheet's own host, so a card left on screen is a card the user can pick
-   * *from*. It used to rely on the toolbar's higher z-index alone, which stops the
-   * toolbar being covered and does nothing about the card underneath it.
-   */
-  private pick(field: FieldKey): void {
-    this.cancelPicker?.();
-    // The name the report row shows, not the storage key. This passed the bare
-    // `FieldKey`, so the picker's toolbar read `Click the "coverLetter" field` —
-    // the one place in the extension that spelled a field the way the code does.
-    // `pickFieldForSetup` has always used `FIELD_LABELS`; this is its twin.
-    const label = FIELD_LABELS[field] ?? field;
-    this.modal?.setHidden(true);
-    const restore = () => this.modal?.setHidden(false);
-    this.cancelPicker = startPicker(async (el) => {
-      const control = resolveControl(el, field === 'resume');
-      if (this.config) await saveFieldOverride(this.config.id, field, generateSelector(control));
-      restore();
-      await this.run();
-    }, String(label), restore);
-  }
-
-  /* ---------------- Recording a site by applying to one job ---------------- */
-
-  /** Which half of the setup is running here, if either. */
-  private recordingPhase(): RecordPhase | undefined {
-    return this.recording ? this.recording.phase ?? 'beforeSend' : undefined;
-  }
-
-  /**
-   * Begin the first pass. The panel folds to its pill rather than closing, because
-   * the user is about to need the whole page — and because a destroyed panel is a
-   * lost place in the wizard they will come straight back to.
-   */
-  private async startRecording(): Promise<void> {
-    if (this.recorder) return;
-    /*
-     * The flow is derived, not asked.
-     *
-     * The panel used to offer two buttons — "Apply on this site" / "Apply on the
-     * employer's site" — and the answer only ever ordered the recorder bar's Declare
-     * menu: `compileRecording` reads the flow back out of the legs the steps really
-     * arrived on (rule 1), in both directions. So it was a question a user looking at
-     * an unfamiliar posting usually cannot answer, whose answer was then overruled.
-     *
-     * `this.detection` is the classifier's verdict on this very page, set by `run()`
-     * and refreshed by `refreshSetup` on every render of the panel the press came
-     * from — the same verdict the `kind` step draws as a banner. It is a better guess
-     * than the user's and it costs them nothing.
-     */
-    const flow: RecordFlow = this.detection?.kind === 'redirect' ? 'external' : 'internal';
-    this.config = await ensureConfigForUrl(location.href);
-    await chrome.runtime.sendMessage({
-      type: MSG.RECORD_START, flow, postingUrl: location.href, phase: 'beforeSend',
-    } satisfies Message);
-    this.recording = {
-      flow, phase: 'beforeSend', startedAt: Date.now(), postingUrl: location.href, steps: [],
-    };
-    await this.loadForRecording();
-    this.setupPanel?.minimize();
-    this.attachRecorder('posting');
-  }
-
-  /**
-   * Begin the second pass: an application has just gone in, and the one thing this
-   * site still needs is on screen for as long as the site chooses to show it.
-   *
-   * It is a `Recording` rather than a bare picker for one reason, and it is the whole
-   * reason: **the confirmation is routinely on a different URL.** Greenhouse lands on
-   * `…/jobs/<id>/confirmation`, and the content script there is a fresh one that has
-   * never heard of this posting. The background's per-tab store is the only thing here
-   * that survives that, and `resumeRecording` is what picks this back up on the far
-   * side.
-   *
-   * No recorder handle is attached. The user is really applying, so the page stays
-   * live and nothing they do is watched — the only thing this pass can produce is the
-   * one thing they point at.
-   */
-  private async startConfirmationPass(sent: boolean): Promise<void> {
-    if (this.recording) return;
-    this.confirmationPassSent = sent;
-    this.config = await ensureConfigForUrl(location.href);
-    await chrome.runtime.sendMessage({
-      type: MSG.RECORD_START,
-      flow: 'internal',
-      postingUrl: location.href,
-      phase: 'afterSend',
-    } satisfies Message);
-    this.recording = {
-      flow: 'internal',
-      phase: 'afterSend',
-      startedAt: Date.now(),
-      postingUrl: location.href,
-      steps: [],
-    };
-    this.setupPanel?.minimize();
-    this.attachAfterSendBar();
-  }
-
-  /**
-   * The after-sending bar: one question, over a page nothing is holding still.
-   *
-   * Separate from `attachRecorder` rather than a branch inside it, because the two
-   * share only the bar. This pass installs no suppression, no click reader and no
-   * field sweep — the marks the first pass draws are about a form, and this page is
-   * whatever the site shows after one has been sent.
-   */
-  private attachAfterSendBar(): void {
-    if (this.recorderBar) return;
-    this.recordingLeg = 'posting';
-    this.recorderBar = new RecorderBar({
-      onInteract: () => {},
-      onForceSend: () => {},
-      onDeclare: () => {},
-      onMarkConfirmation: () => this.pickForBind('success', 'posting'),
-      onReset: () => {},
-      onUndo: () => {},
-      // "Not yet" — stand the pass down, keeping everything the first pass taught the
-      // site. Nothing is written and nothing is recorded as applied.
-      onDone: () => void this.stopConfirmationPass(),
-    });
-    this.paintBar();
-  }
-
-  /**
-   * The mark was made: write it, and let the ordinary machinery notice.
-   *
-   * The last step is deliberately the smallest one. Rather than a second path for
-   * "this posting was applied for", the patched config is put back on the controller
-   * and `setupSubmitDetection` is armed with it — the element the user just pointed at
-   * is on screen and visible, so the existing observer fires `SUBMITTED` immediately
-   * and the posting is recorded through the one path that has always done it.
-   *
-   * The recording is stopped *before* that, which is what lets `handleSubmitted` close
-   * the tab as usual: its "never while a recording is running" guard exists for the
-   * first pass, where tidying the page away would take the confirmation with it.
-   *
-   * `compiled.posting.url` and not `location.href`: the confirmation is routinely on a
-   * page of its own, and the config this belongs to is the one the application was
-   * sent from.
-   */
-  private async finishConfirmationPass(): Promise<void> {
-    const answer = await this.ask<RecordingResponse>({ type: MSG.RECORD_STOP });
-    if (answer?.recording) this.recording = answer.recording;
-    const recording = this.recording;
-    if (!recording) return;
-
-    const compiled = compileRecording(recording);
-    if (!compiled.posting.successSelector) {
-      // Nothing to write, and the bar must not go on asking as though nothing had
-      // happened — the user pointed at something and a silent return reads as the
-      // press having done nothing at all. Same rule as `heldSendNotice`: a refusal
-      // explains itself where it happened.
-      this.recorderNotice = 'That mark could not be saved. Point at the message the '
-        + 'site shows back, or press Done to leave this site as it is.';
-      this.paintBar();
-      return;
-    }
-
-    const config = await ensureConfigForUrl(compiled.posting.url);
-    await applyConfigPatch(config.id, compiled.posting);
-    // Re-read rather than patching the local copy: `applyConfigPatch` is a
-    // read-modify-write of the stored object, and the snapshot on this controller is
-    // as old as the page.
-    this.config = (await getSiteConfigs()).find((c) => c.id === config.id) ?? this.config;
-    this.setupSubmitDetection();
-
-    // The bar stays up to report, because nothing else here can. On a page whose
-    // confirmation is inline the modal's own receipt appears behind it, and on one
-    // that navigated there is no modal at all.
-    this.recorderNotice = 'Saved. This site can read its own confirmations now — '
-      + 'Apply works here from now on.';
-    this.paintBar();
-  }
-
-  /** Take the after-sending bar down, keeping whatever the first pass taught the site. */
-  private async stopConfirmationPass(): Promise<void> {
-    this.cancelPicker?.();
-    await chrome.runtime.sendMessage({ type: MSG.RECORD_STOP } satisfies Message).catch(() => {});
-    this.recorderBar?.destroy();
-    this.recorderBar = undefined;
-    this.recorderNotice = undefined;
-    this.confirmationPassSent = false;
-    this.clearRecording();
-  }
-
-  /**
-   * Pick a recording back up on a page that knows nothing about it.
-   *
-   * This is the two-step case, and the reason the recording lives in the background:
-   * the user pressed "Apply on company site", the browser left for the employer's
-   * ATS, and under the default `newTabCloseSource` the tab they started in was
-   * closed behind them. This content script is a fresh one on a different origin.
-   */
-  /**
-   * The CV and the cover letter as real `File`s.
-   *
-   * Split out of `run()` because a recording needs them and `run()` is precisely
-   * what stands down while one is live — so `applyFill('resume', …)` had nothing to
-   * attach at the one moment the user is pointing at the upload control.
-   */
-  private async loadDocs(): Promise<void> {
-    const [cv, cover] = await Promise.all([getDoc('resume'), getDoc('coverLetter')]);
-    this.cvFile = cv ? cvFileToFile(cv) : null;
-    this.coverFile = cover ? cvFileToFile(cover) : null;
-  }
-
-  /**
-   * Everything a recording needs in order to fill what it is told to fill, read fresh.
-   *
-   * Fresh because the profile snapshot is as old as the page: a detail typed into
-   * Options a minute ago is the one the user expects to see land in the box.
-   */
-  private async loadForRecording(): Promise<void> {
-    this.declaredFills.clear();
-    this.profile = (await getState()).profile;
-    await this.loadDocs();
-  }
-
-  private async resumeRecording(): Promise<void> {
-    const answer = await this.ask<RecordingResponse>({ type: MSG.RECORD_GET });
-    const recording = answer?.recording;
-    if (!recording) return;
-    this.recording = recording;
-
-    /*
-     * The after-sending pass has one page by definition — whichever one the
-     * application went from — so none of the two-leg reasoning below applies to it.
-     * A second URL here is the confirmation page loading, and synthesizing a
-     * `navigate` step for it would have `compileRecording` read a handoff that never
-     * happened, splitting one mark across two configs and writing it to neither.
-     */
-    if ((recording.phase ?? 'beforeSend') === 'afterSend') {
-      this.attachAfterSendBar();
-      return;
-    }
-
-    await this.loadForRecording();
-
-    // Which config this page's steps belong to. The posting is whatever the
-    // recording started on; anything on another host is the employer's side.
-    const leg: RecordLeg = isExternalUrl(recording.postingUrl, location.href)
-      ? 'destination'
-      : 'posting';
-
-    // The handoff itself, recorded from the only place that can see it happened.
-    //
-    // No click knows it is going to be the one that leaves, and the background is
-    // told nothing until a step arrives from the far side — so the navigation is
-    // noticed *here*, on arrival, by a content script comparing where it woke up
-    // with where the recording began. It is stamped `posting` on purpose: it is the
-    // last thing that happened on the board, and `compileRecording` reads it there
-    // to work out which click was the apply link.
-    if (leg === 'destination' && !recording.destinationUrl) {
-      await this.onRecordedStep({
-        id: `n${Date.now().toString(36)}`,
-        at: Math.max(0, Date.now() - recording.startedAt),
-        leg: 'posting',
-        url: recording.postingUrl,
-        action: 'navigate',
-        label: '',
-        to: location.href,
-      });
-    }
-
-    this.attachRecorder(leg);
-  }
-
-  private attachRecorder(leg: RecordLeg): void {
-    const recording = this.recording;
-    if (!recording || this.recorder) return;
-    this.recordingLeg = leg;
-
-    this.recorder = startRecording({
-      leg,
-      startedAt: recording.startedAt,
-      onStep: (step) => void this.onRecordedStep(step),
-      // The bar is the only thing on screen that says whether the page is inert or
-      // live, so every mode change has to reach it — including the ones it did not
-      // ask for, like an armed click spending itself.
-      onMode: () => this.paintBar(),
-      // A send was held. The step it made arrives through `onStep` and clears the
-      // notice, so this is set *after* it — the order is what makes the explanation
-      // survive its own step.
-      onHeldSend: (el) => {
-        this.recorderNotice = heldSendNotice(labelFor(el));
-        this.paintBar();
-      },
-      sendMarked: () => (this.recording?.steps ?? []).some((step) => step.bind === 'submit'),
-    });
-    this.recorderBar = new RecorderBar({
-      onInteract: () => this.toggleArmed(),
-      onForceSend: () => void this.forceSend(),
-      onDeclare: (bind) => this.pickForBind(bind, leg),
-      onMarkConfirmation: () => this.pickForBind('success', leg),
-      onReset: () => void this.resetRecording(),
-      onUndo: () => void this.undoStep(),
-      onDone: () => void this.stopRecording(),
-    });
-    this.paintBar();
-    // After the bar, never before: the bar is the only thing on screen that says the
-    // page is inert, and marks appearing ahead of it are unexplained.
-    this.markDetectedFields();
-  }
-
-  /**
-   * What the extension can already see, named on the page the user is about to
-   * apply on.
-   *
-   * **Both legs, and the same sweep on each.** The posting leg used to keep whatever
-   * `refreshSetup` had happened to draw a moment earlier — containers, a guessed Send
-   * button, the redirect element — and the destination leg, a fresh content script on
-   * the employer's site that has never run detection, showed nothing at all. Clearing
-   * first is what makes the two the same page.
-   *
-   * **Fields only.** `refreshSetup` also names the Send button, but that is the
-   * panel's guess about a control, and putting a chip reading "Send button" beside
-   * something the user is about to press for real reads as an instruction the
-   * extension is in no position to give. The bar's Declare menu is how those two get
-   * named here, and `pickForBind` chips what it is told.
-   *
-   * The config is optional all the way down (`detectForConfig`), because on the
-   * destination leg there routinely is none.
-   *
-   * **It runs again every time the page settles from a gesture**, not only when the
-   * recorder attaches. Half the sites this exists for have no form until something
-   * is pressed — ModalLever's whole point, and page two of any wizard form — so a
-   * single sweep at attach named the posting and then went quiet for the rest of
-   * the recording, exactly as the fields it was drawn for appeared.
-   */
-  private markDetectedFields(): void {
-    try {
-      clearHighlights();
-      const detected = detectForConfig({
-        root: document, fields: DETECTABLE_FIELDS, config: this.config,
-      });
-      for (const d of detected) {
-        if (d.element) highlight(d.element, d.confidence, FIELD_LABELS[d.field]);
-      }
-      this.markBoundSteps();
-    } catch (e) {
-      // A sweep is a nicety; a recording that would not attach is not. Never let the
-      // second fail for the first.
-      console.warn(LOG, 'recording: field sweep failed', e);
-    }
-  }
-
-  /**
-   * Draw again what the user has already said, over what the extension guessed.
-   *
-   * Two things make this part of the sweep rather than a nicety on top of it. The
-   * `clearHighlights` above takes *every* mark, so without this the second sweep of
-   * a recording silently unnames the Send button and the confirmation banner — the
-   * two marks that gate Apply, and the two that cannot be redrawn from detection
-   * because detection is exactly what could not find them. And it runs last on
-   * purpose: `tagElement` replaces the chip on an element it is given twice, so a
-   * field the user declared keeps the name they chose rather than the heuristic's.
-   *
-   * Only this leg's steps. A selector recorded on the board would either not resolve
-   * on the employer's ATS or — worse — resolve to something else wearing the same
-   * id, and `leg` is already the answer to which page a step was made on.
-   */
-  private markBoundSteps(): void {
-    for (const step of this.recording?.steps ?? []) {
-      if (!step.bind || step.leg !== this.recordingLeg) continue;
-      const el = query(document, step.target?.selector);
-      if (!el) continue;
-      // A declared field carries the outcome of the fill that followed it, or this
-      // sweep would repaint "there is nothing in your profile for this" as done a few
-      // hundred milliseconds after the user was told otherwise.
-      const declared = isFieldBind(step.bind) ? this.declaredFills.get(fieldOf(step.bind)) : undefined;
-      highlight(el, declared ?? 'high', bindLabel(step.bind));
-    }
-  }
-
-  /**
-   * A gesture landed, so look again once the page has finished reacting to it.
-   *
-   * Not synchronously: the click is what *starts* a modal being injected, an SPA
-   * re-rendering, a fetch landing, so a sweep taken as the step is recorded reads
-   * the page the user has just left. `watchPageChange`'s settle is what waits for
-   * the burst to end.
-   *
-   * And bounded — re-armed by each step, dropped a few seconds after the last one.
-   * A standing subscription would re-run a whole-document detection sweep behind
-   * every carousel, live clock and lazy image on the posting, for the length of a
-   * recording that lasts minutes. A page only changes under this because someone
-   * pressed something, so a press is the right thing to hang the window on.
-   */
-  private scheduleFieldSweep(): void {
-    if (!this.recorder) return;
-    this.sweepWatch ??= watchPageChange(() => this.markDetectedFields(), SWEEP_SETTLE_MS);
-    if (this.sweepWindow) clearTimeout(this.sweepWindow);
-    this.sweepWindow = setTimeout(() => this.stopFieldSweep(), SWEEP_WINDOW_MS);
-  }
-
-  private stopFieldSweep(): void {
-    if (this.sweepWindow) clearTimeout(this.sweepWindow);
-    this.sweepWindow = undefined;
-    this.sweepWatch?.();
-    this.sweepWatch = undefined;
-  }
-
-  private async onRecordedStep(step: RecordedStep): Promise<void> {
-    this.recording?.steps.push(step);
-    // A new step answers whatever the last one left hanging.
-    this.recorderNotice = undefined;
-    this.paintBar();
-    // What the page looks like may be about to change — see `scheduleFieldSweep`.
-    this.scheduleFieldSweep();
-    await chrome.runtime.sendMessage({ type: MSG.RECORD_PUSH, step } satisfies Message);
-  }
-
-  /**
-   * Interact. An arm that is already up is cancelled rather than re-armed: the
-   * button is the only thing holding the page live, so it has to be the way back
-   * out of it too.
-   */
-  private toggleArmed(): void {
-    const recorder = this.recorder;
-    if (!recorder) return;
-    if (recorder.mode() === 'idle') recorder.arm();
-    else recorder.disarm();
-  }
-
-  /**
-   * "That was not the Send button."
-   *
-   * Two halves, and both are needed. The mark the hold made has to go — it is a guess
-   * the user has just refused, and leaving it would put the wrong control in
-   * `submitSelector` — and the next gesture has to be allowed to be send-shaped, or
-   * the same press is held again and the refusal does nothing.
-   *
-   * `MSG.RECORD_UNDO` rather than a local splice: the background holds the truth, and
-   * the held step is always the last one, having just been made.
-   */
-  private async forceSend(): Promise<void> {
-    this.recorderNotice = undefined;
-    await this.undoStep();
-    this.recorder?.arm({ force: true });
-    this.paintBar();
-  }
-
-  private async undoStep(): Promise<void> {
-    const answer = await this.ask<RecordingResponse>({ type: MSG.RECORD_UNDO });
-    if (answer?.recording) this.recording = answer.recording;
-    this.paintBar();
-  }
-
-  /**
-   * Reset. Throw the recording away and begin it again where it began.
-   *
-   * Undo can only ever take a step out of the *list*; it cannot take back what the
-   * step did. The "Show more" is still open, the form is still on page three, and
-   * after a handoff the browser is on the employer's site entirely — so a recording
-   * carried on after a few undos is being made against a page state no later visit
-   * ever reaches, and `prep` replays into it. That is why this reloads: a clean list
-   * against a dirty page is the half-fix, and the worse one.
-   *
-   * `RECORD_START` is already the clean slate — it overwrites the tab's entry
-   * unconditionally — so there is no `RECORD_RESET`. It is re-sent with the
-   * recording's **own** `postingUrl`, never `location.href`: resetting from the
-   * employer's ATS must not redefine the posting as the ATS page, or the handoff
-   * could never be recorded again. Clearing `destinationUrl` with it is the other
-   * half of that, and what stops `compileRecording` still believing a handoff
-   * happened.
-   */
-  private async resetRecording(): Promise<void> {
-    const recording = this.recording;
-    if (!recording) return;
-    this.cancelPicker?.();
-
-    // Awaited: the navigation below tears this context down, and a message still in
-    // flight when it does would leave the old steps in the store.
-    await chrome.runtime.sendMessage({
-      type: MSG.RECORD_START,
-      flow: recording.flow,
-      postingUrl: recording.postingUrl,
-      phase: recording.phase ?? 'beforeSend',
-    } satisfies Message);
-
-    // Nothing is torn down by hand. Unload does it, and `run()` stands down on
-    // `this.recorder` existing — clearing it here would open a window in which an
-    // autofill could start against a page that is about to be replaced.
-    //
-    // Through `webUrl` like every other href this extension hands the browser, even
-    // though a `postingUrl` captured from a content script's `location.href` is always
-    // http(s). A refusal falls back to a reload, so the control can never do nothing.
-    const target = webUrl(recording.postingUrl);
-    if (!target || target === location.href) location.reload();
-    else location.assign(target);
-  }
-
-  /**
-   * Mark something that is not what just happened — the description two screens up,
-   * the confirmation banner that has just appeared. It goes through the same picker
-   * every other override does, and produces a step like any other so the review can
-   * show and undo it.
-   */
-  private pickForBind(bind: BindKey, leg: RecordLeg): void {
-    // Declaring is the other answer to the same question, so it takes the arm down
-    // with it — otherwise the page stays live behind the picker's toolbar.
-    this.recorder?.disarm();
-    this.cancelPicker?.();
-    this.cancelPicker = startPicker((element) => {
-      const recording = this.recording;
-      if (!recording) return;
-      /*
-       * A field is stored against the control, not against whatever was pointed at.
-       *
-       * The user routinely picks the `<label>` or the box around it, and this
-       * selector becomes a `fieldOverride` — an override that does not resolve to
-       * something fillable fills nothing on every later visit, which `refreshSetup`
-       * can only report after the fact. `resolveControl` is the same walk the review
-       * modal's Pick already does.
-       */
-      const field = isFieldBind(bind) ? fieldOf(bind) : undefined;
-      const target = field ? resolveControl(element, field === 'resume') : element;
-
-      const pushed = this.onRecordedStep({
-        id: `p${Date.now().toString(36)}`,
-        at: Math.max(0, Date.now() - recording.startedAt),
-        leg,
-        url: location.href,
-        action: 'click',
-        target: pickSelector(target),
-        label: clip(element.textContent ?? '', 60).trim(),
-        bind,
-        bindSource: 'user',
-      });
-
-      /*
-       * Naming a field fills it, then and there.
-       *
-       * The mark alone is a green outline on a box, and whether it is the *right*
-       * box was only ever answered on a later visit — after the recording had been
-       * compiled and saved. Putting the real value in says it immediately, in the
-       * only terms that settle it. Nothing here is visible to the recording itself:
-       * the arm is already down, so the recorder's `change` reader bails, and
-       * `input`/`change` are in neither of `inertPage`'s suppression lists, so the
-       * page's own handlers see the value exactly as if it had been typed.
-       */
-      const filled = field ? this.applyFill(field, target as HTMLElement) : undefined;
-      if (field) {
-        this.declaredFills.set(field, filled ? 'high' : 'low');
-        // A box that stays empty has to say why, or the one thing that proves the
-        // pick worked reads as the pick having failed. After the step, not before:
-        // `onRecordedStep` clears the notice and paints, so a notice set ahead of it
-        // is wiped, and one set behind it needs the bar told a second time.
-        if (!filled) {
-          this.recorderNotice = emptyProfileNotice(bindLabel(bind));
-          this.paintBar();
-        }
-      }
-
-      // The receipt for the naming that just happened. Declare the Confirmation and
-      // then the Send button and, unlabelled, they are two identical green outlines
-      // with nothing saying which is which — on exactly the two marks that gate Apply.
-      highlight(target as HTMLElement, filled === false ? 'low' : 'high', bindLabel(bind));
-      /*
-       * The after-sending pass exists for exactly one mark, so making it is the end
-       * of the pass — there is nothing further to press Done about.
-       *
-       * After the push has landed, though, and that is not tidiness. `RECORD_PUSH`
-       * and the `RECORD_STOP` this ends in are both read-modify-writes of the same
-       * `chrome.storage.session` entry with no lock between them; if the stop's read
-       * won, it returned a recording with no steps, `finishConfirmationPass`
-       * overwrote the good local copy with it, and the one mark the user came here
-       * to make compiled to nothing — silently.
-       */
-      if ((recording.phase ?? 'beforeSend') === 'afterSend') {
-        void pushed.then(() => this.finishConfirmationPass());
-      }
-      // No sweep is scheduled here: the step above went through `onRecordedStep`,
-      // which arms one, and `markBoundSteps` redraws this mark from that very step.
-      // The picker's toolbar docks where the bar that opened it is docked. The user
-      // may have moved that bar off the page's own header, and a picker opening back
-      // at the edge they moved it away from reads as a different tool — and lands on
-      // the very nav the move was about.
-    }, bindLabel(bind), () => this.paintBar(), this.recorderBar?.place());
-  }
-
-  private paintBar(): void {
-    const recording = this.recording;
-    if (!this.recorderBar || !recording) return;
-    this.recorderBar.render({
-      phase: recording.phase ?? 'beforeSend',
-      flow: recording.flow,
-      leg: this.recordingLeg,
-      stepCount: recording.steps.length,
-      mode: this.recorder?.mode() ?? 'idle',
-      last: recording.steps[recording.steps.length - 1],
-      bound: recording.steps.map((s) => s.bind).filter((b): b is BindKey => !!b),
-      notice: this.recorderNotice,
-      sent: this.confirmationPassSent,
-    });
-  }
-
-  /**
-   * Done applying. The recording is compiled and handed to the panel for review —
-   * nothing is written to the config until Save, because a recording is a proposal
-   * and half of the point of the review is that it can be refused.
-   */
-  private async stopRecording(): Promise<void> {
-    this.cancelPicker?.();
-    this.stopFieldSweep();
-    this.recorder?.stop();
-    this.recorder = undefined;
-    this.recorderBar?.destroy();
-    this.recorderBar = undefined;
-
-    const answer = await this.ask<RecordingResponse>({ type: MSG.RECORD_STOP });
-    if (answer?.recording) this.recording = answer.recording;
-    if (!this.recording) return;
-    this.compiled = compileRecording(this.recording);
-
-    await this.openSetup();
-    this.setupPanel?.showReview(true);
-  }
-
-  /** Re-decide one step from the review, then recompile: the summary must follow. */
-  private async rebindStep(id: string, bind: BindKey | null): Promise<void> {
-    const step = this.recording?.steps.find((s) => s.id === id);
-    if (!step) return;
-    if (bind) { step.bind = bind; step.bindSource = 'user'; } else { delete step.bind; delete step.bindSource; }
-    await this.recompile();
-  }
-
-  private async removeStep(id: string): Promise<void> {
-    if (!this.recording) return;
-    this.recording.steps = this.recording.steps.filter((s) => s.id !== id);
-    await this.recompile();
-  }
-
-  /** Re-point a step whose selector was only ever its position on the page. */
-  private repickStep(id: string): void {
-    const step = this.recording?.steps.find((s) => s.id === id);
-    if (!step) return;
-    this.cancelPicker?.();
-    this.setupPanel?.setHidden(true);
-    const restore = () => this.setupPanel?.setHidden(false);
-    this.cancelPicker = startPicker((element) => {
-      step.target = pickSelector(element);
-      restore();
-      void this.recompile();
-    }, step.label || 'this step', restore);
-  }
-
-  private async recompile(): Promise<void> {
-    if (this.recording) this.compiled = compileRecording(this.recording);
-    await this.refreshSetup();
-  }
-
-  /**
-   * Write it. Both legs when there are two — `ensureConfigForUrl` is what gives the
-   * employer's ATS a config of its own, which is the same thing a followed handoff
-   * does when it lands somewhere unconfigured.
-   */
-  private async saveRecording(): Promise<void> {
-    const compiled = this.compiled;
-    if (!compiled) return;
-
-    const posting = await ensureConfigForUrl(compiled.posting.url);
-    await applyConfigPatch(posting.id, compiled.posting);
-    if (compiled.destination?.url) {
-      const destination = await ensureConfigForUrl(compiled.destination.url);
-      await applyConfigPatch(destination.id, compiled.destination);
-    }
-
-    // Report it, then offer the wizard — this used to *be* the wizard, which dropped
-    // the user four steps into the manual surface with nothing saying the recording
-    // had worked. The order matters: the mode is set first so no wizard frame is
-    // painted on the way past, and the refresh that follows is what the saved
-    // screen's outstanding-work list is counted from. Counting it from the render
-    // still on screen would count work this patch has just done.
-    this.clearRecording();
-    this.setupPanel?.showHome({ saved: true });
-    await this.refreshSetup();
-
-    /*
-     * And then hand the user to the card that can finish the job.
-     *
-     * The first pass ends with the site able to fill and knowing what sends it, and
-     * exactly one thing outstanding: the message it shows once an application has
-     * really gone in, which does not exist until one has. Home said so and offered
-     * `Mark the confirmation` — a control that waits over a live page for something
-     * to point at, on a page where nothing has been sent and nothing is going to be.
-     * So the seam was silent in the one place it had to speak.
-     *
-     * Four guards, and each says a different thing. `refreshSetup` above is what
-     * makes all of them current: it re-reads the config this save just wrote and
-     * re-runs the classifier, so every one of them is about the page as it now is.
-     */
-    // Nothing to finish, and nothing to send: a posting on record as applied has no
-    // decision left on it at all.
-    if (this.applied || this.alreadyApplied) return;
-    // Never over a card that is about to say something else. On a posting the
-    // classifier reads as a handoff the review's banner leads with "Applies on the
-    // employer's own site" and its primary opens that application — pushing it in
-    // front of the user with an offer to send *here* would be two answers to one
-    // question, on the one surface whose whole job is saying what happens next.
-    if (this.detection?.kind === 'redirect') return;
-    // A *saved* Send button, which is rule 10: the leg that sends the application
-    // owns the sending, so a selector saved for this page is the user having marked
-    // the button on it. Deliberately not `findSubmitControl`'s label heuristic, which
-    // nominates something on almost any page — nothing is offered on a guess.
-    if (!this.config?.submitSelector) return;
-    // And the rest of the offer's honesty, in the one place it is already written:
-    // `settings.finishSetupOnApply` is on, no confirmation is saved yet, and the
-    // button resolves here and now. With the setting off, or on a page where it does
-    // not resolve, this is exactly what it always was — home, and no hand-off.
-    if (this.applyState(false) !== 'finishSetup') return;
-
-    this.setupJustSaved = true;
-    await this.fillForSend();
-    // Over the panel, which folds to its pill: `restore` reports the unfold through
-    // `onFold`, and `arbitrateSheets` is what hands the one slot across. A card that
-    // was already expanded is left exactly as it is.
-    this.modal?.restore();
-  }
-
-  /** Leave the review, keeping whatever was already in the config. */
-  private discardRecording(): void {
-    this.clearRecording();
-    this.setupPanel?.showReview(false);
-    void this.refreshSetup();
-  }
-
-  /**
-   * Done with the recording itself. Split out because Save and Discard both finish
-   * with it and then go to different screens — and the recording has to be gone
-   * before either renders, or `refreshSetup` hands the panel a `compiled` it would
-   * put the review back up from.
-   */
-  private clearRecording(): void {
-    this.recording = undefined;
-    this.compiled = undefined;
-  }
-
-  /* ---------------- On-page Setup mode ---------------- */
-
-  /** Enter visual setup: ensure a config exists for this URL, then show the panel. */
-  private async openSetup(): Promise<void> {
-    const isNew = !this.config;
-    this.config = await ensureConfigForUrl(location.href);
-    if (isNew) this.setupSubmitDetection();
-
-    if (!this.setupPanel) {
-      this.setupPanel = new SetupPanel({
-        onAddPrep: (action, list) => this.addPrep(action, list),
-        onPickPrepTarget: (i, list) => this.pickPrepTarget(i, list),
-        onMovePrep: (i, dir, list) => this.movePrep(i, dir, list),
-        onRemovePrep: (i, list) => this.removePrep(i, list),
-        onSetPrepMs: (i, ms, list) => this.setPrepMs(i, ms, list),
-        onRunPrep: () => this.runPrep(),
-        onPickContainer: (key) => this.pickContainer(key),
-        onClearContainer: (key) => this.clearContainer(key),
-        onPickField: (field) => this.pickFieldForSetup(field),
-        onClearField: (field) => this.clearFieldForSetup(field),
-        onPickRedirect: (key) => this.pickRedirect(key as RedirectSelectorKey),
-        onClearRedirect: (key) => this.clearRedirect(key as RedirectSelectorKey),
-        onPickSubmit: () => this.pickSubmit(),
-        onClearSubmit: () => void this.clearSubmit(),
-        onPickSuccess: () => this.pickSuccess(),
-        onClearSuccess: () => void this.clearSuccess(),
-        onRename: (name, pattern) => this.renameConfig(name, pattern),
-        onStartRecording: () => void this.startRecording(),
-        // The panel's way into the second pass: no Send is pressed, because the user
-        // is going to apply by hand. The bar is identical — it has only ever waited.
-        // By hand, from the panel: nothing has been sent, and the bar has to say so.
-        onMarkConfirmation: () => void this.startConfirmationPass(false),
-        onRebindStep: (id, bind) => void this.rebindStep(id, bind),
-        onRepickStep: (id) => this.repickStep(id),
-        onRemoveStep: (id) => void this.removeStep(id),
-        onSaveRecording: () => void this.saveRecording(),
-        onDiscardRecording: () => this.discardRecording(),
-        // "Advanced (JSON)" is about *this config*, so it lands on the JSON that
-        // holds it. Without `at`/`focus` it opened the options page on whatever
-        // tab is default — the queue — and left the user to find the editor.
-        onOpenOptions: () => chrome.runtime.sendMessage({
-          type: MSG.OPEN_OPTIONS, hash: 'sites', at: 'configs-section', focus: '#configs-json',
-        }),
-        onDismissHelp: () => void this.dismissHelp(),
-        onClose: () => this.closeSetup(),
-        // The same three the review modal wires, because it is the same slot:
-        // a drag holds for this page, fullscreen is a preference, and a fold
-        // hands the slot to whatever is left.
-        onFold: () => this.arbitrateSheets('setup'),
-        onLayoutChange: (layout) => { this.draggedLayout = layout; },
-        onFullscreen: (on) => {
-          this.settings.modalFullscreen = on;
-          void patchSettings({ modalFullscreen: on });
-        },
-      });
-    }
-    // Asking for setup again while it is folded means "bring it back", not
-    // "re-scan the page behind a pill". `restore` is a no-op when it is already
-    // open, and `refreshSetup` claims the slot either way.
-    this.setupPanel.restore();
-    await this.refreshSetup();
-  }
-
-  /**
-   * Done — finished with this site, so the panel really goes. The header's `×`
-   * does not come here; it minimizes, and the panel stays alive behind its pill.
-   */
-  private closeSetup(): void {
-    this.cancelPicker?.();
-    // Not while a recording is running. These marks belong to the recording, not to
-    // the panel — Done here means "finished with the panel", and the panel is
-    // reachable mid-recording from its pill. Wiping them would leave the user
-    // applying over a bare page with nothing to re-draw them until the recording ends.
-    if (!this.recorder) clearHighlights();
-    this.setupPanel?.destroy();
-    this.setupPanel = undefined;
-    // Re-render an existing report against the config that was just edited —
-    // picking the Send button has to bring Apply to life now, not after a
-    // re-run that would wipe every field already filled. Never creates
-    // a modal: a page the user only came to configure has nothing to report.
-    // It also hands the slot back: `showModal` re-arbitrates, and with the panel
-    // gone the review card is what takes it.
-    if (this.modal) this.showModal();
-    else this.arbitrateSheets();
-  }
-
-  /**
-   * Recompute the panel from the live DOM + config. Beyond saved selectors this
-   * also runs the same heuristics as the fill flow, so already-matchable fields
-   * and containers show up (green/yellow) and get outlined on the page — the
-   * user only needs to Pick the ones that stay grey.
-   */
-  private async refreshSetup(): Promise<void> {
-    if (!this.setupPanel || !this.config) return;
-    // Re-read the config so freshly-saved selectors show up.
-    const fresh = findMatchingConfig(location.href, (await getState()).siteConfigs);
-    if (fresh) this.config = fresh;
-    const config = this.config;
-
-    clearHighlights();
-
-    // Prerequisite steps, in run order.
-    const toPrepRows = (steps: PrepStep[] | undefined): PrepRow[] => (steps ?? []).map((s) => ({
-      action: s.action,
-      selector: s.selector,
-      ms: s.ms,
-      resolves: s.selector ? query(document, s.selector) != null : undefined,
-    }));
-    const prep = toPrepRows(config.prep);
-    const beforeFollow = toPrepRows(config.redirect?.beforeFollow);
-    const submitCv = toPrepRows(config.submitCv);
-
-    // How this posting applies: quick-apply here, or a handoff to the employer.
-    const detection = detectRedirect({ root: document, pageUrl: location.href, config: config.redirect });
-    this.detection = detection;
-    const verdict: SetupVerdict = {
-      title: detection.kind === 'redirect'
-        ? 'External application'
-        : detection.kind === 'quickApply'
-          ? 'Quick apply'
-          : 'Quick apply (assumed)',
-      detail: detection.reason,
-      kind: detection.kind,
-    };
-    if (detection.element) highlight(detection.element, detection.kind === 'redirect' ? 'high' : 'low');
-
-    const redirectRows: SetupRow[] = REDIRECT_ROWS.map(({ key, label }) => {
-      const saved = config.redirect?.[key];
-      const el = saved ? query(document, saved) : null;
-      const usedHere = detection.source === 'override' && key === 'applySelector' && !!detection.href;
-      return {
-        key,
-        label,
-        status: saved ? (el ? 'high' : 'low') : 'none',
-        note: !saved ? 'not set'
-          : !el ? 'saved selector · no match'
-          : usedHere && detection.href ? `saved · → ${hostOf(detection.href)}`
-          : `saved · ${saved}`,
-        hasSave: !!saved,
-      };
-    });
-
-    // Job-info containers: explicit selector, else generic fallback (auto).
-    const containers: SetupRow[] = (['jobTitle', 'jobDescription', 'jobRequirements'] as ContainerKey[])
-      .map((key) => {
-        const p = previewContainer(config, key);
-        if (p.el) highlight(p.el, 'high');
-        const snippet = p.text ? clip(p.text, 50) : '';
-        const saved = !!config.extract[key];
-        const note = p.source === 'override' ? `saved · ${snippet}`
-          : p.source === 'auto' ? `auto · ${snippet}`
-          : p.source === 'override-miss' ? 'saved selector · no match'
-          : 'not set';
-        return {
-          key,
-          label: CONTAINER_LABELS[key],
-          status: p.el ? 'high' : 'none',
-          note,
-          hasSave: saved,
-        };
-      });
-
-    // Form fields: run detection (overrides + heuristics) exactly like the fill flow.
-    const detected = detectForConfig({ root: document, fields: DETECTABLE_FIELDS, config });
-
-    const fields: SetupRow[] = detected.map((d) => {
-      const fillable = d.element ? isFillable(d.element, d.field === 'resume') : false;
-      // A saved override that points at a non-fillable node (e.g. a label/div)
-      // resolves but can't be filled — surface it as a warning, not false-green.
-      const status = d.element && !fillable ? 'low' : d.confidence;
-      // Named on the page, not just outlined. Nine coloured outlines say nine things
-      // were found and never which one is Email — and while a recording runs this is
-      // the only field feedback there is, the panel being folded to its pill.
-      if (d.element) highlight(d.element, status, FIELD_LABELS[d.field]);
-      const hasSave = d.field === 'resume' ? !!config.cvUpload : !!config.fieldOverrides?.[d.field];
-      const where = d.element ? (d.selectorUsed ?? generateSelector(d.element)) : '';
-      const note = d.element && !fillable ? `not a form field — re-pick · ${where}`
-        : d.source === 'override' ? `saved · ${where}`
-        : d.source === 'heuristic' ? `auto${d.confidence === 'low' ? ' (low)' : ''} · ${where}`
-        : 'not found';
-      return {
-        key: d.field,
-        label: FIELD_LABELS[d.field],
-        status,
-        note,
-        hasSave,
-      };
-    });
-    // Same reading order as the review modal's report. This step lists every
-    // field the extension knows, so the split matters more here than there: what
-    // the user actually filled in comes first, and eleven rows for fields that
-    // have nothing to fill them with stop sitting above the one that needs a Pick.
-    const orderedFields = orderFields(
-      fields, (r) => r.key as FieldKey, (r) => this.hasValueFor(r.key as FieldKey));
-
-    // The Send button, found the same way Apply will find it. Highlighted like
-    // the field rows, so "which button is that?" is answered on the page rather
-    // than by reading a selector.
-    const found = findSubmitControl(
-      document,
-      config.submitSelector,
-      detected.map((d) => d.element).filter((e): e is HTMLElement => e != null),
-    );
-    // The most consequential mark on the page, and the one an outline can least
-    // answer for: on most sites this control is *guessed* from its label, and "Save
-    // job" sits an inch from the real one. `BIND_LABELS` because the Declare menu
-    // already names this exact object — one vocabulary, not two spellings.
-    if (found.element) {
-      highlight(found.element, found.source === 'override' ? 'high' : 'low', BIND_LABELS.submit);
-    }
-    const foundLabel = found.element
-      ? clip(found.element.textContent ?? '', 40) || generateSelector(found.element)
-      : '';
-    const submitRow: SetupRow = {
-      key: 'submitSelector',
-      label: 'Send button',
-      status: found.element ? (found.source === 'override' ? 'high' : 'low') : 'none',
-      // Branch on which selector actually produced the control, not on whether
-      // one is saved. `findSubmitControl` falls through to the label heuristic
-      // when a saved selector stops resolving, so `saved · …` there named a
-      // selector that had matched nothing and credited it with a button the
-      // guessing had found — the one row where "saved beats the guessing every
-      // time" is not true. The dot already keys off `found.source`; only the
-      // words did not.
-      note: found.source === 'override' ? `saved · ${config.submitSelector}`
-        : found.element
-          ? `${config.submitSelector ? 'saved selector · no match — ' : ''}auto · ${foundLabel}`
-          : config.submitSelector
-            ? 'saved selector · no match — Apply is greyed out'
-            : 'not found — Apply is greyed out',
-      hasSave: !!config.submitSelector,
-    };
-
-    // The confirmation element. Unlike every other row, "not set" is never fine:
-    // it is what marks a posting applied, and Apply will not send without it.
-    const successEl = config.successSelector ? query(document, config.successSelector) : null;
-    if (successEl) highlight(successEl, 'high', BIND_LABELS.success);
-    const successRow: SetupRow = {
-      key: 'successSelector',
-      label: 'Confirmation element',
-      // Green as soon as one is saved, whether or not it resolves right now:
-      // being absent is the *normal* state before a submission, and the yellow
-      // "saved selector · no match" the other rows use would cry wolf on every
-      // healthy site. There is nothing to verify until an application is sent.
-      status: config.successSelector ? 'high' : 'none',
-      note: config.successSelector
-        ? `saved · ${config.successSelector}${successEl ? ' · on screen now' : ''}`
-        : 'not set — Apply is greyed out',
-      hasSave: !!config.successSelector,
-    };
-
-    this.setupPanel.render({
-      name: config.name,
-      urlPattern: config.urlPatterns[0] ?? '',
-      prep,
-      containers,
-      fields: orderedFields,
-      verdict,
-      redirect: redirectRows,
-      beforeFollow,
-      submitCv,
-      submit: submitRow,
-      success: successRow,
-      helpSeen: (await getSettings()).helpSeen,
-      formFactor: currentFormFactor(),
-      // The review renders from these two; the panel decides whether it is showing
-      // them (`showReview`), because that is a place in a task and not a fact
-      // about the data — the same rule its `step` follows.
-      recording: this.recording,
-      compiled: this.compiled,
-      // The same two the review modal renders from, off the same fields: one slot
-      // means a panel that opens where the card the user configured opens, at the
-      // size they configured it at. A drag on either sheet moves both.
-      layout: this.draggedLayout ?? this.settings.modalLayout,
-      fullscreen: this.settings.modalFullscreen,
-    });
-    this.arbitrateSheets('setup');
-  }
-
-  /**
-   * The legend was dismissed. Persisted rather than kept in the panel, because
-   * the next posting gets a brand-new panel in a brand-new content script — and
-   * being re-taught the basics sixty times in a session is its own problem.
-   */
-  private async dismissHelp(): Promise<void> {
-    if ((await getSettings()).helpSeen) return;
-    await patchSettings({ helpSeen: true });
-  }
-
-  private pickRedirect(key: RedirectSelectorKey): void {
-    this.pickInto(REDIRECT_ROWS.find((r) => r.key === key)!.label, async (el) => {
-      if (this.config) await saveRedirectSelector(this.config.id, key, generateSelector(el));
-    });
-  }
-
-  private async clearRedirect(key: RedirectSelectorKey): Promise<void> {
-    if (this.config) await clearRedirectSelector(this.config.id, key);
-    await this.refreshSetup();
-  }
-
-  /**
-   * Save the button Apply presses. No `resolveControl` here, unlike a field pick:
-   * the user is pointing at a button, and the wrapper it sits in is often what
-   * actually carries the click handler — "helpfully" resolving inward would save
-   * a selector for a `<span>` that does nothing when clicked.
-   */
-  private pickSubmit(): void {
-    this.pickInto('Send button', async (el) => {
-      if (this.config) await saveSubmitSelector(this.config.id, generateSelector(el));
-    });
-  }
-
-  private async clearSubmit(): Promise<void> {
-    if (this.config) await clearSubmitSelector(this.config.id);
-    await this.refreshSetup();
-  }
-
-  /**
-   * Save the site's confirmation element. Realistically picked with a real
-   * confirmation on screen — after sending one application by hand — which is
-   * why the row says so rather than assuming it can be guessed cold.
-   */
-  private pickSuccess(): void {
-    this.pickInto('Confirmation element', async (el) => {
-      if (this.config) await saveSuccessSelector(this.config.id, generateSelector(el));
-    });
-  }
-
-  private async clearSuccess(): Promise<void> {
-    if (this.config) await clearSuccessSelector(this.config.id);
-    await this.refreshSetup();
-  }
-
-  private pickContainer(key: ContainerKey): void {
-    this.pickInto(CONTAINER_LABELS[key], async (el) => {
-      if (this.config) await saveExtractSelector(this.config.id, key, generateSelector(el));
-    });
-  }
-
-  private async clearContainer(key: ContainerKey): Promise<void> {
-    if (this.config) await clearExtractSelector(this.config.id, key);
-    await this.refreshSetup();
-  }
-
-  private pickFieldForSetup(field: FieldKey): void {
-    this.pickInto(FIELD_LABELS[field], async (el) => {
-      // The user may click a label/wrapper; save the actual fillable control.
-      const control = resolveControl(el, field === 'resume');
-      if (this.config) await saveFieldOverride(this.config.id, field, generateSelector(control));
-    });
-  }
-
-  private async clearFieldForSetup(field: FieldKey): Promise<void> {
-    if (this.config) await clearFieldOverride(this.config.id, field);
-    await this.refreshSetup();
-  }
-
-  private async renameConfig(name: string, pattern: string): Promise<void> {
-    if (!this.config) return;
-    await mutateSiteConfig(this.config.id, (c) => {
-      if (name) c.name = name;
-      if (pattern) c.urlPatterns[0] = pattern;
-    });
-    await this.refreshSetup();
-  }
-
-  /* --- Prerequisite steps --- */
-
-  /**
-   * Read-modify-write one of the config's step arrays: pre-fill, pre-handoff, or
-   * the CV-confirmation steps Apply runs before it presses Send.
-   */
-  private async mutatePrep(fn: (prep: PrepStep[]) => void, list: PrepListKey = 'prep'): Promise<void> {
-    if (!this.config) return;
-    await mutateSiteConfig(this.config.id, (c) => {
-      if (list === 'beforeFollow') {
-        const steps = [...(c.redirect?.beforeFollow ?? [])];
-        fn(steps);
-        c.redirect = { ...c.redirect, beforeFollow: steps };
-        return;
-      }
-      if (list === 'submitCv') {
-        const steps = [...(c.submitCv ?? [])];
-        fn(steps);
-        c.submitCv = steps;
-        return;
-      }
-      const prep = [...(c.prep ?? [])];
-      fn(prep);
-      c.prep = prep;
-    });
-  }
-
-  /** Add a step. Selector-based actions launch the picker to choose their target. */
-  private addPrep(action: PrepAction, list: PrepListKey): void {
-    if (action === 'delay') {
-      void this.mutatePrep((p) => { p.push({ action: 'delay', ms: 500 }); }, list).then(() => this.refreshSetup());
-      return;
-    }
-    this.pickInto(`step target (${action})`, (el) =>
-      this.mutatePrep((p) => { p.push({ action, selector: generateSelector(el) }); }, list));
-  }
-
-  private pickPrepTarget(index: number, list: PrepListKey): void {
-    this.pickInto('step target', (el) =>
-      this.mutatePrep((p) => {
-        if (p[index]) p[index] = { ...p[index], selector: generateSelector(el) };
-      }, list));
-  }
-
-  private async movePrep(index: number, dir: -1 | 1, list: PrepListKey): Promise<void> {
-    await this.mutatePrep((p) => {
-      const j = index + dir;
-      if (j < 0 || j >= p.length) return;
-      [p[index], p[j]] = [p[j], p[index]];
-    }, list);
-    await this.refreshSetup();
-  }
-
-  private async removePrep(index: number, list: PrepListKey): Promise<void> {
-    await this.mutatePrep((p) => { p.splice(index, 1); }, list);
-    await this.refreshSetup();
-  }
-
-  private async setPrepMs(index: number, ms: number, list: PrepListKey): Promise<void> {
-    await this.mutatePrep((p) => { if (p[index]) p[index] = { ...p[index], ms }; }, list);
-    await this.refreshSetup();
-  }
-
-  /** Run the saved steps now so the form/description appears, then re-scan the page. */
-  private async runPrep(): Promise<void> {
-    if (!this.config) return;
-    try {
-      await runPrepSteps(this.config.prep);
-    } catch (e) {
-      console.warn(LOG, 'setup: prep run failed', e);
-    }
-    await this.refreshSetup();
-  }
-
-  /**
-   * Run the picker for setup: hide the panel so it can't be picked by accident,
-   * hand the chosen element to `onPick`, then restore + rescan. The panel is
-   * re-highlighted by `refreshSetup`, so callers only persist.
-   */
-  private pickInto(label: string, onPick: (el: Element) => Promise<void>): void {
-    this.cancelPicker?.();
-    this.setupPanel?.setHidden(true);
-    const restore = () => this.setupPanel?.setHidden(false);
-    this.cancelPicker = startPicker(async (el) => {
-      await onPick(el);
-      restore();
-      await this.refreshSetup();
-    }, label, restore);
-  }
-
-  /**
-   * Press the site's own Send button, because the user pressed Apply. This is
-   * the one place the extension acts on the form rather than reporting on it,
-   * and it is still not an *auto*-submit: nothing here runs without that press.
-   *
-   * The CV-confirmation steps run first. On the sites that need them the file is
-   * attached but not yet accepted, so sending before they run submits an
-   * application with no CV — the exact failure `submitCv` was added to prevent.
-   * Re-scanning between the two phases is deliberate: those steps often build
-   * the rest of the form.
-   */
-  private async apply(): Promise<void> {
-    // Never twice. The modal retires the button, but the UI must not be the only
-    // thing between a finished posting and a second application — this method is
-    // the sole caller of `target.click()`, so the guard belongs where the press
-    // happens rather than only where it is offered.
-    if (this.applied || this.alreadyApplied) {
-      console.warn(LOG, 'apply: this posting is already recorded as applied');
-      return;
-    }
-
-    /*
-     * The second half of setting this site up, if it has not had one.
-     *
-     * Started *before* the press, not after: the Send button routinely navigates, and
-     * a `RECORD_START` still in flight when this context is torn down leaves the far
-     * side with nothing to resume — which is exactly the case this pass exists for.
-     * The modal folds to its pill for the same reason the panel does when a recording
-     * begins: the user is about to be asked to point at something on the page, and
-     * the card is sitting on it.
-     */
-    if (this.applyState(false) === 'finishSetup') {
-      this.modal?.minimize();
-      await this.startConfirmationPass(true);
-    }
-    if (this.config?.submitCv?.length) {
-      try {
-        await runPrepSteps(this.config.submitCv);
-      } catch (e) {
-        console.warn(LOG, 'CV confirmation steps failed', e);
-      }
-      this.detectAndFill();
-      this.showModal();
-    }
-
-    const target = this.submitControl();
-    if (!target) {
-      // The modal already explains this: Apply is greyed and says why. Acting on
-      // a guess here is how the wrong button gets pressed.
-      console.warn(LOG, 'apply: no submit control found');
-      return;
-    }
-    target.scrollIntoView({ block: 'center' });
-    target.click();
-  }
-
-  /**
-   * Whether Apply may run, and if not, which half is missing.
-   *
-   * A confirmation element is required, not merely useful: without one there is
-   * no way to read back whether the submission was accepted, and pressing Send
-   * anyway is how a rejected application gets recorded as sent. Refusing to send
-   * what cannot be verified is the whole point — so "no confirmation configured"
-   * greys Apply exactly as hard as "no button found", and says which it is.
-   */
-  private applyState(isRedirect: boolean): ApplyState {
-    if (isRedirect) return 'noButton';
-    if (!this.config?.successSelector) {
-      /*
-       * The deadlock, and the one place it is allowed to give.
-       *
-       * Requiring the confirmation element before sending is unanswerable on a site
-       * that has never been applied to: the element does not exist until an
-       * application has gone in. So Apply sends this one — the user pressed it — and
-       * then asks them to point at the reply. The outcome is still read back, once,
-       * by the person looking at it, and by the extension every time after.
-       *
-       * Only with a real button to press. Offering to finish a setup that cannot
-       * start is worse than the blocked state it replaces, and `noButton` is the more
-       * useful complaint. With the setting off, nothing here changes at all.
-       */
-      if (this.settings.finishSetupOnApply && this.submitControl()) return 'finishSetup';
-      return 'noConfirmation';
-    }
-    return this.submitControl() ? 'ready' : 'noButton';
-  }
-
-  /** The control Apply presses: the saved selector, else the best-scoring button. */
-  private submitControl(): HTMLElement | null {
-    return findSubmitControl(
-      document,
-      this.config?.submitSelector,
-      [...this.elements.values()],
-    ).element;
-  }
-
-  /**
-   * Blank every field we filled and throw the card away.
-   *
-   * Reached only through `MSG.RESET`, i.e. the popup's "Reset". It used to sit
-   * in the review modal's `⋯` as well, which put an unconfirmed wipe of
-   * the whole fill — and of the report describing it — one tap from Site setup,
-   * on the surface whose entire job is showing what was filled. The popup is the
-   * right home for it: there, starting over is what the button is for.
+   * Empty what was filled and start the report over. Reached only from the popup's
+   * "Reset & Re-run", where starting over is what the button is for — never from
+   * the card, whose job is showing what was filled.
    */
   private reset(): void {
     this.cancelPicker?.();
-    clearHighlights();
-    for (const [field, el] of this.elements) {
-      const m = this.matches.find((x) => x.field === field);
-      // `confirmedFields` counts as filled here even though the report does not
-      // re-colour for it: this blanks what the extension put on the page, and a
-      // confirmed row's value went in exactly the same way the fill's did.
-      const wrote = m?.filled || this.confirmedFields.has(field);
-      if (wrote && field !== 'resume' && (el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement)) {
-        fillTextField(el, '');
-      }
-    }
-    this.elements.clear();
-    this.matches = [];
-    this.confirmedFields.clear();
-    this.hasRun = false;
+    this.engine.reset();
+    this.confirmed.clear();
+    this.wanted = false;
+    this.job = undefined;
     this.modal?.destroy();
     this.modal = undefined;
+    this.chip?.setCardOpen(false);
   }
 }
 
-/** Truncate to `n` chars with an ellipsis. */
-
-const TEXTLIKE_SELECTOR =
-  'input:not([type=file]):not([type=hidden]):not([type=submit]):not([type=button])' +
-  ':not([type=reset]):not([type=image]):not([type=checkbox]):not([type=radio]),' +
-  'textarea, select, [contenteditable=""], [contenteditable=true]';
-
-/** True when an element can actually receive a fill (text control, or file input for the CV). */
-function isFillable(el: Element, forFile: boolean): boolean {
-  return forFile ? el.matches('input[type=file]') : el.matches(TEXTLIKE_SELECTOR);
-}
+const CONTROL = 'input:not([type=hidden]):not([type=submit]):not([type=button]):not([type=reset]):not([type=image]),'
+  + 'textarea, select, [contenteditable=""], [contenteditable=true]';
 
 /**
  * The user may pick a label or a wrapper instead of the input itself. Resolve to
- * the real fillable control: the label's target, a descendant control, or the
- * nearest control in the surrounding field group. Falls back to the picked node.
+ * the real control: the label's target, a descendant control, or the nearest
+ * control in the surrounding field group. Falls back to the picked node.
  */
-function resolveControl(el: Element, forFile: boolean): Element {
-  const sel = forFile ? 'input[type=file]' : TEXTLIKE_SELECTOR;
-  if (el.matches(sel)) return el;
-  if (el instanceof HTMLLabelElement && el.control?.matches(sel)) return el.control;
-  const inside = el.querySelector(sel);
+function resolveControl(el: Element): Element {
+  if (el.matches(CONTROL)) return el;
+  if (el instanceof HTMLLabelElement && el.control?.matches(CONTROL)) return el.control;
+  const inside = el.querySelector(CONTROL);
   if (inside) return inside;
-  const wrapper = el.closest('label, [class*="field" i], [class*="form-group" i], [class*="input" i]');
-  const near = wrapper?.querySelector(sel);
+  const wrapper = el.closest('label, fieldset, [class*="field" i], [class*="form-group" i], [class*="question" i], [class*="input" i]');
+  const near = wrapper?.querySelector(CONTROL);
   if (near) return near;
   return el;
 }

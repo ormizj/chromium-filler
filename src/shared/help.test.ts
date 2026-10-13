@@ -1,20 +1,12 @@
 import { describe, it, expect } from 'vitest';
-import type { SiteConfig } from './types';
-import { BIND_LABELS, MARK_GROUP_TEXT } from './labels';
-import { markGroupOf, type ConfigBindKey } from './recording';
 import {
-  BIND_HELP, CONCEPT_HELP, CONFIG_HELP, DOT_LEGEND, PREP_HELP, REDIRECT_HELP,
-  SETTINGS_HELP, SETUP_STEP_HELP, SYNC_SETUP_STEPS, SYNC_TROUBLESHOOTING, describeConfig,
+  CONCEPT_HELP, DOT_LEGEND, SETTINGS_HELP, SYNC_SETUP_STEPS, SYNC_TROUBLESHOOTING,
   type HelpEntry,
 } from './help';
 
 /** Every catalog, flattened, so the shape rules are asserted once for all of them. */
 const ALL: Array<[string, HelpEntry]> = [
-  ...Object.entries(CONFIG_HELP),
-  ...Object.entries(REDIRECT_HELP),
   ...Object.entries(SETTINGS_HELP),
-  ...Object.entries(PREP_HELP),
-  ...Object.entries(SETUP_STEP_HELP),
   ...Object.entries(CONCEPT_HELP),
 ];
 
@@ -26,8 +18,7 @@ describe('help catalog', () => {
     }
   });
 
-  // A body that only repeats its own title is a placeholder, not an explanation —
-  // exactly the state this whole feature exists to fix.
+  // A body that only repeats its own title is a placeholder, not an explanation.
   it('never restates the title as the body', () => {
     for (const [key, entry] of ALL) {
       expect(entry.body.trim().toLowerCase(), key).not.toBe(entry.title.trim().toLowerCase());
@@ -35,82 +26,11 @@ describe('help catalog', () => {
     }
   });
 
-  /**
-   * The Declare menu draws the `short` under the mark it belongs to, so an entry
-   * without one is a mark that explains itself nowhere — and the menu is the last
-   * surface where the choice is still open.
-   */
-  it('gives every mark a one-line form, quoted from the catalog it belongs to', () => {
-    for (const [key, entry] of Object.entries(BIND_HELP)) {
-      expect(entry.short?.trim(), key).toBeTruthy();
-    }
-    expect(BIND_HELP.submit).toBe(CONFIG_HELP.submitSelector);
-    expect(BIND_HELP.quickApplySelector).toBe(REDIRECT_HELP.quickApplySelector);
-  });
-
-  /**
-   * And it has to be an example rather than a definition. The caption sits under the
-   * mark's own name and under the head of its group, both of which have already
-   * given the definition — so "External apply link · the link out to the employer's
-   * own application", read under "Applying on the employer's site", is one thing said
-   * three times, and the menu still has not said *which* link.
-   *
-   * So the test is not "does it repeat a word" — a caption is allowed to use the
-   * words around it — but "does it bring any of its own": at least two content words
-   * the label and the head between them do not already have. That is what a caption
-   * costs a line of a 60vh list for. Words are matched on their first four letters,
-   * because "applies" under "Applying" is the same word doing the same nothing.
-   */
-  it('captions a mark with something its name and its head do not already say', () => {
-    const stem = (w: string) => w.slice(0, 4);
-    const words = (s: string) => (s.toLowerCase().match(/[a-z]+/g) ?? []);
-
-    for (const [key, entry] of Object.entries(BIND_HELP)) {
-      const bind = key as ConfigBindKey;
-      const known = new Set([
-        ...words(BIND_LABELS[bind]),
-        ...words(MARK_GROUP_TEXT[markGroupOf(bind)]),
-      ].map(stem));
-      // Five letters and up: the rule is about what a caption contributes, and the
-      // short words it needs to make a sentence out of it contribute nothing.
-      const own = words(entry.short!).filter((w) => w.length >= 5 && !known.has(stem(w)));
-      expect(own.length, `${key}: ${entry.short}`).toBeGreaterThanOrEqual(2);
-    }
-  });
-
-  it('documents every row of every setup step', () => {
-    for (const [key, group] of Object.entries(SETUP_STEP_HELP)) {
-      for (const row of group.rows ?? []) {
-        expect(row.label.trim(), `${key} row label`).not.toBe('');
-        expect(row.body.trim(), `${key}.${row.label}`).not.toBe('');
-      }
-    }
-  });
-
-  /**
-   * A row built from a catalog entry has to carry that entry's example with it.
-   * The concrete selector is what the wizard is missing at the moment it matters
-   * — you are on the step, about to press Pick — and it already exists one
-   * surface away, on the Sites reference. Asserted through the entry rather than
-   * against a literal, because a second copy of the string is the drift this
-   * whole file exists to prevent.
-   */
-  it('carries the catalog example onto the row that quotes it', () => {
-    const row = SETUP_STEP_HELP.kind.rows?.find((r) => r.label === 'Quick-apply marker');
-    expect(row?.example).toBe(REDIRECT_HELP.quickApplySelector.example);
-    expect(row?.example?.trim()).toBeTruthy();
-  });
-
-  /**
-   * The legend is read at a glance, above the work itself. The first attempt
-   * used the full bodies and filled an entire phone screen with prose before
-   * the user could reach a single row.
-   */
-  it('gives the legend concepts a one-line form', () => {
-    for (const key of ['dots', 'autoVsSaved', 'todoChip', 'picker'] as const) {
+  it('gives the card\'s key concepts a one-line form', () => {
+    for (const key of ['dots', 'teaching', 'picker', 'customFields'] as const) {
       const short = CONCEPT_HELP[key].short;
       expect(short, key).toBeTruthy();
-      expect(short!.length, `${key} is too long for a legend line`).toBeLessThan(90);
+      expect(short!.length, `${key} is too long for a key line`).toBeLessThan(90);
     }
   });
 
@@ -139,11 +59,6 @@ describe('help catalog', () => {
         expect(outsideCode(text), `${key}.${field}`).not.toMatch(/[*_]/);
       }
     }
-    for (const [key, group] of Object.entries(SETUP_STEP_HELP)) {
-      for (const row of group.rows ?? []) {
-        expect(outsideCode(row.body), `${key}.${row.label}`).not.toMatch(/[*_]/);
-      }
-    }
   });
 
   it('shows each dot colour rather than naming it', () => {
@@ -151,24 +66,17 @@ describe('help catalog', () => {
     for (const row of DOT_LEGEND) expect(row.label.trim()).not.toBe('');
   });
 
-  it('covers the vocabulary the setup panel puts on screen', () => {
-    // These are the strings a user sees with no explanation today.
-    for (const key of ['dots', 'autoVsSaved', 'todoChip', 'picker', 'neverSubmits'] as const) {
-      expect(CONCEPT_HELP[key]).toBeTruthy();
-    }
-  });
-
   /**
-   * The review modal's Apply button is greyed out on any page where no Send
-   * button could be found. Pressing it opens this entry — so it has to say what
-   * Apply does AND how to point it at the right control, or the user is left
-   * exactly where they started.
+   * The product never presses a site's Submit button, and nothing the user reads
+   * may say or imply otherwise — "until you press Apply" outlived the button by a
+   * release once already.
    */
-  it('explains the greyed-out Apply button and how to enable it', () => {
-    const entry = CONCEPT_HELP.apply;
-    expect(entry).toBeTruthy();
-    expect(entry.body).toMatch(/set up this site|send button/i);
-    expect(entry.body).toMatch(/press|send/i);
+  it('never promises to send anything', () => {
+    for (const [key, entry] of ALL) {
+      const text = `${entry.body} ${entry.when ?? ''} ${entry.short ?? ''}`;
+      expect(text, key).not.toMatch(/\bpress(es)? Apply\b|Apply presses|Apply sends/);
+    }
+    expect(CONCEPT_HELP.neverSubmits.body).toMatch(/never/i);
   });
 });
 
@@ -223,97 +131,5 @@ describe('sync setup guide', () => {
   // cannot drift into two different sets of instructions.
   it('keeps the steps out of the concept entry', () => {
     expect(CONCEPT_HELP.syncClient.body).not.toMatch(/\(1\)/);
-  });
-});
-
-describe('describeConfig', () => {
-  const base: SiteConfig = { id: 'acme', name: 'Acme', urlPatterns: ['*://acme.com/*'], extract: {} };
-
-  it('names the pages the config applies to', () => {
-    expect(describeConfig(base)).toContain('*://acme.com/*');
-  });
-
-  it('describes the wait, in seconds rather than milliseconds', () => {
-    const text = describeConfig({ ...base, waitFor: 'form', waitTimeoutMs: 15000 });
-    expect(text).toContain('form');
-    expect(text).toContain('15s');
-  });
-
-  // "Page actions" is what the wizard's second step is called, so that is what
-  // these are named here too — "setup step" collided with the wizard's own
-  // numbered steps, which is two vocabularies wearing one word.
-  it('counts page actions and says what the first one does', () => {
-    const text = describeConfig({
-      ...base,
-      prep: [
-        { action: 'click', selector: '#apply', optional: true },
-        { action: 'delay', ms: 500 },
-      ],
-    });
-    expect(text).toContain('#apply');
-    expect(text).toMatch(/2 page actions/i);
-    expect(text).not.toMatch(/setup steps?/i);
-  });
-
-  it('mentions the handoff when redirect selectors are configured', () => {
-    const text = describeConfig({ ...base, redirect: { markerSelector: '.ext-badge' } });
-    expect(text).toMatch(/employer|external/i);
-    expect(text).toContain('.ext-badge');
-  });
-
-  /**
-   * The board that mixes both kinds of posting is the normal shape, and it is
-   * exactly the one this used to get wrong: the two branches were an `else if`,
-   * so a config carrying both was described as handing off and the quick-apply
-   * selector went unmentioned — naming the rule that loses and omitting the rule
-   * that wins. Someone debugging the site would go looking in the wrong place.
-   */
-  it('never describes a quick-apply site as only handing off', () => {
-    const text = describeConfig({
-      ...base,
-      redirect: { quickApplySelector: '.inline-form', applySelector: '.ext' },
-    });
-    expect(text).toContain('.inline-form');
-    expect(text).toContain('.ext');
-  });
-
-  // Order is the claim: `detectRedirect` checks the quick-apply marker first and
-  // returns there, so a sentence that reads the other way round is a lie about
-  // precedence even when it names both selectors.
-  it('states the two redirect rules in the order the detector applies them', () => {
-    const text = describeConfig({
-      ...base,
-      redirect: { quickApplySelector: '.inline-form', markerSelector: '.ext-badge' },
-    });
-    expect(text.indexOf('.inline-form')).toBeLessThan(text.indexOf('.ext-badge'));
-  });
-
-  it('explains successSelector as the proof it was sent', () => {
-    const text = describeConfig({ ...base, successSelector: '.thanks' });
-    expect(text).toContain('.thanks');
-    expect(text).toMatch(/sent|applied/i);
-  });
-
-  // A configured submitCv is the difference between a live button and a dead one
-  // in the review modal, so the Sites summary must not stay silent about it.
-  it('mentions the CV confirmation steps and what the first one does', () => {
-    const text = describeConfig({
-      ...base,
-      submitCv: [{ action: 'click', selector: '#cv-attach' }],
-    });
-    expect(text).toContain('#cv-attach');
-    expect(text).toMatch(/cv|résumé/i);
-  });
-
-  it('says overrides exist and how many', () => {
-    const text = describeConfig({ ...base, fieldOverrides: { email: '#e', city: '#c' } });
-    expect(text).toMatch(/2 field/i);
-  });
-
-  // The bare template a user gets from "Add template" must still read as a sentence.
-  it('describes a minimal config without dangling punctuation', () => {
-    const text = describeConfig(base);
-    expect(text.trim()).not.toMatch(/[,;]$/);
-    expect(text).toMatch(/\.$/);
   });
 });

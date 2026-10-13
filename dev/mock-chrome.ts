@@ -18,8 +18,8 @@ import {
   MSG, type SessionState, type StatusResponse, type SyncState,
 } from '../src/shared/messages';
 import { clientProblem, normalizeClient, type SyncClient } from '../src/shared/syncConfig';
-import { DEFAULT_SETTINGS, EXAMPLE_SITE_CONFIG } from '../src/shared/defaults';
-import type { JobUrlEntry } from '../src/shared/types';
+import { DEFAULT_SETTINGS } from '../src/shared/defaults';
+import type { JobUrlEntry, Lesson } from '../src/shared/types';
 import { applyStatus, makeEntry } from '../src/shared/jobUrls';
 import { nextBatch, queueProgress } from '../src/shared/queue';
 
@@ -47,7 +47,9 @@ const FRESH = new URLSearchParams(location.search).get('state') === 'fresh';
 /** Seed realistic data on first run so the UI isn't empty. */
 function seedIfEmpty(): void {
   const all = readAll();
-  const mode = FRESH ? 'fresh' : 'full';
+  // Versioned: bump it whenever the seed's shape changes, or a browser that ran the
+  // harness before keeps the old store and shows none of the new data.
+  const mode = FRESH ? 'fresh' : 'full-v2';
   // Keyed on the mode, not on a bare flag: the two share one localStorage, so
   // `?state=fresh` would otherwise inherit whatever the last page seeded — and
   // the page after it would inherit the empty store.
@@ -65,14 +67,31 @@ function seedIfEmpty(): void {
         city: 'London',
         coverLetter: 'I love building widgets.',
       },
-      custom: {},
+      keywords: { firstName: ['christian name'] },
+      customFields: [
+        { id: 'c_exp', label: 'Years of experience', kind: 'text', value: '7', keywords: ['experience in years'] },
+        { id: 'c_visa', label: 'Need sponsorship', kind: 'yesNo', value: 'No', keywords: ['visa sponsorship', 'right to work'] },
+        { id: 'c_notice', label: 'Notice period', kind: 'text', value: '1 month', keywords: [] },
+      ],
     },
-    siteConfigs: [EXAMPLE_SITE_CONFIG],
+    lessons: seedLessons(),
     // A queue with something in it: an empty one hides every session control,
     // which is the part of the UI most worth iterating on.
     jobUrls: seedJobUrls(),
     settings: DEFAULT_SETTINGS,
   });
+}
+
+function seedLessons(): Lesson[] {
+  const at = Date.now() - 86_400_000;
+  return [
+    { id: 'l1', signature: { question: 'given name', kind: 'text' }, target: { field: 'firstName' }, label: 'Given name', taughtOn: 'jobs.acme.test', createdAt: at, hits: 4 },
+    { id: 'l2', signature: { question: 'where are you based', kind: 'text' }, target: { field: 'city' }, label: 'Where are you based?', taughtOn: 'careers.widget.dev', createdAt: at, hits: 2 },
+    { id: 'l3', signature: { question: 'name', kind: 'text', section: 'reference 1' }, target: { field: 'c_ref' }, label: 'Name', taughtOn: 'boards.example', createdAt: at, hits: 0 },
+    { id: 'l4', signature: { question: 'how many years have you worked with kubernetes', kind: 'number' }, target: { field: 'c_exp' }, label: 'How many years have you worked with Kubernetes?', taughtOn: 'jobs.acme.test', createdAt: at, hits: 1 },
+    { id: 'l5', signature: { question: 'how did you hear about us', kind: 'select' }, target: { ignore: true }, label: 'How did you hear about us?', taughtOn: 'jobs.acme.test', createdAt: at, hits: 6 },
+    { id: 'l6', signature: { question: '', kind: 'text', host: 'boards.example' }, target: { field: 'phone' }, label: 'Unlabelled field', taughtOn: 'boards.example', createdAt: at, hits: 1 },
+  ];
 }
 
 function seedJobUrls(): JobUrlEntry[] {
@@ -126,12 +145,11 @@ const FILLED = 5;
 
 function fakeStatus(): StatusResponse {
   return {
-    siteMatched: true,
-    siteName: EXAMPLE_SITE_CONFIG.name,
-    configId: EXAMPLE_SITE_CONFIG.id,
     filledCount: hasRun ? FILLED : 0,
     reportedCount: hasRun ? REPORTED : 0,
+    toTeach: hasRun ? REPORTED - FILLED : 0,
     hasRun,
+    inQueue: sessionActive,
   };
 }
 
@@ -220,6 +238,8 @@ function backgroundReply(
       return sessionSnapshot();
     case MSG.SESSION_STATE:
       return sessionSnapshot();
+    case MSG.QUEUE_TAB:
+      return { inQueue: sessionActive, progress: sessionSnapshot().progress };
     default:
       return { ok: true };
   }

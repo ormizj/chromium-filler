@@ -148,6 +148,20 @@ export function markOpenedDone(
   return changed === 0 ? { list, changed } : { list: out, changed };
 }
 
+/**
+ * A tab the queue opened was closed: the user is done with that posting.
+ *
+ * Only an `opened` posting moves, and only to `markedDone` — the user's own word,
+ * which closing the tab is. One already skipped, applied or marked keeps its
+ * answer, and one never opened is not this tab's to finish. The same list back
+ * when nothing changes, so the caller can skip the write.
+ */
+export function finishOnClose(list: JobUrlEntry[], url: string, now: number = Date.now()): JobUrlEntry[] {
+  const entry = list.find((e) => e.url === url);
+  if (!entry || entry.status !== 'opened') return list;
+  return applyStatus(list, url, 'markedDone', now);
+}
+
 /** Append an entry for `url` unless the database already has one. */
 function ensureUrl(list: JobUrlEntry[], url: string, now: number): JobUrlEntry[] {
   return list.some((e) => e.url === url) ? list : [...list, makeEntry(url, now)];

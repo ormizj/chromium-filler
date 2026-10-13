@@ -133,6 +133,15 @@ export function retintTag(el: HTMLElement, confidence: MatchConfidence): void {
   if (mark) mark.tag.style.borderLeftColor = statusColor(currentPalette(), confidence);
 }
 
+/** Take one element's chip away, leaving the rest. */
+export function untagElement(el: HTMLElement): void {
+  const mark = tags.get(el);
+  if (!mark) return;
+  mark.tag.remove();
+  tags.delete(el);
+  if (!tags.size) unlisten();
+}
+
 export function clearTags(): void {
   for (const mark of tags.values()) mark.tag.remove();
   tags.clear();

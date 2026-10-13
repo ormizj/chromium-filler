@@ -1,27 +1,15 @@
 /**
- * Background service worker: batch-opens job URLs, opens the options page, and
- * owns the two-step ("redirect") handoff — the one part of the flow a content
- * script cannot see, because the destination is a different page, often in a
- * different tab, reached through tracker/302 hops.
+ * Background service worker: the queue session (`session.ts`), the sync
+ * (`sync.ts`), and opening the options page. Nothing here fills, follows or sends
+ * anything — that was the automation era. What it still owns is the one thing a
+ * content script cannot see: which tabs belong to the queue, and what closing one
+ * of them means.
  */
 
-import {
-  MSG, type FollowRedirectResponse, type Message, type RecordingResponse,
-} from '../shared/messages';
-import {
-  getRecording, inheritRecording, popStep, pushStep, startRecording, stopRecording,
-} from './recordings';
-import {
-  getSettings, getStoredSiteConfigs, mutateJobUrls, saveStoredSiteConfigs,
-} from '../shared/storage';
-import { migrateLegacy } from '../shared/siteConfigs';
-import { currentFormFactor } from '../shared/formFactor';
-import { applyStatusChain, linkRedirect } from '../shared/jobUrls';
-import { isExternalUrl } from '../shared/redirect';
-import { navigableUrl } from '../shared/appLink';
+import { MSG, type Message } from '../shared/messages';
 import { DEFAULT_STATE } from '../shared/defaults';
 import {
-  onSubmitted, onTabClosed, openUrls, sessionState, skipUrl, startSession, stopSession,
+  adoptChildTab, onTabClosed, openUrls, queueTab, sessionState, skipUrl, startSession, stopSession,
 } from './session';
 import {
   connectAccount, disconnectAccount, setSyncClient, syncNow, syncOnStartup, syncState,
@@ -29,27 +17,10 @@ import {
 
 const LOG = '[chromium-filler:bg]';
 
-/** How long a still-navigating tab keeps producing events before we settle on its URL. */
-const SETTLE_MS = 1200;
-/** A handoff that hasn't landed by now is abandoned (login wall, closed tab, ...). */
-const WATCH_TTL_MS = 90_000;
-
 chrome.runtime.onInstalled.addListener(async (details) => {
   if (details.reason === 'install') {
-    const existing = await chrome.storage.local.get('siteConfigs');
-    if (!existing.siteConfigs) {
-      // Seeded unstamped, so any real edit on either device outranks the example
-      // in a sync, and a delete of it holds.
-      await chrome.storage.local.set({
-        ...DEFAULT_STATE,
-        siteConfigs: DEFAULT_STATE.siteConfigs.map((c) => migrateLegacy(c, currentFormFactor())),
-      });
-    }
-  } else if (details.reason === 'update') {
-    // Configs from before the desktop/mobile split go into this device's half —
-    // they were recorded here. Readers migrate on read as well; doing it once
-    // here is what puts the stored shape on disk before the first sync sends it.
-    await saveStoredSiteConfigs(await getStoredSiteConfigs());
+    const existing = await chrome.storage.local.get(['profile', 'settings']);
+    if (!existing.profile && !existing.settings) await chrome.storage.local.set({ ...DEFAULT_STATE });
   }
 });
 
@@ -61,59 +32,17 @@ chrome.runtime.onStartup.addListener(() => {
   void syncOnStartup().catch((e) => console.warn(LOG, 'startup sync failed', e));
 });
 
-chrome.runtime.onMessage.addListener((msg: Message, _sender, sendResponse) => {
+chrome.runtime.onMessage.addListener((msg: Message, sender, sendResponse) => {
   if (msg.type === MSG.OPEN_URLS) {
     openUrls(msg.urls)
       .then(() => sendResponse({ ok: true }))
       .catch((e) => sendResponse({ ok: false, error: String(e) }));
     return true;
   }
-  if (msg.type === MSG.SUBMITTED) {
-    handleSubmitted(msg.url, _sender.tab?.id)
-      .then(() => sendResponse({ ok: true }))
-      .catch((e) => sendResponse({ ok: false, error: String(e) }));
-    return true;
-  }
-  if (msg.type === MSG.APPLYING) {
-    noteApplying(msg.url, _sender.tab?.id)
-      .then(() => sendResponse({ ok: true }))
-      .catch((e) => sendResponse({ ok: false, error: String(e) }));
-    return true;
-  }
-  if (msg.type === MSG.RECORD_START) {
-    startRecording(_sender.tab?.id, msg.flow, msg.postingUrl, msg.phase)
-      .then(() => sendResponse({ ok: true }))
-      .catch((e) => sendResponse({ ok: false, error: String(e) }));
-    return true;
-  }
-  if (msg.type === MSG.RECORD_PUSH) {
-    pushStep(_sender.tab?.id, msg.step)
-      .then(() => sendResponse({ ok: true }))
-      .catch((e) => sendResponse({ ok: false, error: String(e) }));
-    return true;
-  }
-  if (msg.type === MSG.RECORD_UNDO) {
-    popStep(_sender.tab?.id)
-      .then((recording) => sendResponse({ recording } satisfies RecordingResponse))
-      .catch(() => sendResponse({} satisfies RecordingResponse));
-    return true;
-  }
-  if (msg.type === MSG.RECORD_GET) {
-    getRecording(_sender.tab?.id)
-      .then((recording) => sendResponse({ recording } satisfies RecordingResponse))
-      .catch(() => sendResponse({} satisfies RecordingResponse));
-    return true;
-  }
-  if (msg.type === MSG.RECORD_STOP) {
-    stopRecording(_sender.tab?.id)
-      .then((recording) => sendResponse({ recording } satisfies RecordingResponse))
-      .catch(() => sendResponse({} satisfies RecordingResponse));
-    return true;
-  }
-  if (msg.type === MSG.FOLLOW_REDIRECT) {
-    followRedirect(msg.sourceUrl, msg.href, _sender.tab)
-      .then(sendResponse)
-      .catch((e) => sendResponse({ error: String(e) } satisfies FollowRedirectResponse));
+  if (msg.type === MSG.QUEUE_TAB) {
+    // The sender's own tab, never one named in the message: a page may only ask
+    // about itself.
+    queueTab(sender.tab?.id).then(sendResponse).catch(() => sendResponse({ inQueue: false }));
     return true;
   }
   if (msg.type === MSG.SESSION_START) {
@@ -129,7 +58,7 @@ chrome.runtime.onMessage.addListener((msg: Message, _sender, sendResponse) => {
     return true;
   }
   if (msg.type === MSG.SESSION_SKIP) {
-    skipUrl(msg.url, _sender.tab?.id).then(sendResponse).catch((e) => sendResponse({ error: String(e) }));
+    skipUrl(msg.url, sender.tab?.id).then(sendResponse).catch((e) => sendResponse({ error: String(e) }));
     return true;
   }
   // The Sync tab renders these straight into its status line, so they are the
@@ -161,8 +90,7 @@ chrome.runtime.onMessage.addListener((msg: Message, _sender, sendResponse) => {
     // Every deep link is a hash on the options URL; `openOptionsPage` cannot
     // carry one, so anything targeted has to go through `tabs.create`.
     const parts: string[] = [];
-    if (msg.createForUrl) parts.push(`create=${encodeURIComponent(msg.createForUrl)}`);
-    else if (msg.hash) parts.push(msg.hash);
+    if (msg.hash) parts.push(msg.hash);
     // `at`/`focus` are additions to whichever tab was named, so they follow it.
     if (msg.at) parts.push(`at=${encodeURIComponent(msg.at)}`);
     if (msg.focus) parts.push(`focus=${encodeURIComponent(msg.focus)}`);
@@ -177,264 +105,21 @@ chrome.runtime.onMessage.addListener((msg: Message, _sender, sendResponse) => {
   return false;
 });
 
-/* ---------------- Which posting a tab is applying to ---------------- */
-
 /**
- * The confirmation is frequently not on the page the form was: Greenhouse lands
- * on `…/jobs/<id>/confirmation`, Lever on its own confirmation page. The content
- * script there is a *fresh* one — it has no memory of the posting, so reporting
- * its own `location.href` would mark the confirmation page applied and leave the
- * job posting sitting at "opened" forever.
- *
- * So each tab remembers the posting it filled. Session storage, keyed by tab,
- * for the same reason the redirect watches are: the worker can be torn down
- * between the submit and the landing, and the navigation itself is what makes
- * that likely.
+ * A closed job tab frees its slot — and, under `markDoneOnClose`, finishes its
+ * posting. The user submits on the site by hand, so closing the tab is the one
+ * thing the extension ever hears that means "done with this one".
  */
-interface ApplyingRecord {
-  url: string;
-  at: number;
-}
-
-const APPLYING_KEY = 'applyingTabs';
-/** A posting still unconfirmed after this is not one this submission finished. */
-const APPLYING_TTL_MS = 30 * 60_000;
-
-async function getApplying(): Promise<Record<string, ApplyingRecord>> {
-  const raw = await chrome.storage.session.get(APPLYING_KEY);
-  return (raw[APPLYING_KEY] as Record<string, ApplyingRecord>) ?? {};
-}
-
-/** This tab is working on this posting. Overwrites: a tab holds one at a time. */
-async function noteApplying(url: string, tabId: number | undefined): Promise<void> {
-  if (tabId == null) return;
-  const all = await getApplying();
-  all[String(tabId)] = { url, at: Date.now() };
-  await chrome.storage.session.set({ [APPLYING_KEY]: all });
-}
-
-/**
- * The posting `tabId` was filling, if it is still fresh. Falls back to the URL
- * the page reported, which is already correct whenever the confirmation renders
- * in place — there the two are the same URL.
- */
-async function applyingUrl(tabId: number | undefined, reported: string): Promise<string> {
-  if (tabId == null) return reported;
-  const all = await getApplying();
-  const record = all[String(tabId)];
-  if (!record) return reported;
-
-  delete all[String(tabId)];
-  await chrome.storage.session.set({ [APPLYING_KEY]: all });
-  if (Date.now() - record.at > APPLYING_TTL_MS) return reported;
-  return record.url;
-}
-
-async function handleSubmitted(reportedUrl: string, tabId: number | undefined): Promise<void> {
-  // Attribute the confirmation to the posting that was filled, not to whatever
-  // page happens to be showing it.
-  const url = await applyingUrl(tabId, reportedUrl);
-
-  // Mark the URL applied, and with it the board posting it was reached from —
-  // the application belongs to that posting even though it was sent elsewhere.
-  await mutateJobUrls((list) => applyStatusChain(list, url, 'applied'));
-
-  // Free this posting's session slot and pull in the next one. This is what
-  // makes a session self-refilling: finishing an application is the trigger.
-  await onSubmitted(tabId);
-
-  // Optionally close the tab after a short delay so the request completes.
-  //
-  // Never while a recording is running, though. The application really was sent, so
-  // marking it applied above is right — but the confirmation appearing is the exact
-  // moment the user has to mark it, and it is the one selector that cannot be
-  // captured at any other time. Tidying the tab away here would close the page out
-  // from under the last step of the setup that whole recording exists to produce.
-  const recording = await getRecording(tabId);
-  const settings = await getSettings();
-  if (settings.closeTabOnSubmit && tabId != null && !recording) {
-    const delay = Math.max(0, settings.closeTabDelayMs ?? 1500);
-    setTimeout(() => chrome.tabs.remove(tabId).catch(() => {}), delay);
-  }
-}
-
-/** A closed job tab frees its slot, whether it was submitted, skipped, or given up on. */
 chrome.tabs.onRemoved.addListener((tabId) => {
   void onTabClosed(tabId).catch((e) => console.warn(LOG, 'session top-up failed', e));
 });
 
-/* ---------------- Two-step (redirect) handoff ---------------- */
-
-interface RedirectWatch {
-  /** The board posting that started the handoff. */
-  sourceUrl: string;
-  sourceTabId: number;
-  startedAt: number;
-}
-
-const WATCH_KEY = 'redirectWatches';
-
 /**
- * Watches live in session storage, keyed by tab: the service worker can be torn
- * down between the click and the landing, and an in-memory map would take the
- * link with it.
- */
-async function getWatches(): Promise<Record<string, RedirectWatch>> {
-  const raw = await chrome.storage.session.get(WATCH_KEY);
-  return (raw[WATCH_KEY] as Record<string, RedirectWatch>) ?? {};
-}
-
-async function setWatches(watches: Record<string, RedirectWatch>): Promise<void> {
-  await chrome.storage.session.set({ [WATCH_KEY]: watches });
-}
-
-async function armWatch(tabId: number, watch: RedirectWatch): Promise<void> {
-  const watches = await getWatches();
-  watches[String(tabId)] = watch;
-  await setWatches(watches);
-}
-
-/** Drop every watch for this handoff (source tab and any tab it opened). */
-async function clearWatchesFor(sourceUrl: string): Promise<void> {
-  const watches = await getWatches();
-  for (const [key, w] of Object.entries(watches)) {
-    if (w.sourceUrl === sourceUrl) delete watches[key];
-  }
-  await setWatches(watches);
-}
-
-/** Expire abandoned handoffs; returns the live ones. */
-function prune(watches: Record<string, RedirectWatch>, now: number): Record<string, RedirectWatch> {
-  const live: Record<string, RedirectWatch> = {};
-  for (const [key, w] of Object.entries(watches)) {
-    if (now - w.startedAt < WATCH_TTL_MS) live[key] = w;
-  }
-  return live;
-}
-
-/**
- * A posting classified as a redirect is being followed. Arm the watch first —
- * whichever way the navigation happens (we open it, the page clicks it, the
- * site opens its own tab), the landing has to be attributable to this posting.
- */
-async function followRedirect(
-  sourceUrl: string,
-  href: string | undefined,
-  tab: chrome.tabs.Tab | undefined,
-): Promise<FollowRedirectResponse> {
-  const tabId = tab?.id;
-  if (tabId == null) return { error: 'no tab' };
-
-  const settings = await getSettings();
-  const target = settings.redirectTarget ?? 'newTabCloseSource';
-
-  // Re-gated here, not only in the detector: this is the one place a redirect tab
-  // is created, and it must not depend on its caller having checked. Fail closed
-  // and arm no watch — the same rule `findSubmitControl` follows, and without it
-  // a 90-second watch would sit on a navigation that never happens.
-  const destination = navigableUrl(href, sourceUrl, settings.keepInBrowser);
-  if (href && !destination) {
-    console.info(LOG, 'refusing an app-handoff apply link —', href);
-    return { error: 'app link' };
-  }
-
-  const watch: RedirectWatch = { sourceUrl, sourceTabId: tabId, startedAt: Date.now() };
-  await armWatch(tabId, watch);
-
-  // No URL to open (a JS apply button): let the page click it and watch where
-  // that lands — in this tab or in one the site opens itself.
-  if (!destination) return { click: true };
-  if (target === 'sameTab') return { navigate: destination };
-
-  const created = await chrome.tabs.create({ url: destination, openerTabId: tabId, active: tab?.active ?? false });
-  if (created.id != null) await armWatch(created.id, watch);
-  return { opened: true };
-}
-
-/**
- * A tab opened by a watched tab inherits its watch (target=_blank apply links) — and
- * a tab opened by a *recording* tab inherits the recording, which is what lets a
- * two-step posting be set up in one pass: the employer's form usually opens in a new
- * tab, and the tab that knew about the recording is often closed behind it.
+ * A tab opened from a queue tab belongs to the same posting — the employer's form
+ * behind "Apply on company website". It carries the chip and fills like its parent,
+ * but takes no slot and finishes nothing when it closes.
  */
 chrome.tabs.onCreated.addListener((tab) => {
-  const opener = tab.openerTabId;
-  if (opener == null || tab.id == null) return;
-  const tabId = tab.id;
-  void (async () => {
-    const watches = await getWatches();
-    const parent = watches[String(opener)];
-    if (parent) await armWatch(tabId, parent);
-    await inheritRecording(opener, tabId);
-  })();
+  if (tab.id == null || tab.openerTabId == null) return;
+  void adoptChildTab(tab.id, tab.openerTabId).catch((e) => console.warn(LOG, 'could not adopt tab', e));
 });
-
-/** Pending settle timers, keyed by tab. Lost on worker restart — see `settle`. */
-const settleTimers = new Map<number, ReturnType<typeof setTimeout>>();
-
-chrome.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
-  if (changeInfo.status !== 'complete' && !changeInfo.url) return;
-  void onWatchedTabUpdated(tabId, tab).catch((e) => console.warn(LOG, 'redirect watch failed', e));
-});
-
-async function onWatchedTabUpdated(tabId: number, tab: chrome.tabs.Tab): Promise<void> {
-  const all = await getWatches();
-  if (Object.keys(all).length === 0) return;
-
-  const live = prune(all, Date.now());
-  if (Object.keys(live).length !== Object.keys(all).length) await setWatches(live);
-
-  const watch = live[String(tabId)];
-  if (!watch) return;
-
-  const url = tab.url;
-  if (!url || !/^https?:/i.test(url)) return;
-  // Still on the board (in-page navigation, a login step): not a landing.
-  if (!isExternalUrl(watch.sourceUrl, url)) return;
-
-  // Chains land in stages — tracker, interstitial, then the real form. Restart
-  // the clock on every hop so the last URL standing is the one recorded.
-  const existing = settleTimers.get(tabId);
-  if (existing) clearTimeout(existing);
-  settleTimers.set(tabId, setTimeout(() => {
-    settleTimers.delete(tabId);
-    void settle(tabId, watch).catch((e) => console.warn(LOG, 'redirect settle failed', e));
-  }, SETTLE_MS));
-}
-
-/** The handoff has stopped moving: record it, tell the page, tidy the tabs. */
-async function settle(tabId: number, watch: RedirectWatch): Promise<void> {
-  const watches = await getWatches();
-  if (!watches[String(tabId)]) return; // already settled or expired
-
-  const tab = await chrome.tabs.get(tabId).catch(() => undefined);
-  const finalUrl = tab?.url;
-  if (!finalUrl || !isExternalUrl(watch.sourceUrl, finalUrl)) return;
-
-  await mutateJobUrls((list) => linkRedirect(list, watch.sourceUrl, finalUrl));
-  await clearWatchesFor(watch.sourceUrl);
-  console.info(LOG, 'redirect landed', watch.sourceUrl, '->', finalUrl);
-
-  notifyLanded(tabId, watch.sourceUrl);
-
-  const settings = await getSettings();
-  if ((settings.redirectTarget ?? 'newTabCloseSource') === 'newTabCloseSource'
-      && watch.sourceTabId !== tabId) {
-    chrome.tabs.remove(watch.sourceTabId).catch(() => {});
-  }
-}
-
-/**
- * Tell the destination page which posting it came from, so it can set itself up
- * and show the provenance. The content script is normally ready by now (it runs
- * at document_idle and we waited out the settle window); one retry covers a slow
- * frame, and a page we can't reach at all is not worth failing the link over.
- */
-function notifyLanded(tabId: number, sourceUrl: string): void {
-  const send = (retry: boolean) => {
-    chrome.tabs.sendMessage(tabId, { type: MSG.REDIRECT_LANDED, sourceUrl }, () => {
-      if (chrome.runtime.lastError && retry) setTimeout(() => send(false), 500);
-    });
-  };
-  send(true);
-}

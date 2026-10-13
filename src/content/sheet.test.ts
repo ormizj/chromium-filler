@@ -1,16 +1,10 @@
 /**
- * The one slot, tested through both surfaces at once.
- *
- * The review modal and the setup panel are one object with two renderings, and
- * before `Sheet` existed they were not: the panel hardcoded its own corner and its
- * own size, its drag had no ceiling, and nothing re-clamped it when the window
- * changed. Every assertion here is about the two behaving identically, because
- * "identically" is the whole feature — a rule proved on the modal alone is exactly
- * the rule the panel used to break.
+ * The sheet's geometry, tested through the review card — the one surface left
+ * built on `Sheet`. The `Surface` indirection stays: it is what a second sheet
+ * would plug into, and every rule here would have to hold for it too.
  */
 import { describe, it, expect, afterEach, vi } from 'vitest';
 import { FillerModal, type ModalCallbacks, type ModalData } from './modal/modal';
-import { SetupPanel, type SetupCallbacks, type SetupData } from './setupPanel';
 import { DEFAULT_MODAL_LAYOUT, MIN_H, MIN_W, type ModalLayout } from '../shared/modalLayout';
 
 const noop = () => {};
@@ -27,23 +21,8 @@ function setViewport(w: number, h: number): void {
 
 function modalCallbacks(over: Partial<ModalCallbacks> = {}): ModalCallbacks {
   return {
-    onRerun: noop, onApply: noop, onConfirm: noop, onPick: noop,
-    onFollow: noop, onFillAnyway: noop, onSkip: noop, onClose: noop,
-    onSendMyself: noop,
-    onOpenSetup: noop, onOpenOptions: noop,
-    ...over,
-  };
-}
-
-function setupCallbacks(over: Partial<SetupCallbacks> = {}): SetupCallbacks {
-  return {
-    onAddPrep: noop, onPickPrepTarget: noop, onMovePrep: noop, onRemovePrep: noop,
-    onSetPrepMs: noop, onRunPrep: noop, onPickContainer: noop, onClearContainer: noop,
-    onPickField: noop, onClearField: noop, onPickRedirect: noop, onClearRedirect: noop,
-    onPickSubmit: noop, onClearSubmit: noop, onPickSuccess: noop, onClearSuccess: noop,
-    onRename: noop, onOpenOptions: noop, onClose: noop, onDismissHelp: noop,
-    onStartRecording: noop, onMarkConfirmation: noop, onRebindStep: noop, onRepickStep: noop, onRemoveStep: noop,
-    onSaveRecording: noop, onDiscardRecording: noop,
+    onRerun: noop, onConfirm: noop, onTeach: noop, onPoint: noop,
+    onSkip: noop, onClose: noop, onOpenOptions: noop,
     ...over,
   };
 }
@@ -53,27 +32,7 @@ function modalData(over: Partial<ModalData> = {}): ModalData {
     siteName: 'Acme',
     jobTitle: 'Engineer',
     matches: [],
-    applyState: 'ready',
-    layout: DEFAULT_MODAL_LAYOUT,
-    ...over,
-  };
-}
-
-function setupData(over: Partial<SetupData> = {}): SetupData {
-  return {
-    name: 'Acme',
-    urlPattern: '*://acme.com/*',
-    prep: [],
-    containers: [],
-    fields: [],
-    verdict: { title: 'Quick apply', detail: 'a form was found here', kind: 'quickApply' },
-    redirect: [],
-    beforeFollow: [],
-    submitCv: [],
-    submit: { key: 'submitSelector', label: 'Send button', status: 'low', note: 'auto · Apply', hasSave: false },
-    success: { key: 'successSelector', label: 'Confirmation element', status: 'high', note: 'saved · #done', hasSave: true },
-    helpSeen: true,
-    formFactor: 'desktop',
+    choices: [],
     layout: DEFAULT_MODAL_LAYOUT,
     ...over,
   };
@@ -86,7 +45,7 @@ function setupData(over: Partial<SetupData> = {}): SetupData {
  */
 interface Surface {
   name: string;
-  open(layout?: ModalLayout, cb?: Partial<ModalCallbacks & SetupCallbacks>): Sheetish;
+  open(layout?: ModalLayout, cb?: Partial<ModalCallbacks>): Sheetish;
 }
 
 interface Sheetish {
@@ -123,25 +82,6 @@ const SURFACES: Surface[] = [
         setFullscreen: (on) => modal.setFullscreen(on),
         get isMinimized() { return modal.isMinimized; },
         destroy: () => modal.destroy(),
-      };
-    },
-  },
-  {
-    name: 'setup panel',
-    open(layout = DEFAULT_MODAL_LAYOUT, cb = {}) {
-      const panel = new SetupPanel(setupCallbacks(cb));
-      live.push(panel);
-      panel.render(setupData({ layout }));
-      const root = shadowOf('chromium-filler-setup-host');
-      return {
-        card: () => root.querySelector('.cf-card'),
-        pill: () => root.querySelector('.cf-pill'),
-        minimize: () => panel.minimize(),
-        restore: () => panel.restore(),
-        setSlot: (s) => panel.setSlot(s),
-        setFullscreen: (on) => panel.setFullscreen(on),
-        get isMinimized() { return panel.isMinimized; },
-        destroy: () => panel.destroy(),
       };
     },
   },
@@ -285,24 +225,5 @@ describe.each(SURFACES)('$name — folding', (surface) => {
     expect(onFold).toHaveBeenCalledWith(true);
     sheet.restore();
     expect(onFold).toHaveBeenLastCalledWith(false);
-  });
-});
-
-describe('one slot, two sheets', () => {
-  it('puts both sheets at the same rectangle when given the same layout', () => {
-    // The point of the whole exercise: the panel used to dock top-right at a
-    // hardcoded 400px while the modal sat bottom-right at the user's size.
-    setViewport(1440, 900);
-    const layout = { right: 24, bottom: 32, width: 500, height: 640 };
-    const boxes = SURFACES.map((s) => {
-      const card = s.open(layout).card()!;
-      return [card.style.right, card.style.bottom, card.style.width, card.style.height];
-    });
-    expect(boxes[0]).toEqual(boxes[1]);
-  });
-
-  it('marks which sheet a card belongs to, so the two are tellable apart', () => {
-    setViewport(1440, 900);
-    expect(SURFACES.map((s) => s.open().card()!.dataset.sheet)).toEqual(['review', 'setup']);
   });
 });

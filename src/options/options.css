@@ -153,8 +153,8 @@ body[data-scroll~='down'] .scrollfade {
  * action row divides its width. Left-packed, the six tabs ran out a third of the
  * way across and the folder read as a small pill above a very wide sheet; worse,
  * nothing reached the sheet's right-hand corner, so only one of the two corners
- * below could ever mean anything. Six one-word labels in ~136px each: nothing
- * here wraps or truncates.
+ * below could ever mean anything. Five one-word labels: nothing here wraps or
+ * truncates.
  */
 .tab {
   flex: 1 1 0;
@@ -927,29 +927,14 @@ label.fld.inline input {
     display: none;
   }
   /**
-   * Wrap the tab strip rather than scroll it.
-   *
-   * `.tabs` scrolls horizontally with `scrollbar-width: none`, which is fine
-   * while everything fits and invisible when it does not: at 390px the six tabs
-   * are 401px wide, so Sync was clipped and Help was entirely off-screen with no
-   * affordance saying to swipe. A tab nobody can see is a tab nobody uses, and
-   * mobile is the priority target.
-   *
-   * The cost is that an active tab on the first row is a raised folder tab with
-   * the panel a row below it, instead of sitting on it. That is why this is
-   * scoped to narrow widths — on desktop all six fit on one line and the folder
-   * metaphor is untouched. `revealSection` already measures the topbar per call,
-   * so a two-row strip does not throw its scroll offset out.
+   * Five one-word tabs on one line, at a tighter padding. Six did not fit a 390px
+   * screen and wrapped onto a 3-column grid, which broke the folder metaphor; with
+   * the Sites tab gone the strip fits whole, so the folder survives on a phone too.
+   * The padding is what has to give: at the desktop's, "Settings" alone ate the
+   * share of two of its neighbours.
    */
-  /**
-   * A grid rather than `flex-wrap`, now that the tabs divide the width: wrapped,
-   * a row of four and a row of two gave the second row's tabs twice the width of
-   * the first's, so the same strip changed rhythm halfway down. Three columns is
-   * two even rows of the six, and a seventh tab would simply start a third row.
-   */
-  .tabs {
-    display: grid;
-    grid-template-columns: repeat(3, 1fr);
+  .tab {
+    padding: 0 var(--space-2);
   }
 }
 @media (min-width: 641px) {
@@ -968,8 +953,8 @@ label.fld.inline input {
    * the selected tab is the first or the last one, which is the same one
    * attribute the squared corners above are decided by.
    *
-   * Narrow is excluded with the rest of the folder metaphor: the strip is a
-   * 3-column grid there and a first-row tab stands on nothing.
+   * Narrow is excluded: the strip runs edge to edge there and the section's own
+   * border already meets it.
    */
   body[data-tab-pos='first'] .tab[aria-selected='true'] {
     border-left: 1px solid var(--border);
@@ -1837,4 +1822,203 @@ label.check .cf-help-btn {
   display: inline-flex;
   align-items: center;
   gap: var(--space-1);
+}
+
+
+/* ---------------- Your own fields ---------------- */
+
+/* A field is a card on the recessed body: its name and kind on one line with
+   Remove held at the end, then its answer, then the wordings it answers. */
+.custom-list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  margin-bottom: var(--space-4);
+}
+
+.custom-card {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  padding: var(--space-4) var(--space-5);
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-card);
+}
+
+.custom-head {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+.custom-head .custom-name {
+  flex: 1 1 auto;
+  min-width: 0;
+  font-weight: 600;
+}
+.custom-head .custom-kind {
+  flex: none;
+  width: auto;
+}
+.custom-head .custom-remove {
+  flex: none;
+}
+
+.custom-line {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+}
+.custom-cap {
+  font-size: var(--text-xs);
+  color: var(--muted);
+}
+.custom-value {
+  width: 100%;
+}
+.custom-meta {
+  color: var(--muted);
+  font-size: var(--text-xs);
+}
+
+/* On a phone the name takes its own line; kind and Remove share the next. */
+@media (max-width: 640px) {
+  .custom-head {
+    flex-wrap: wrap;
+  }
+  .custom-head .custom-name {
+    flex: 1 0 100%;
+  }
+  .custom-head .custom-kind {
+    flex: 1 1 auto;
+  }
+}
+
+.empty-note[hidden] {
+  display: none;
+}
+
+/* ---------------- Wordings (chips you can add and remove) ---------------- */
+
+.chipedit {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-1);
+  padding: var(--space-1);
+  min-height: var(--tap);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--bg);
+}
+.chipedit:focus-within {
+  box-shadow: var(--ring);
+}
+.chipedit-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  padding-right: 2px;
+}
+button.chipedit-x {
+  min-height: 0;
+  min-width: 0;
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  background: transparent;
+  color: var(--muted);
+  font-size: var(--text-md);
+  line-height: 1;
+}
+button.chipedit-x:hover {
+  background: var(--surface-2);
+  color: var(--fg);
+}
+input.chipedit-input {
+  flex: 1 1 120px;
+  min-width: 120px;
+  min-height: 32px;
+  border: 0;
+  background: transparent;
+  box-shadow: none;
+  padding: 0 var(--space-2);
+}
+input.chipedit-input:focus {
+  outline: none;
+  box-shadow: none;
+}
+
+.wordings {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+.wording-row {
+  display: grid;
+  grid-template-columns: 140px 1fr;
+  align-items: center;
+  gap: var(--space-3);
+}
+.wording-name {
+  font-size: var(--text-md);
+  color: var(--fg);
+}
+@media (max-width: 640px) {
+  .wording-row {
+    grid-template-columns: 1fr;
+    gap: var(--space-1);
+  }
+}
+
+/* ---------------- What it has learned ---------------- */
+
+.learned {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+}
+.learned-group {
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-card);
+  overflow: hidden;
+}
+.learned-head {
+  margin: 0;
+  padding: var(--space-3) var(--space-5);
+  font-size: var(--text-md);
+  font-weight: 600;
+  border-bottom: 1px solid var(--border);
+}
+.learned-row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  padding: var(--space-2) var(--space-5);
+}
+.learned-row + .learned-row {
+  border-top: 1px solid var(--border);
+}
+.learned-text {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-1) var(--space-2);
+}
+.learned-q {
+  flex: 1 0 100%;
+  font-size: var(--text-md);
+  overflow-wrap: anywhere;
+}
+.learned-text small {
+  color: var(--muted);
+  font-size: var(--text-xs);
+}
+.learned-remove {
+  flex: none;
 }

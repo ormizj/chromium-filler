@@ -263,9 +263,11 @@ button.cf-btn.primary[aria-disabled='true'] {
   --i: var(--icon-alert);
 }
 
+/* `none` is "not recognised — teach it": a neutral grey question, not the red of
+   an error. The class name stays (`.cf-dot.none` is what the E2E asserts on). */
 .cf-dot.none {
-  background: var(--err);
-  --i: var(--icon-x);
+  background: var(--muted-2);
+  --i: var(--icon-teach);
 }
 
 /**
@@ -1007,7 +1009,7 @@ button.cf-btn.primary[aria-disabled='true'] {
   color: var(--warn);
 }
 .cf-stat.none .cf-stat-n {
-  color: var(--err);
+  color: var(--muted);
 }
 .cf-stat.accent .cf-stat-n {
   color: var(--accent);

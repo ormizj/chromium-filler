@@ -1,19 +1,16 @@
-import { describe, it, expect, beforeEach } from 'vitest';
+import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { fileToCvFile, cvFileToFile, setCv, getCv, clearCv } from './cvStore';
 import {
-  upsertSiteConfig, saveJobUrls, getJobUrls, getSiteConfigs, saveFieldOverride,
-  mutateSiteConfig, saveExtractSelector, ensureConfigForUrl,
-  clearExtractSelector, clearFieldOverride, getSettings, saveSettings,
-  getStoredSiteConfigs, saveSubmitSelector,
+  saveJobUrls, getJobUrls, getSettings, saveSettings, getProfile, getState,
+  getLessons, mutateLessons, mutateProfile, normalizeProfile,
 } from './storage';
-import type { SiteConfig } from './types';
+import type { Lesson } from './types';
 
 beforeEach(async () => {
   // The mocked chrome.storage.local persists between tests; reset it.
   await chrome.storage.local.clear();
 });
 
-const cfg = (id: string): SiteConfig => ({ id, name: id, urlPatterns: [`*://${id}/*`], extract: {} });
 
 function readBytes(blob: Blob): Promise<Uint8Array> {
   return new Promise((resolve, reject) => {
@@ -28,10 +25,11 @@ describe('settings', () => {
   it('backfills a setting an older install never stored', async () => {
     // Written before sessionBatchSize existed; reading must not yield undefined,
     // or the session would open zero tabs.
-    await chrome.storage.local.set({ settings: { autoRunOnLoad: false } });
+    await chrome.storage.local.set({ settings: { closeTabOnSkip: false } });
     const settings = await getSettings();
     expect(settings.sessionBatchSize).toBe(2);
-    expect(settings.autoRunOnLoad).toBe(false);
+    expect(settings.closeTabOnSkip).toBe(false);
+    expect(settings.markDoneOnClose).toBe(true);
   });
 
   it('keeps a stored batch size over the default', async () => {
@@ -69,127 +67,41 @@ describe('cv codec (File <-> CvFile)', () => {
   });
 });
 
-describe('site config upsert', () => {
-  it('adds a new config and updates an existing one by id', async () => {
-    await upsertSiteConfig(cfg('a'));
-    await upsertSiteConfig(cfg('b'));
-    let all = await getSiteConfigs();
-    expect(all.map((c) => c.id)).toEqual(['a', 'b']);
-
-    const updated = { ...cfg('a'), name: 'Renamed' };
-    await upsertSiteConfig(updated);
-    all = await getSiteConfigs();
-    expect(all).toHaveLength(2);
-    expect(all.find((c) => c.id === 'a')?.name).toBe('Renamed');
+describe('profile', () => {
+  it('reads an older profile into today\'s shape, dropping the unused custom map', async () => {
+    await chrome.storage.local.set({ profile: { values: { email: 'a@b.test' }, custom: { x: 'y' } } });
+    expect(await getProfile()).toEqual({ values: { email: 'a@b.test' }, keywords: {}, customFields: [] });
   });
 
-  it('saveFieldOverride writes fieldOverrides and cvUpload', async () => {
-    await upsertSiteConfig(cfg('a'));
-    await saveFieldOverride('a', 'email', '#candidate_email');
-    await saveFieldOverride('a', 'resume', 'input.cv');
-    const all = await getSiteConfigs();
-    const a = all.find((c) => c.id === 'a')!;
-    expect(a.fieldOverrides?.email).toBe('#candidate_email');
-    expect(a.cvUpload).toBe('input.cv');
+  it('a fresh install has an empty profile with empty lists', async () => {
+    expect(normalizeProfile(undefined)).toEqual({ values: {}, keywords: {}, customFields: [] });
   });
 
-  it('mutateSiteConfig read-modify-writes one config by id and no-ops on miss', async () => {
-    await upsertSiteConfig(cfg('a'));
-    await mutateSiteConfig('a', (c) => { c.name = 'New name'; });
-    await mutateSiteConfig('missing', (c) => { c.name = 'nope'; });
-    const all = await getSiteConfigs();
-    expect(all).toHaveLength(1);
-    expect(all[0].name).toBe('New name');
-  });
-
-  it('saveExtractSelector writes into extract, creating keys as needed', async () => {
-    await upsertSiteConfig(cfg('a'));
-    await saveExtractSelector('a', 'jobTitle', 'h1.title');
-    await saveExtractSelector('a', 'jobRequirements', '#reqs');
-    const a = (await getSiteConfigs()).find((c) => c.id === 'a')!;
-    expect(a.extract.jobTitle).toBe('h1.title');
-    expect(a.extract.jobRequirements).toBe('#reqs');
-  });
-
-  it('clear helpers remove extract selectors and field overrides', async () => {
-    await upsertSiteConfig(cfg('a'));
-    await saveExtractSelector('a', 'jobTitle', 'h1');
-    await saveFieldOverride('a', 'email', '#e');
-    await saveFieldOverride('a', 'resume', 'input.cv');
-    await clearExtractSelector('a', 'jobTitle');
-    await clearFieldOverride('a', 'email');
-    await clearFieldOverride('a', 'resume');
-    const a = (await getSiteConfigs()).find((c) => c.id === 'a')!;
-    expect(a.extract.jobTitle).toBeUndefined();
-    expect(a.fieldOverrides?.email).toBeUndefined();
-    expect(a.cvUpload).toBeUndefined();
-  });
-
-  it('ensureConfigForUrl returns an existing match without duplicating', async () => {
-    await upsertSiteConfig({ ...cfg('a'), urlPatterns: ['*://jobs.example.com/*'] });
-    const got = await ensureConfigForUrl('https://jobs.example.com/apply/1');
-    expect(got.id).toBe('a');
-    expect(await getSiteConfigs()).toHaveLength(1);
-  });
-
-  it('ensureConfigForUrl never reuses an id already taken by another config', async () => {
-    // A config narrowed to part of its host (the setup panel's Rename does
-    // exactly this) does not match the host's other pages, so a second config
-    // gets created — and its id is derived from the same host slug. Two configs
-    // sharing an id means every id-keyed writer edits the first one, so a Pick
-    // on the second site silently saves onto the first.
-    await upsertSiteConfig({
-      ...cfg('x-com'),
-      urlPatterns: ['*://x.com/careers/*'],
-      fieldOverrides: { email: '#original' },
-    });
-
-    const created = await ensureConfigForUrl('https://x.com/other/jobs/1');
-    const all = await getSiteConfigs();
-    expect(all).toHaveLength(2);
-    expect(new Set(all.map((c) => c.id)).size).toBe(2);
-
-    await saveFieldOverride(created.id, 'email', '#new-site-email');
-    const after = await getSiteConfigs();
-    expect(after.find((c) => c.id === created.id)?.fieldOverrides?.email).toBe('#new-site-email');
-    expect(after.find((c) => c.id === 'x-com')?.fieldOverrides?.email).toBe('#original');
-  });
-
-  it('ensureConfigForUrl creates + persists a new config when none matches', async () => {
-    const got = await ensureConfigForUrl('https://newsite.co/careers/42');
-    expect(got.name).toBe('newsite.co');
-    const all = await getSiteConfigs();
-    expect(all.map((c) => c.id)).toContain(got.id);
+  it('mutateProfile read-modify-writes', async () => {
+    await mutateProfile((p) => ({
+      ...p, customFields: [{ id: 'c_a', label: 'A', kind: 'text', value: '1', keywords: [] }],
+    }));
+    expect((await getProfile()).customFields?.map((f) => f.id)).toEqual(['c_a']);
   });
 });
 
-describe('site configs — one half per form factor', () => {
-  // jsdom's user agent reads as desktop.
-  it('reads a legacy flat config as this device\'s half', async () => {
-    await chrome.storage.local.set({ siteConfigs: [{ ...cfg('a'), submitSelector: '#send' }] });
-    expect((await getSiteConfigs())[0].submitSelector).toBe('#send');
-    expect((await getStoredSiteConfigs())[0].desktop?.submitSelector).toBe('#send');
+describe('lessons', () => {
+  const lesson: Lesson = {
+    id: 'l1', signature: { question: 'q', kind: 'text' }, target: { ignore: true }, label: 'Q', createdAt: 1, hits: 0,
+  };
+
+  it('start empty, and come back from getState', async () => {
+    expect(await getLessons()).toEqual([]);
+    await mutateLessons((l) => [...l, lesson]);
+    expect((await getState()).lessons).toEqual([lesson]);
   });
 
-  it('writes this device\'s half and leaves the other alone', async () => {
-    await chrome.storage.local.set({
-      siteConfigs: [{ id: 'a', name: 'a', urlPatterns: ['*://a/*'], mobile: { extract: {}, submitSelector: '.m' } }],
-    });
-    expect((await getSiteConfigs())[0].submitSelector).toBeUndefined();
-    await saveSubmitSelector('a', '#d');
-    const [stored] = await getStoredSiteConfigs();
-    expect(stored.desktop?.submitSelector).toBe('#d');
-    expect(stored.desktop?.updatedAt).toEqual(expect.any(Number));
-    expect(stored.mobile).toEqual({ extract: {}, submitSelector: '.m' });
-  });
-
-  it('ensureConfigForUrl does not create a second config when only the other half exists', async () => {
-    await chrome.storage.local.set({
-      siteConfigs: [{ id: 'a', name: 'a', urlPatterns: ['*://a.com/*'], mobile: { extract: {}, submitSelector: '.m' } }],
-    });
-    const got = await ensureConfigForUrl('https://a.com/job/1');
-    expect(got.id).toBe('a');
-    expect(await getStoredSiteConfigs()).toHaveLength(1);
+  it('skip the write when the helper returns the same list', async () => {
+    await mutateLessons((l) => [...l, lesson]);
+    const set = vi.spyOn(chrome.storage.local, 'set');
+    await mutateLessons((l) => l);
+    expect(set).not.toHaveBeenCalled();
+    set.mockRestore();
   });
 });
 

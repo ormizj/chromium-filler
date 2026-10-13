@@ -1,0 +1,65 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>QuestionBoard — Platform Engineer</title>
+    <style>
+      body { font: 15px/1.6 system-ui, sans-serif; max-width: 640px; margin: 40px auto; padding: 0 16px; }
+      label, .q { display: block; margin: 12px 0 4px; font-weight: 600; }
+      input[type=text], input:not([type]), select { width: 100%; padding: 8px; box-sizing: border-box; font: inherit; }
+      fieldset { margin: 16px 0; border: 1px solid #d1d5db; border-radius: 8px; }
+      fieldset label { display: inline; font-weight: 400; margin-right: 12px; }
+    </style>
+  </head>
+  <body>
+    <!--
+      The questions the built-in fields do not cover, in the shapes real ATS forms
+      draw them — and the collision a lesson must never make.
+
+      - "Given name" is a wording the built-ins already know; "Preferred name" is not.
+      - The question written ABOVE a box, in a div, with nothing labelling the input.
+      - A yes/no radio group whose question is its legend.
+      - Two boxes both labelled "Name", one per referee section: teaching one must
+        never fill the other.
+    -->
+    <h1>Platform Engineer — QuestionBoard</h1>
+    <form id="q-form">
+      <label for="q-given">Given name</label>
+      <input id="q-given" />
+
+      <label for="q-email">Email</label>
+      <input id="q-email" type="email" />
+
+      <label for="q-preferred">Preferred name</label>
+      <input id="q-preferred" />
+
+      <div class="field">
+        <div class="q">How many years of experience do you have?</div>
+        <div><input id="q-years" /></div>
+      </div>
+
+      <fieldset id="q-visa">
+        <legend>Do you require visa sponsorship?</legend>
+        <label><input type="radio" name="visa" value="y" id="visa-yes" /> Yes</label>
+        <label><input type="radio" name="visa" value="n" id="visa-no" /> No</label>
+      </fieldset>
+
+      <fieldset>
+        <legend>Reference 1</legend>
+        <label for="ref1-name">Name</label>
+        <input id="ref1-name" />
+      </fieldset>
+      <fieldset>
+        <legend>Reference 2</legend>
+        <label for="ref2-name">Name</label>
+        <input id="ref2-name" />
+      </fieldset>
+
+      <button type="submit">Submit application</button>
+    </form>
+    <script>
+      document.getElementById('q-form').addEventListener('submit', (e) => e.preventDefault());
+    </script>
+  </body>
+</html>
