@@ -6,7 +6,7 @@
  * anything, follows anything or waits for a confirmation, so every state is about
  * the filling: done and waiting for the user to submit on the site, nothing
  * recognised yet, nothing in the profile to fill with — or a posting the job
- * database already has down as applied.
+ * database already has down as done.
  */
 
 import { FLOW_TEXT, type FlowKey } from './labels';
@@ -15,10 +15,10 @@ import type { ConceptKey } from './help';
 export type FlowTone = 'ok' | 'warn' | 'accent' | 'quiet';
 
 export interface FlowInput {
-  /** The job database already has this URL down as `applied`. */
-  alreadyApplied?: boolean;
-  /** When that record says the application went in, if the entry carries it. */
-  appliedAt?: number;
+  /** The job database already has this URL down as `done`. */
+  alreadyDone?: boolean;
+  /** When it was marked done, if the log says. */
+  doneAt?: number;
   /** The profile has nothing at all to fill with — no details, no CV, no own fields. */
   profileEmpty?: boolean;
   /** Rows in the report, rows that took a value, rows nothing recognised. */
@@ -39,14 +39,14 @@ export interface FlowBanner {
 }
 
 const TONES: Record<FlowKey, FlowTone> = {
-  alreadyApplied: 'ok',
+  alreadyDone: 'ok',
   ready: 'quiet',
   nothing: 'quiet',
   empty: 'quiet',
 };
 
 const HELP: Partial<Record<FlowKey, ConceptKey>> = {
-  alreadyApplied: 'alreadyApplied',
+  alreadyDone: 'alreadyDone',
   nothing: 'teaching',
   ready: 'neverSubmits',
 };
@@ -65,7 +65,7 @@ export function flowBanner(input: FlowInput): FlowBanner {
 
 function classify(input: FlowInput): FlowKey {
   // A record of the posting being done outranks anything about this visit's fill.
-  if (input.alreadyApplied) return 'alreadyApplied';
+  if (input.alreadyDone) return 'alreadyDone';
   // Only the profile can cause this, so it is worded about the profile — never
   // "no form was found", which blamed the site.
   if (input.profileEmpty) return 'empty';
@@ -76,10 +76,10 @@ function classify(input: FlowInput): FlowKey {
 }
 
 function detail(key: FlowKey, base: string, input: FlowInput): string {
-  if (key === 'alreadyApplied') {
+  if (key === 'alreadyDone') {
     // The date only when the entry carries one; a sentence with "undefined" in it
     // is worse than no date.
-    const when = input.appliedAt ? ` on ${new Date(input.appliedAt).toLocaleDateString()}` : '';
+    const when = input.doneAt ? ` on ${new Date(input.doneAt).toLocaleDateString()}` : '';
     return `${input.siteName ?? 'This posting'} ${base.replace('{when}', when)}`;
   }
   if (key === 'ready') {

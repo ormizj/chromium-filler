@@ -16,7 +16,7 @@ const noop = () => {};
 function callbacks(over: Partial<ModalCallbacks> = {}): ModalCallbacks {
   return {
     onRerun: noop, onConfirm: noop, onTeach: noop, onPoint: noop,
-    onSkip: noop, onClose: noop, onOpenOptions: noop,
+    onSkip: noop, onClose: noop,
     ...over,
   };
 }
@@ -56,7 +56,7 @@ const data = (matches: FieldMatch[], over: Partial<ModalData> = {}): ModalData =
 
 const QUEUE = {
   active: true, batchSize: 2,
-  progress: { total: 12, queued: 7, inFlight: 2, applied: 1, skipped: 1, markedDone: 1, done: 3, ratio: 0.25 },
+  progress: { total: 12, queued: 7, inFlight: 2, done: 3, ratio: 0.25 },
 };
 
 let modal: FillerModal | undefined;
@@ -79,17 +79,11 @@ function footerBtn(shadow: ShadowRoot, label: string): HTMLButtonElement {
 function render(d: ModalData, cb = callbacks()): ShadowRoot {
   modal = new FillerModal(cb);
   modal.render(d);
-  modal.setView('fields');
   return shadow();
 }
 
 function shadow(): ShadowRoot {
   return (document.getElementById('chromium-filler-modal-host') as HTMLElement).shadowRoot!;
-}
-
-function tab(root: ShadowRoot, label: 'Job' | 'Fields'): HTMLButtonElement {
-  return Array.from(root.querySelectorAll<HTMLButtonElement>('.cf-view'))
-    .find((b) => b.textContent?.includes(label))!;
 }
 
 function rows(shadow: ShadowRoot) {
@@ -282,11 +276,10 @@ describe('FillerModal — teaching a row', () => {
     expect((shadow.querySelector('.cf-teach select') as HTMLSelectElement).value).toBe('email');
   });
 
-  it('opening a chooser from the picker switches to the report and unfolds the card', () => {
+  it('opening a chooser from the picker unfolds the card', () => {
     const m = unknown('Given name');
     modal = new FillerModal(callbacks());
     modal.render(data([m]));
-    modal.setView('job');
     modal.minimize();
     modal.openTeach(m.id);
     expect(modal.isMinimized).toBe(false);
@@ -325,42 +318,41 @@ describe('FillerModal — the count line and the banner', () => {
 });
 
 describe('FillerModal — the footer', () => {
-  it('is Fill again and the overflow, off the queue', () => {
+  const footerLabels = (shadow: ShadowRoot) =>
+    [...shadow.querySelectorAll('.cf-footer-actions > button.cf-btn')].map((b) => b.textContent);
+
+  it('is Fill again and Teach, off the queue — no overflow menu', () => {
     const shadow = render(data([match()]));
-    const labels = [...shadow.querySelectorAll('.cf-footer-actions > button.cf-btn')].map((b) => b.textContent);
-    expect(labels).toEqual([ACTION_LABELS.fillAgain]);
+    expect(footerLabels(shadow)).toEqual([ACTION_LABELS.fillAgain, ACTION_LABELS.teach]);
     expect(footerBtn(shadow, ACTION_LABELS.skipNext)).toBeUndefined();
+    expect(shadow.querySelector('.cf-more')).toBeNull();
   });
 
   it('adds Skip → next on a queue tab', () => {
     const onSkip = vi.fn();
     const shadow = render(data([match()], { queue: QUEUE }), callbacks({ onSkip }));
+    expect(footerLabels(shadow)).toEqual([ACTION_LABELS.fillAgain, ACTION_LABELS.teach, ACTION_LABELS.skipNext]);
     footerBtn(shadow, ACTION_LABELS.skipNext).click();
     expect(onSkip).toHaveBeenCalled();
   });
 
-  it('retires Skip on an applied posting, without removing it', () => {
+  it('retires Skip on a posting already done, without removing it', () => {
     const onSkip = vi.fn();
-    const shadow = render(data([match()], { queue: QUEUE, alreadyApplied: true }), callbacks({ onSkip }));
+    const shadow = render(data([match()], { queue: QUEUE, alreadyDone: true }), callbacks({ onSkip }));
     const skip = footerBtn(shadow, ACTION_LABELS.skipNext);
     expect(skip.getAttribute('aria-disabled')).toBe('true');
     skip.click();
     expect(onSkip).not.toHaveBeenCalled();
   });
 
-  it('Fill again calls back, and the overflow reaches Options and pointing', () => {
+  it('Fill again sweeps again, and Teach points at a field — the popup\'s Teach', () => {
     const onRerun = vi.fn();
     const onPoint = vi.fn();
-    const onOpenOptions = vi.fn();
-    const shadow = render(data([match()]), callbacks({ onRerun, onPoint, onOpenOptions }));
+    const shadow = render(data([match()]), callbacks({ onRerun, onPoint }));
     footerBtn(shadow, ACTION_LABELS.fillAgain).click();
     expect(onRerun).toHaveBeenCalled();
-    const menu = shadow.querySelector('.cf-more-menu') as HTMLElement;
-    const items = [...menu.querySelectorAll('button')];
-    expect(items.map((b) => b.textContent)).toEqual([ACTION_LABELS.openOptions, 'Point at a field']);
-    items[1].click();
+    footerBtn(shadow, ACTION_LABELS.teach).click();
     expect(onPoint).toHaveBeenCalled();
-    expect(menu.hidden).toBe(true);
   });
 
   it('does not offer Reset', () => {
@@ -379,21 +371,20 @@ describe('FillerModal — the queue', () => {
   });
 });
 
-describe('FillerModal — an applied posting', () => {
+describe('FillerModal — a posting already done', () => {
   it('leads with the record and marks the header', () => {
     modal = new FillerModal(callbacks());
-    modal.render(data([match()], { alreadyApplied: true, jobTitle: 'Engineer' }));
-    modal.setView('job');
+    modal.render(data([match()], { alreadyDone: true }));
     const root = shadow();
-    expect(root.querySelector('.cf-flow.ok .cf-flow-title')!.textContent).toBe('Already applied');
-    expect(root.querySelector('.cf-header .cf-sent-chip')!.textContent).toBe('Applied');
+    expect(root.querySelector('.cf-flow.ok .cf-flow-title')!.textContent).toBe('Already done');
+    expect(root.querySelector('.cf-header .cf-sent-chip')!.textContent).toBe('Done');
   });
 
   it('says so on the pill', () => {
     modal = new FillerModal(callbacks());
-    modal.render(data([match()], { alreadyApplied: true }));
+    modal.render(data([match()], { alreadyDone: true }));
     modal.minimize();
-    expect(shadow().querySelector('.cf-pill')!.textContent).toBe('Already applied');
+    expect(shadow().querySelector('.cf-pill')!.textContent).toBe('Already done');
   });
 });
 
@@ -417,51 +408,27 @@ describe('FillerModal — the pill', () => {
   it('minimizing keeps the report, so restoring shows it again', () => {
     modal = new FillerModal(callbacks());
     modal.render(data([match(), unknown('Q')]));
-    modal.setView('fields');
     modal.minimize();
     modal.restore();
     expect(rows(shadow())).toHaveLength(2);
   });
 });
 
-describe('FillerModal — the Fields tab advertises what it is hiding', () => {
+describe('FillerModal — the header', () => {
   const dotOn = (matches: FieldMatch[]) => {
     modal = new FillerModal(callbacks());
     modal.render(data(matches));
-    modal.setView('job');
-    return tab(shadow(), 'Fields').querySelector('.cf-dot')!.className;
+    return shadow().querySelector('.cf-header .cf-dot')!.className;
   };
   it('grey while a question is left to teach', () => expect(dotOn([match(), unknown('Q')])).toContain('none'));
   it('amber while a row needs a look', () => expect(dotOn([match({ filled: false })])).toContain('low'));
   it('green when every row is answered', () => expect(dotOn([match(), unknown('Q', { ignored: true })])).toContain('high'));
-});
 
-describe('FillerModal — the Job view', () => {
-  it('renders the posting as prose, with its requirements apart', () => {
-    modal = new FillerModal(callbacks());
-    modal.render(data([match()], {
-      jobTitle: 'Engineer',
-      jobDescription: [{ kind: 'para', text: 'We build things.' }, { kind: 'list', items: ['TS', 'CSS'] }],
-      jobRequirements: [{ kind: 'para', text: 'Five years.' }],
-    }));
-    modal.setView('job');
-    const root = shadow();
-    expect(root.querySelector('.cf-title')!.textContent).toBe('Engineer');
-    expect(root.querySelectorAll('.cf-prose li')).toHaveLength(2);
-    expect(root.querySelector('.cf-section')!.textContent).toBe('Requirements');
-  });
-
-  it('says so when the page had no description', () => {
-    modal = new FillerModal(callbacks());
-    modal.render(data([match()]));
-    modal.setView('job');
-    expect(shadow().querySelector('.cf-empty')!.textContent).toMatch(/no description/i);
-  });
-
-  it('stays on the chosen view across a re-render', () => {
-    const shadow = render(data([match()]));
-    modal!.render(data([match(), unknown('Q', { later: true })]));
-    expect(tab(shadow, 'Fields').getAttribute('aria-selected')).toBe('true');
+  it('is the report alone: no view toggle and no fullscreen', () => {
+    const root = render(data([match()]));
+    expect(root.querySelector('.cf-views, .cf-view')).toBeNull();
+    expect(root.querySelector('.cf-fullscreen')).toBeNull();
+    expect(root.querySelector('.cf-report')).not.toBeNull();
   });
 });
 
@@ -469,8 +436,7 @@ describe('FillerModal — stored geometry', () => {
   it('applies the saved size and position on a desktop viewport', () => {
     modal = new FillerModal(callbacks());
     modal.render(data([match()], {
-      jobTitle: 'A job',
-      layout: { right: 40, bottom: 24, width: 500, height: 600 },
+        layout: { right: 40, bottom: 24, width: 500, height: 600 },
     }));
     const card = shadow().querySelector('.cf-card') as HTMLElement;
     expect(card.style.width).toBe('500px');
@@ -480,8 +446,7 @@ describe('FillerModal — stored geometry', () => {
   it('clamps a layout stored on a bigger screen back onto this one', () => {
     modal = new FillerModal(callbacks());
     modal.render(data([match()], {
-      jobTitle: 'A job',
-      layout: { right: 16, bottom: 16, width: 4000, height: 4000 },
+        layout: { right: 16, bottom: 16, width: 4000, height: 4000 },
     }));
     const card = shadow().querySelector('.cf-card') as HTMLElement;
     expect(parseInt(card.style.width, 10)).toBeLessThanOrEqual(window.innerWidth);
@@ -494,8 +459,7 @@ describe('FillerModal — stored geometry', () => {
     // meant to fill the screen came out 820px and the simulator was lying.
     modal = new FillerModal(callbacks());
     modal.render(data([match()], {
-      jobTitle: 'A job',
-      layout: { right: 0, bottom: 0, width: window.innerWidth, height: window.innerHeight },
+        layout: { right: 0, bottom: 0, width: window.innerWidth, height: window.innerHeight },
     }));
     const card = shadow().querySelector('.cf-card') as HTMLElement;
     expect(card.style.maxHeight).toBe('none');
@@ -511,8 +475,7 @@ describe('FillerModal — stored geometry', () => {
     setViewport(1440, 900);
     modal = new FillerModal(callbacks());
     modal.render(data([match()], {
-      jobTitle: 'A job',
-      layout: { right: 16, bottom: 16, width: 460, height: 720 },
+        layout: { right: 16, bottom: 16, width: 460, height: 720 },
     }));
     const card = shadow().querySelector('.cf-card') as HTMLElement;
     expect(card.style.height).toBe('720px');
@@ -534,7 +497,6 @@ describe('FillerModal — stored geometry', () => {
  */
 describe('FillerModal — flush edges', () => {
   const at = (over: Partial<ModalLayout>) => data([match()], {
-    jobTitle: 'A job',
     layout: { right: 16, bottom: 16, width: 460, height: 720, ...over },
   });
 
@@ -579,133 +541,8 @@ describe('FillerModal — flush edges', () => {
   });
 });
 
-/**
- * Fullscreen is an *override* of the stored layout, not a replacement for it: the
- * user's configured card has to be waiting when they turn it off again. It is also
- * the one modal state that outlives the page, so it arrives through `ModalData`
- * from the controller rather than living on the instance the way `view` does.
- */
-describe('FillerModal — fullscreen', () => {
-  const laid = (over: Partial<ModalData> = {}) => data([match()], {
-    jobTitle: 'A job',
-    layout: { right: 16, bottom: 16, width: 460, height: 720 },
-    ...over,
-  });
-
-  const card = () => shadow().querySelector('.cf-card') as HTMLElement;
-  const toggle = () => shadow().querySelector('.cf-fullscreen') as HTMLButtonElement;
-  const limits = () => {
-    const { limitTop, limitRight, limitBottom, limitLeft } = card().dataset;
-    return { top: limitTop, right: limitRight, bottom: limitBottom, left: limitLeft };
-  };
-
-  it('offers the toggle without spending a primary fill on it', () => {
-    setViewport(1440, 900);
-    modal = new FillerModal(callbacks());
-    modal.render(laid());
-    expect(toggle().getAttribute('aria-pressed')).toBe('false');
-    expect(toggle().getAttribute('aria-label')).toBe('Fullscreen');
-    expect(toggle().classList.contains('primary')).toBe(false);
-    expect(shadow().querySelectorAll('button.cf-btn.primary')).toHaveLength(0);
-  });
-
-  it('fills the viewport when pressed, and says so', () => {
-    setViewport(1440, 900);
-    const onFullscreen = vi.fn();
-    modal = new FillerModal(callbacks({ onFullscreen }));
-    modal.render(laid());
-
-    toggle().click();
-
-    expect(onFullscreen).toHaveBeenCalledWith(true);
-    expect(card().style.width).toBe('1440px');
-    expect(card().style.height).toBe('900px');
-    expect(card().style.right).toBe('0px');
-    expect(card().style.bottom).toBe('0px');
-    // All four edges flush is what squares the corners and drops the borders.
-    expect(limits()).toEqual({ top: 'screen', right: 'screen', bottom: 'screen', left: 'screen' });
-    expect(toggle().getAttribute('aria-pressed')).toBe('true');
-    expect(toggle().getAttribute('aria-label')).toBe('Exit fullscreen');
-  });
-
-  it('opens fullscreen when the stored setting says so', () => {
-    // The whole point of persisting it: the next posting must not need the click.
-    setViewport(1440, 900);
-    modal = new FillerModal(callbacks());
-    modal.render(laid({ fullscreen: true }));
-    expect(card().style.width).toBe('1440px');
-    expect(card().classList.contains('cf-full')).toBe(true);
-    expect(toggle().getAttribute('aria-pressed')).toBe('true');
-  });
-
-  it('gives back the configured card on the way out, untouched', () => {
-    // The regression this design exists to prevent: fullscreen must not be
-    // implemented by writing a full-viewport rectangle over `settings.modalLayout`,
-    // or turning it off would leave the user with no card to come back to.
-    setViewport(1440, 900);
-    const onFullscreen = vi.fn();
-    const d = laid({ fullscreen: true });
-    modal = new FillerModal(callbacks({ onFullscreen }));
-    modal.render(d);
-
-    toggle().click();
-
-    expect(onFullscreen).toHaveBeenCalledWith(false);
-    expect(card().style.width).toBe('460px');
-    expect(card().style.right).toBe('16px');
-    expect(d.layout).toEqual({ right: 16, bottom: 16, width: 460, height: 720 });
-  });
-
-  it('tracks the viewport as it changes', () => {
-    setViewport(1440, 900);
-    modal = new FillerModal(callbacks());
-    modal.render(laid({ fullscreen: true }));
-    expect(card().style.width).toBe('1440px');
-
-    setViewport(1000, 700);
-    expect(card().style.width).toBe('1000px');
-    expect(card().style.height).toBe('700px');
-  });
-
-  it('stops the header being a drag handle while it is on', () => {
-    // A drag would move the card out from under the flag: it would look
-    // un-fullscreened while the setting still said it was.
-    setViewport(1440, 900);
-    const onLayoutPreview = vi.fn();
-    const onLayoutChange = vi.fn();
-    modal = new FillerModal(callbacks({ onLayoutPreview, onLayoutChange }));
-    modal.render(laid({ fullscreen: true }));
-
-    const header = shadow().querySelector('.cf-header') as HTMLElement;
-    header.setPointerCapture = noop;
-    header.releasePointerCapture = noop;
-    const at = (type: string, x: number, y: number) =>
-      header.dispatchEvent(new MouseEvent(type, { clientX: x, clientY: y, bubbles: true }));
-
-    at('pointerdown', 500, 300);
-    at('pointermove', 400, 200);
-    at('pointerup', 400, 200);
-
-    expect(onLayoutPreview).not.toHaveBeenCalled();
-    expect(onLayoutChange).not.toHaveBeenCalled();
-    expect(card().style.width).toBe('1440px');
-  });
-
-  it('is a class and no inline geometry on a phone', () => {
-    // Under 640px the sheet is sized by the media query, and an inline width
-    // would beat it — so fullscreen there has to be CSS off this class.
-    setViewport(390, 800);
-    modal = new FillerModal(callbacks());
-    modal.render(laid({ fullscreen: true }));
-    expect(card().classList.contains('cf-full')).toBe(true);
-    expect(card().style.width).toBe('');
-    expect(card().style.maxHeight).toBe('');
-  });
-});
-
 describe('FillerModal — two views of one layout', () => {
   const laid = (over = {}) => data([match()], {
-    jobTitle: 'A job',
     layout: { right: 16, bottom: 16, width: 460, height: 720 },
     ...over,
   });

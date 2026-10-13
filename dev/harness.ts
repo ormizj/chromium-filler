@@ -27,10 +27,9 @@
 import './mock-chrome';
 import type { FieldMatch } from '../src/shared/types';
 import type { SessionState } from '../src/shared/messages';
-import type { JobBlock } from '../src/shared/jobText';
 import { DEFAULT_MODAL_LAYOUT } from '../src/shared/modalLayout';
 import {
-  FillerModal, type ModalCallbacks, type ModalData, type ModalView,
+  FillerModal, type ModalCallbacks, type ModalData,
 } from '../src/content/modal/modal';
 import { QueueChip } from '../src/content/queueChip';
 import { startPicker } from '../src/content/picker';
@@ -73,17 +72,15 @@ async function bootPage(name: 'popup' | 'options'): Promise<void> {
     'custom-fields': 'profile&at=custom-section',
     learned: 'profile&at=learned-section',
     wordings: 'profile&at=wordings',
+    // The Sync tab, at its "What syncs" lists.
+    sync: 'sync&at=sync-scope-heading',
   };
   if (name === 'options' && deepLinks[state]) history.replaceState(null, '', `#${deepLinks[state]}`);
 
   await import(/* @vite-ignore */ `${base}/${name}.ts`);
 
-  // A closed <details> is a state a screenshot cannot reach: opening the archive
-  // panel takes a click, and the whole point of the harness is that it does not.
-  if (state === 'export') {
-    const panel = document.getElementById('export-options') as HTMLDetailsElement | null;
-    if (panel) panel.open = true;
-  }
+  // A closed <details> is a state a screenshot cannot reach: opening it takes a
+  // click, and the whole point of the harness is that it does not.
   if (state === 'wordings') {
     const panel = document.getElementById('wordings') as HTMLDetailsElement | null;
     if (panel) panel.open = true;
@@ -170,7 +167,7 @@ const CHOICES: FieldChoice[] = [
 const SESSION: SessionState = {
   active: true,
   batchSize: 5,
-  progress: { total: 60, queued: 46, inFlight: 5, applied: 8, skipped: 1, markedDone: 0, done: 9, ratio: 9 / 60 },
+  progress: { total: 60, queued: 46, inFlight: 5, done: 9, ratio: 9 / 60 },
 };
 
 /**
@@ -192,16 +189,6 @@ const REPORT: FieldMatch[] = [
 
 const BASE_MODAL: ModalData = {
   siteName: 'jobs.acme.test',
-  jobTitle: 'Staff Platform Engineer',
-  jobDescription: [
-    { kind: 'para', text: 'Acme is hiring a Staff Platform Engineer to own the deployment pipeline end to end. You will work across infrastructure, developer tooling, and release engineering.' },
-  ],
-  jobRequirements: [
-    { kind: 'list', items: ['8+ years', 'Kubernetes', 'Go or Rust', 'On-call experience'] },
-  ],
-  // Invented fixture values — `shared/jobMeta.ts` reads these off the page's own
-  // JSON-LD, and renders nothing where the posting states nothing.
-  meta: { company: 'Acme', location: 'Remote (Berlin, DE)', employmentType: 'Full-time' },
   matches: REPORT,
   choices: CHOICES,
   // What a fresh install gets. Without it the card falls back to the CSS
@@ -210,38 +197,20 @@ const BASE_MODAL: ModalData = {
 };
 
 /**
- * A posting of realistic length and shape. The typography is the whole point of
- * the Job view, and a three-line description proves nothing about it: paragraph
- * rhythm, heading spacing and bullet indents only misbehave at length.
+ * A report of realistic length: a long application form. The body scroll and the
+ * row rhythm only misbehave at length, and a nine-row report proves nothing.
  */
-const LONG_DESCRIPTION: JobBlock[] = [
-  { kind: 'para', text: 'Acme runs the deployment pipeline for every product team in the company. Roughly four hundred engineers ship through it each week, and when it is slow or unreliable, all of them feel it at once.' },
-  { kind: 'heading', text: 'About the role' },
-  { kind: 'para', text: 'You will own that pipeline end to end: the build system, the release tooling, and the guardrails that keep a bad change from reaching production. This is a hands-on staff role — you will spend most of your time in code, and the rest making sure the people around you do not have to.' },
-  { kind: 'para', text: 'The team is eight engineers across three time zones. We work asynchronously by default, with two hours of overlap each day and no expectation of being online outside them.' },
-  { kind: 'heading', text: 'What you will do' },
-  { kind: 'list', items: [
-    'Own the build and release pipeline, from commit to production rollout',
-    'Cut the median deploy time, which is currently just over eleven minutes',
-    'Design the guardrails — progressive rollout, automated rollback, change budgets',
-    'Mentor engineers on the team and review the designs that touch delivery',
-    'Carry the on-call pager for the pipeline, roughly one week in eight',
-  ] },
-  { kind: 'heading', text: 'What we are looking for' },
-  { kind: 'list', items: [
-    'Eight or more years building and operating developer infrastructure at scale',
-    'Deep familiarity with Kubernetes, and with what goes wrong in it',
-    'Strong Go or Rust — the tooling is Go, the agent is Rust',
-    'Experience owning a system that other engineers depend on hourly',
-  ] },
-  { kind: 'heading', text: 'Nice to have' },
-  { kind: 'list', items: [
-    'Bazel, Buck, or another build system you have had to make fast',
-    'Public writing or speaking about delivery engineering',
-  ] },
-  { kind: 'heading', text: 'How we hire' },
-  { kind: 'para', text: 'Four conversations over two weeks: an intro call, a systems design discussion, a practical session on a real problem from our backlog, and a conversation with the team you would join. We pay for the practical session.' },
-  { kind: 'para', text: 'Acme is an equal opportunity employer. We are happy to make adjustments to the process — tell us what you need.' },
+const LONG_REPORT: FieldMatch[] = [
+  ...REPORT,
+  match('Phone', 'phone', 'high', true, { kind: 'tel', valueToFill: '+1 555 123 4567' }),
+  match('LinkedIn profile', 'linkedin', 'high', true, { kind: 'url', valueToFill: 'linkedin.com/in/ada' }),
+  match('Portfolio', 'website', 'low', false, { kind: 'url', valueToFill: 'ada.dev' }),
+  match('City', 'city', 'high', true, { valueToFill: 'London' }),
+  match('Notice period', undefined, 'none', false),
+  match('Salary expectation', undefined, 'none', false, { kind: 'number' }),
+  match('Do you need visa sponsorship?', 'c_visa', 'high', true, { kind: 'radio', source: 'keyword', valueToFill: 'No' }),
+  match('Pronouns', undefined, 'none', false, { kind: 'select' }),
+  match('Anything else we should know?', undefined, 'none', false, { kind: 'textarea' }),
 ];
 
 /**
@@ -250,17 +219,14 @@ const LONG_DESCRIPTION: JobBlock[] = [
  */
 const MODAL_STATES: Record<string, Partial<ModalData>> = {
   default: {},
-  // A full-length posting: the only state that exercises the reading typography
-  // and the body scroll the Job view exists for.
-  long: { jobDescription: LONG_DESCRIPTION, jobRequirements: [] },
+  // A full-length form: the state that exercises the body scroll.
+  long: { matches: LONG_REPORT },
   // Dragged into the right-hand edge and tall enough to be pinned top and bottom:
   // the flush rule in one screenshot. Desktop width only.
   flush: {
-    jobDescription: LONG_DESCRIPTION,
-    jobRequirements: [],
+    matches: LONG_REPORT,
     layout: { right: 0, bottom: 0, width: 460, height: 4000 },
   },
-  fullscreen: { jobDescription: LONG_DESCRIPTION, jobRequirements: [], fullscreen: true },
   // Confident matches the control would not take — a <select> with no matching
   // option. Reads as "to check", never as filled.
   'failed-fill': {
@@ -291,7 +257,7 @@ const MODAL_STATES: Record<string, Partial<ModalData>> = {
     ],
   },
   // A posting the database already has as applied.
-  'already-applied': { alreadyApplied: true, appliedAt: Date.UTC(2026, 4, 12) },
+  'already-done': { alreadyDone: true, doneAt: Date.UTC(2026, 4, 12) },
   // A page full of questions none of which are known yet.
   nothing: {
     matches: [
@@ -318,11 +284,9 @@ function modalCallbacks(self: () => FillerModal | undefined): ModalCallbacks {
     onTeach: (id, choice) => console.log('[harness] teach', id, choice),
     onPoint: () => console.log('[harness] point at a field'),
     onSkip: () => console.log('[harness] skip'),
-    onOpenOptions: () => console.log('[harness] open options'),
     onClose: () => self()?.minimize(),
     onFold: (c) => console.log('[harness] modal folded', c),
     onLayoutChange: (l) => console.log('[harness] layout', l),
-    onFullscreen: (on) => console.log('[harness] fullscreen', on),
   };
 }
 
@@ -330,10 +294,6 @@ function bootModal(): void {
   fakePosting();
   let modal: FillerModal;
   modal = new FillerModal(modalCallbacks(() => modal));
-  // `&view=job|fields` picks the view. The card opens on the report by default,
-  // as it does on any page the queue did not open.
-  const view = params.get('view');
-  modal.setView(view === 'job' ? 'job' : 'fields');
   if (state === 'pill-only') modal.minimize();
 
   modal.render({
@@ -342,7 +302,6 @@ function bootModal(): void {
     // `?session=1` (or `&queue=1`) is a queue tab: the strip and Skip → next.
     queue: params.get('session') === '1' || params.get('queue') === '1' ? SESSION : undefined,
   });
-  if (view === 'job' || view === 'fields') modal.setView(view as ModalView);
 
   // `&teach=<n>` opens the chooser on row n; `&new=1` with it opens "New field…".
   const teach = Number(params.get('teach'));

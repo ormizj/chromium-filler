@@ -31,30 +31,25 @@ import { dropField, forget, lessonsFor, targetField } from '../shared/lessons';
 import { isFragile } from '../shared/inputSignature';
 import { extractUrls } from '../shared/urlImport';
 import {
-  ALL_JOB_STATUSES, addUrls, applyStatus, deleteUrl, jobUrlStats, markOpenedDone, visibleUrls,
+  ALL_JOB_STATUSES, addUrls, applyStatus, deleteUrl, jobUrlStats, visibleUrls,
 } from '../shared/jobUrls';
-import { hostOf } from '../shared/url';
 import { MSG } from '../shared/messages';
 import {
   getProfile, saveProfile, mutateProfile, getSettings, saveSettings,
   getLessons, mutateLessons,
   getJobUrls, mutateJobUrls,
-  getJobDetails, saveJobDetails, mutateJobDetails,
 } from '../shared/storage';
-import { pruneDetails } from '../shared/jobDetails';
+import { JOB_STATUS_LABELS } from '../shared/labels';
 import {
-  EXPORT_FIELD_ORDER, buildExport, exportFilename, resolveExport, toCsv,
-  type ExportFormat, type ExportSelection,
-} from '../shared/jobExport';
-import { EXPORT_FIELD_LABELS, JOB_STATUS_LABELS } from '../shared/labels';
-import {
-  buildSnapshot, mergeIntoLocal, parseSnapshot, snapshotFilename,
+  buildSnapshot, mergeIntoLocal, parseSnapshot, snapshotFilename, summarize as summarizeSnapshot,
+  type SnapshotSummary,
 } from '../shared/syncSnapshot';
+import { SYNCED_SETTINGS, SYNC_DOMAINS, canonical } from '../shared/syncUnits';
 import { getCv, getDoc, setDoc, clearDoc } from '../shared/cvStore';
 import { readSyncClient } from '../shared/syncConfig';
 import {
-  CONCEPT_HELP, SETTINGS_HELP, SYNC_SETUP_STEPS, SYNC_TROUBLESHOOTING,
-  type GuideStep, type HelpEntry,
+  CONCEPT_HELP, DEVICE_ONLY_TEXT, LOCAL_SCOPE_TEXT, SETTINGS_HELP, SYNC_SCOPE_TEXT, SYNC_SETUP_STEPS,
+  SYNC_TROUBLESHOOTING, type GuideStep, type HelpEntry, type ScopeLine,
 } from '../shared/help';
 import { helpButton, helpPanel, richText } from '../ui/help';
 import { setLimitAttrs } from '../ui/limits';
@@ -128,6 +123,10 @@ function flashSection(el: HTMLElement): void {
  */
 function revealSection(id: string, focus?: string): void {
   const el = $(id);
+  // A section inside a folded disclosure is not there to be seen until it is
+  // opened — and it has no height to scroll to either, so open it first.
+  const fold = el.closest('details');
+  if (fold) fold.open = true;
   const bar = document.querySelector<HTMLElement>('.topbar');
   const reduce = matchMedia('(prefers-reduced-motion: reduce)').matches;
   const top = el.getBoundingClientRect().top + window.scrollY - (bar?.offsetHeight ?? 0) - 12;
@@ -697,7 +696,7 @@ function initHelp(): void {
 
   const concepts: Array<keyof typeof CONCEPT_HELP> = [
     'howItWorks', 'neverSubmits', 'teaching', 'customFields', 'dots', 'picker', 'leftAlone',
-    'sessions', 'queueChip', 'markedDone', 'syncClient',
+    'sessions', 'queueChip', 'done', 'syncClient',
   ];
   $('help-concepts').replaceChildren(...concepts.map((key) => helpPanel(CONCEPT_HELP[key])));
 
@@ -827,48 +826,32 @@ function guideStep(step: GuideStep, i: number): HTMLLIElement {
 
 async function initSettings(): Promise<void> {
   const fillAuto = $<HTMLInputElement>('fill-auto');
-  const openCard = $<HTMLInputElement>('open-card-queue');
-  const markDone = $<HTMLInputElement>('mark-done-on-close');
-  const closeOnSkip = $<HTMLInputElement>('close-on-skip');
-  const closeDelay = $<HTMLInputElement>('close-delay');
+  const openCard = $<HTMLInputElement>('open-card-filled');
   const keepInBrowser = $<HTMLInputElement>('keep-in-browser');
-  const modalFullscreen = $<HTMLInputElement>('modal-fullscreen');
 
   const settings = await getSettings();
   fillAuto.checked = settings.fillAutomatically;
-  openCard.checked = settings.openCardOnQueueTabs;
-  markDone.checked = settings.markDoneOnClose;
-  closeOnSkip.checked = settings.closeTabOnSkip;
-  closeDelay.value = String(settings.closeTabDelayMs);
+  openCard.checked = settings.openCardWhenFilled;
   keepInBrowser.checked = settings.keepInBrowser;
-  modalFullscreen.checked = settings.modalFullscreen;
 
   const persist = async () => {
     const s = await getSettings();
     await saveSettings({
       ...s,
       fillAutomatically: fillAuto.checked,
-      openCardOnQueueTabs: openCard.checked,
-      markDoneOnClose: markDone.checked,
-      closeTabOnSkip: closeOnSkip.checked,
-      closeTabDelayMs: Math.max(0, Number(closeDelay.value) || 0),
+      openCardWhenFilled: openCard.checked,
       keepInBrowser: keepInBrowser.checked,
-      modalFullscreen: modalFullscreen.checked,
     });
     setStatus($('settings-status'), 'Saved', 'ok');
   };
 
-  for (const control of [fillAuto, openCard, markDone, closeOnSkip, closeDelay, keepInBrowser, modalFullscreen]) {
+  for (const control of [fillAuto, openCard, keepInBrowser]) {
     control.addEventListener('change', persist);
   }
 
   attachRowHelp(fillAuto, SETTINGS_HELP.fillAutomatically);
-  attachRowHelp(openCard, SETTINGS_HELP.openCardOnQueueTabs);
-  attachRowHelp(markDone, SETTINGS_HELP.markDoneOnClose);
-  attachRowHelp(closeOnSkip, SETTINGS_HELP.closeTabOnSkip);
-  attachRowHelp(closeDelay, SETTINGS_HELP.closeTabDelayMs);
+  attachRowHelp(openCard, SETTINGS_HELP.openCardWhenFilled);
   attachRowHelp(keepInBrowser, SETTINGS_HELP.keepInBrowser);
-  attachRowHelp(modalFullscreen, SETTINGS_HELP.modalFullscreen);
   attachHelp($('queue-settings-heading'), CONCEPT_HELP.sessions);
 
   // What the stored rectangle *is* — that a drag on a page does not write it, that
@@ -1160,21 +1143,15 @@ function describeScreen(vp: ModelledViewport): string {
 /** The preview modal is a mannequin: its buttons must not do anything real. */
 const PREVIEW_CALLBACKS: ModalCallbacks = {
   onRerun: () => {}, onConfirm: () => {}, onTeach: () => {}, onPoint: () => {},
-  onSkip: () => {}, onClose: () => {}, onOpenOptions: () => {},
+  onSkip: () => {}, onClose: () => {},
 };
 
 function previewData(layout: ModalLayout): ModalData {
   return {
     siteName: 'Example Careers',
-    jobTitle: 'Staff Platform Engineer',
-    jobDescription: [
-      { kind: 'para', text: 'This is a preview of the review modal at the size and position you have chosen. Drag the card in the frame above to move it.' },
-      { kind: 'heading', text: 'What you would see here' },
-      { kind: 'list', items: ['The posting’s description', 'Its requirements', 'The fill report, behind the Fields tab'] },
-    ],
-    // A sample report, so the Fields tab shows its status dot: the preview is
-    // meant to answer "does this size work", and an empty report would hide the
-    // one piece of chrome most likely to be clipped by a bad one.
+    // A sample report, so the header shows its status dot and the rows have
+    // something to say: the preview is meant to answer "does this size work", and
+    // an empty report would hide the chrome most likely to be clipped by a bad one.
     matches: [
       {
         id: 'p1', question: 'Full name', kind: 'text', field: 'fullName', fieldLabel: 'Full name',
@@ -1258,23 +1235,15 @@ function shortUrl(url: string): string {
 
 const STATUS_KIND: Record<JobUrlStatus, string> = {
   new: '',
-  opened: 'accent',
-  redirected: 'accent',
-  applied: 'ok',
-  skipped: '',
-  markedDone: 'ok',
+  done: 'ok',
 };
 
 function renderStats(list: JobUrlEntry[]): void {
   const s = jobUrlStats(list);
   const cards: Array<[string, number, string]> = [
     ['Total', s.total, 'total'],
-    ['New', s.new, 'new'],
-    ['Opened', s.opened, 'opened'],
-    ['Redirected', s.redirected, 'redirected'],
-    ['Applied', s.applied, 'applied'],
-    ['Skipped', s.skipped, 'skipped'],
-    [JOB_STATUS_LABELS.markedDone, s.markedDone, 'markedDone'],
+    [JOB_STATUS_LABELS.new, s.new, 'new'],
+    [JOB_STATUS_LABELS.done, s.done, 'done'],
   ];
   $('url-stats').replaceChildren(...cards.map(([k, n, cls]) => {
     const card = document.createElement('div');
@@ -1373,16 +1342,12 @@ function urlRow(entry: JobUrlEntry): HTMLElement {
 
   const info = document.createElement('small');
   const bits = [`added ${fmtDate(entry.addedAt)}`];
-  if (entry.appliedAt) bits.push(`applied ${fmtDate(entry.appliedAt)}`);
-  // Two-step postings: show which end of the handoff this row is.
-  if (entry.redirectUrl) bits.push(`→ ${hostOf(entry.redirectUrl)}`);
-  if (entry.sourceUrl) bits.push(`via ${hostOf(entry.sourceUrl)}`);
+  const doneAt = entry.status === 'done'
+    ? entry.history.filter((h) => h.status === 'done').at(-1)?.at
+    : undefined;
+  if (doneAt) bits.push(`done ${fmtDate(doneAt)}`);
   info.textContent = bits.join(' · ');
-  info.title = [
-    ...(entry.sourceUrl ? [`from ${entry.sourceUrl}`] : []),
-    ...(entry.redirectUrl ? [`applies at ${entry.redirectUrl}`] : []),
-    ...entry.history.map((h) => `${h.status} @ ${new Date(h.at).toLocaleString()}`),
-  ].join('\n');
+  info.title = entry.history.map((h) => `${h.status} @ ${new Date(h.at).toLocaleString()}`).join('\n');
 
   sub.append(chip, info);
   meta.append(a, sub);
@@ -1543,9 +1508,7 @@ async function renderSession(list: JobUrlEntry[]): Promise<void> {
     toggle.className = 'primary';
     toggle.disabled = queued === 0;
   }
-  sub.textContent = p
-    ? `${p.applied} applied · ${p.skipped} skipped · ${p.done}/${p.total} done`
-    : '';
+  sub.textContent = p ? `${p.done}/${p.total} done` : '';
 
   if (document.activeElement !== batch) {
     batch.value = String(session?.batchSize ?? (await getSettings()).sessionBatchSize);
@@ -1631,244 +1594,134 @@ async function initUrls(): Promise<void> {
   $('clear-urls').addEventListener('click', async () => {
     const list = await getJobUrls();
     if (list.length === 0) { setStatus($('queue-status'), 'Queue is already empty', 'err'); return; }
-    // The saved postings go with it, and that is the half worth warning about:
-    // the queue can be re-imported from the board, the archive cannot be re-read
-    // once the postings are down.
     // With sync on this is not a local delete: the entries are tombstoned so the
     // other browser does not resurrect them, which means it clears there too.
     const shared = (await getSettings()).syncEnabled
       ? ' Sync is on, so this also clears the other browser at the next sync.'
       : '';
     $('clear-confirm-label').textContent =
-      `Delete all ${list.length} posting(s), their history and the saved job archive? `
-      + `Export first if you want to keep it. This cannot be undone.${shared}`;
+      `Delete all ${list.length} posting(s) and their history? `
+      + `Export a backup first (Sync tab) if you want to keep them. This cannot be undone.${shared}`;
     confirmBox.hidden = false;
   });
   $('clear-cancel').addEventListener('click', () => { confirmBox.hidden = true; });
 
-  // Closing every `opened` posting at once — a session that was dealt with outside
-  // the extension leaves them mid-flow for ever. Undoable row by row from each
-  // status menu, but it touches many rows at once, so it names the count first.
-  const doneBox = $('mark-done-confirm');
-  attachHelp($('mark-done-label'), CONCEPT_HELP.markedDone, (panel) => doneBox.after(panel));
-  $('mark-opened-done').addEventListener('click', async () => {
-    const opened = visibleUrls(await getJobUrls()).filter((e) => e.status === 'opened').length;
-    if (opened === 0) { setStatus($('queue-status'), 'No “opened” postings', 'err'); return; }
-    const shared = (await getSettings()).syncEnabled
-      ? ' Sync is on, so the other browser gets the change at the next sync.'
-      : '';
-    $('mark-done-confirm-label').textContent =
-      `Mark all ${opened} opened posting(s) as done? `
-      + `You can change any of them back from its status menu.${shared}`;
-    doneBox.hidden = false;
-  });
-  $('mark-done-cancel').addEventListener('click', () => { doneBox.hidden = true; });
-  $('mark-done-really').addEventListener('click', async () => {
-    let changed = 0;
-    await mutateJobUrls((all) => {
-      const out = markOpenedDone(all);
-      changed = out.changed;
-      return out.list;
-    });
-    doneBox.hidden = true;
-    await renderQueue();
-    setStatus($('queue-status'), `Marked ${changed} posting(s) done`, 'ok');
-  });
   $('clear-really').addEventListener('click', async () => {
     // Tombstone rather than truncate. A bare `saveJobUrls([])` is undone by the
     // next sync — the other device still holds every entry, and a union can only
     // grow — so the clear would appear to work and then silently reverse itself.
     await mutateJobUrls((all) => all.reduce((list, e) => deleteUrl(list, e.url), all));
-    await saveJobDetails({});
     confirmBox.hidden = true;
     shownCount = PAGE_SIZE;
     await renderQueue();
     setStatus($('queue-status'), 'Queue cleared', 'ok');
   });
 
-  $('export-jobs').addEventListener('click', () => void exportJobs());
-  attachHelp($('archive-heading'), CONCEPT_HELP.exportJobs);
-  // What the ticks mean and how a selection survives the schema growing — the
-  // entry existed and nothing rendered it. The panel goes after the whole
-  // `<details>`, not after the anchor: the anchor is inside the `<summary>`, and
-  // an explanation folded away with the disclosure it explains is unreachable
-  // until you open the thing you were asking about.
-  attachHelp($('export-options-label'), SETTINGS_HELP.exportOptions,
-    (panel) => $('export-options').after(panel));
-  await renderExportOptions();
-
   document.addEventListener('click', () => closeAllMenus());
-
-  // Collect captures whose posting has since been deleted. Once per page load
-  // rather than per render, so a row removed with Undo still on screen keeps its
-  // text until the user has actually let it go.
-  //
-  // This is a read-modify-write, and it is the last thing boot does before
-  // `data-ready` goes up — anything writing captures underneath a booting
-  // options page races it and loses. Nothing a user does has that shape; the
-  // E2E archive spec does, and waits for the flag rather than pretending
-  // otherwise.
-  const known = (await getJobUrls()).map((e) => e.url);
-  await mutateJobDetails((map) => pruneDetails(map, known));
 
   await renderQueue();
 }
 
-/* ---------------- What to export ---------------- */
+/* ---------------- Sync ---------------- */
 
-/** One checkbox or radio, at a full tap target, labelled from the catalog. */
-function checkRow(
-  id: string,
-  label: string,
-  on: boolean,
-  onChange: (on: boolean) => void,
-  radio?: string,
-): HTMLLabelElement {
-  const wrap = document.createElement('label');
-  wrap.className = 'check';
-  const box = document.createElement('input');
-  box.type = radio ? 'radio' : 'checkbox';
-  if (radio) box.name = radio;
-  box.id = id;
-  box.checked = on;
-  box.addEventListener('change', () => onChange(box.checked));
-  const text = document.createElement('span');
-  text.textContent = label;
-  wrap.append(box, text);
-  return wrap;
-}
-
-/**
- * The Archive panel: one checkbox per column, one per posting status, and the
- * two formats.
- *
- * Both lists are walked from the model — `EXPORT_FIELD_LABELS` and
- * `ALL_JOB_STATUSES` — rather than written into options.html, which is what
- * makes a new column or a new status arrive here as a checkbox by itself. A
- * change saves immediately, like every other control on this page; only the
- * summary is re-rendered afterwards, because rebuilding the grid would take the
- * focus out from under the box just ticked.
- */
-async function renderExportOptions(): Promise<void> {
-  const chosen = resolveExport((await getSettings()).exportOptions);
-  const fields = new Set(chosen.fields);
-  const statuses = new Set(chosen.statuses);
-
-  $('export-fields').replaceChildren(...EXPORT_FIELD_ORDER.map((f) => checkRow(
-    `export-field-${f}`, EXPORT_FIELD_LABELS[f], fields.has(f),
-    (on) => void patchExport((sel) => ({ ...sel, fields: { ...sel.fields, [f]: on } })),
-  )));
-
-  $('export-statuses').replaceChildren(...ALL_JOB_STATUSES.map((s) => checkRow(
-    `export-status-${s}`, JOB_STATUS_LABELS[s], statuses.has(s),
-    (on) => void patchExport((sel) => ({ ...sel, statuses: { ...sel.statuses, [s]: on } })),
-  )));
-
-  const formats: Array<[ExportFormat, string]> = [['json', 'JSON'], ['csv', 'CSV (spreadsheet)']];
-  $('export-format').replaceChildren(...formats.map(([value, label]) => checkRow(
-    `export-format-${value}`, label, chosen.format === value,
-    () => void patchExport((sel) => ({ ...sel, format: value })),
-    'export-format-choice',
-  )));
-
-  await refreshExportSummary();
-}
-
-/**
- * Serialized through a promise chain, like `session.ts` and `sync.ts`: each edit
- * is a read-modify-write of one settings object, so two ticks in quick
- * succession would otherwise both read the same snapshot and the second would
- * erase the first. Ticking a column off is exactly the gesture people repeat.
- */
-let exportWrites: Promise<void> = Promise.resolve();
-
-async function patchExport(edit: (sel: ExportSelection) => ExportSelection): Promise<void> {
-  exportWrites = exportWrites.then(async () => {
-    const settings = await getSettings();
-    await saveSettings({ ...settings, exportOptions: edit(settings.exportOptions ?? {}) });
-  });
-  await exportWrites;
-  await refreshExportSummary();
-}
-
-/**
- * What pressing Export would produce, in one line — and the only place the
- * empty selection is caught. Nothing here can be "fixed" for the user: a file
- * with no columns is a file of empty objects, so the button goes dead and says
- * which tick is missing.
- */
-async function refreshExportSummary(): Promise<void> {
-  const chosen = resolveExport((await getSettings()).exportOptions);
-  const button = $<HTMLButtonElement>('export-jobs');
-  const summary = $('export-summary');
-  button.disabled = chosen.fields.length === 0 || chosen.statuses.length === 0;
-
-  if (chosen.fields.length === 0) {
-    summary.textContent = 'Pick at least one column to export.';
-    return;
+function scopeItem(line: ScopeLine, sub?: string[]): HTMLLIElement {
+  const li = document.createElement('li');
+  const title = document.createElement('b');
+  title.textContent = line.title;
+  const detail = document.createElement('small');
+  detail.textContent = line.detail;
+  li.append(title, detail);
+  if (sub?.length) {
+    const ul = document.createElement('ul');
+    ul.className = 'scope-sub';
+    ul.replaceChildren(...sub.map((text) => {
+      const item = document.createElement('li');
+      item.textContent = text;
+      return item;
+    }));
+    li.append(ul);
   }
-  if (chosen.statuses.length === 0) {
-    summary.textContent = 'Pick at least one kind of posting to export.';
-    return;
-  }
-
-  const count = buildExport(await getJobUrls(), {}, {
-    statuses: chosen.statuses, fields: ['url'],
-  }).length;
-  const kinds = chosen.statuses.map((s) => JOB_STATUS_LABELS[s].toLowerCase()).join(', ');
-  summary.textContent =
-    `${count} posting(s) — ${kinds} — with ${chosen.fields.length} of `
-    + `${EXPORT_FIELD_ORDER.length} columns, as ${chosen.format.toUpperCase()}.`;
+  return li;
 }
 
 /**
- * Write the chosen postings out as one file.
- *
- * A plain anchor download, deliberately: the options page is an extension page,
- * so this needs no `downloads` permission, and the background could not do it
- * anyway — an MV3 service worker has no `URL.createObjectURL`.
+ * "What syncs": the user's one view of what leaves this browser in the
+ * background. Rendered from the model sync runs on — `SYNC_DOMAINS`, the synced
+ * settings and the local ones — so it cannot fall behind it.
  */
-async function exportJobs(): Promise<void> {
-  const status = $('export-status');
-  const chosen = resolveExport((await getSettings()).exportOptions);
-  const [list, details] = await Promise.all([getJobUrls(), getJobDetails()]);
-  const jobs = buildExport(list, details, { statuses: chosen.statuses, fields: chosen.fields });
-  if (jobs.length === 0) {
-    setStatus(status, 'Nothing matches what you chose to export', 'err');
-    return;
-  }
-
-  // The BOM is what makes a spreadsheet read this as UTF-8 rather than as the
-  // local codepage, which is where an accented company name goes wrong.
-  const [text, type] = chosen.format === 'csv'
-    ? [`﻿${toCsv(jobs, chosen.fields)}`, 'text/csv;charset=utf-8']
-    : [JSON.stringify(jobs, null, 2), 'application/json'];
-  const href = URL.createObjectURL(new Blob([text], { type }));
-  const a = document.createElement('a');
-  a.href = href;
-  a.download = exportFilename(new Date(), chosen);
-  a.click();
-  URL.revokeObjectURL(href);
-
-  // Only worth saying when the text was part of what was asked for.
-  const wanted = chosen.fields.includes('description');
-  const missing = wanted ? jobs.filter((j) => (j.description ?? []).length === 0).length : 0;
-  setStatus(
-    status,
-    missing === 0
-      ? `Exported ${jobs.length} posting(s)`
-      : `Exported ${jobs.length} posting(s) — ${missing} with no saved text`,
-    'ok',
+function renderSyncScope(): void {
+  $('sync-scope-synced').replaceChildren(...SYNC_DOMAINS.map((d) => scopeItem(
+    SYNC_SCOPE_TEXT[d],
+    d === 'settings' ? SYNCED_SETTINGS.map((k) => SETTINGS_HELP[k].title) : undefined,
+  )));
+  $('sync-scope-local').replaceChildren(
+    ...Object.values(LOCAL_SCOPE_TEXT).map((line) => scopeItem(line)),
+    ...DEVICE_ONLY_TEXT.map((line) => scopeItem(line)),
   );
 }
 
-/* ---------------- Sync ---------------- */
+/** "40 posting(s), 9 profile field(s) and 12 lesson(s)" — what one side holds. */
+function describeHoldings(s: SnapshotSummary): string {
+  return `${s.postings} posting(s), ${s.fields} profile field(s) and ${s.lessons} lesson(s)`;
+}
 
 /**
- * Options → Settings → Sync. Two ways to move the same database: through a
- * Google account, or as a file you carry yourself. Both end in the same
- * `mergeJobs`, so importing a backup and syncing cannot disagree about what
- * combining two databases means.
+ * What this browser holds besides the job list, as one comparable string —
+ * values only. A sync that merely adopts the far side's timestamps for equal
+ * values has changed nothing anyone could see, and must not reload the page.
+ */
+async function deviceFingerprint(): Promise<string> {
+  const { state } = await buildSnapshot();
+  return canonical(Object.fromEntries(Object.entries(state).map(([k, u]) => [k, u.value])));
+}
+
+/** Where a status line to show after a reload is parked for the next page load. */
+const AFTER_RELOAD_KEY = 'cf-sync-note';
+
+/**
+ * Show what a sync or an import brought in. A job list change is re-rendered in
+ * place; anything else — the profile, the lessons, the settings — is drawn by a
+ * dozen sections that read storage once at load, so the page reloads to show it,
+ * carrying its status line across. Not while an edit is unsaved: the reload would
+ * throw it away (and `beforeunload` would ask first), so it says to reload
+ * instead.
+ */
+async function showArrived(beforeState: string, statusEl: HTMLElement, note: string): Promise<void> {
+  const after = await deviceFingerprint();
+  const unsaved = [...document.querySelectorAll<HTMLElement>('.savebar')].some((b) => !b.hidden);
+  if (after === beforeState || unsaved) {
+    setStatus(statusEl, after === beforeState
+      ? note
+      : `${note}. Save your edits, then reload this page to see what arrived.`, 'ok');
+    await renderQueue();
+    return;
+  }
+  try {
+    sessionStorage.setItem(AFTER_RELOAD_KEY, JSON.stringify({ id: statusEl.id, note }));
+  } catch {
+    /* No session storage: the reload still shows the new state, just without the note. */
+  }
+  location.reload();
+}
+
+/** The status line a reload in `showArrived` carried across, shown once. */
+function showNoteFromBeforeReload(): void {
+  try {
+    const raw = sessionStorage.getItem(AFTER_RELOAD_KEY);
+    if (!raw) return;
+    sessionStorage.removeItem(AFTER_RELOAD_KEY);
+    const { id, note } = JSON.parse(raw) as { id: string; note: string };
+    const el = document.getElementById(id);
+    if (el) setStatus(el, note, 'ok');
+  } catch {
+    /* Nothing to show. */
+  }
+}
+
+/**
+ * Options → Sync. Two ways to move the same state: through a Google account, or
+ * as a file you carry yourself. Both end in the same `mergeSnapshots`, so
+ * importing a backup and syncing cannot disagree about what combining means.
  */
 async function initSync(): Promise<void> {
   const toggle = $<HTMLInputElement>('sync-enabled');
@@ -1880,11 +1733,21 @@ async function initSync(): Promise<void> {
   attachHelp($('sync-heading'), SETTINGS_HELP.syncEnabled);
   attachRowHelp(toggle, SETTINGS_HELP.syncEnabled);
   attachHelp($('sync-client-heading'), CONCEPT_HELP.syncClient);
+  renderSyncScope();
+  showNoteFromBeforeReload();
 
+  // With the switch off nothing below can run, so the account line, its buttons
+  // and the OAuth client form are not shown. What syncs and the backup file stay:
+  // one says what turning it on would do, the other works without it.
+  const showControls = () => {
+    for (const el of document.querySelectorAll<HTMLElement>('.sync-when-on')) el.hidden = !toggle.checked;
+  };
   toggle.checked = (await getSettings()).syncEnabled;
+  showControls();
   toggle.addEventListener('change', async () => {
+    showControls();
     await saveSettings({ ...(await getSettings()), syncEnabled: toggle.checked });
-    setStatus(status, `Job database sync ${toggle.checked ? 'on' : 'off'}`, 'ok');
+    setStatus(status, `Sync ${toggle.checked ? 'on' : 'off'}`, 'ok');
     await renderSync();
   });
 
@@ -1989,8 +1852,8 @@ async function initSync(): Promise<void> {
     // default, but a user may have switched it off — and then naming the disabled
     // button would be the last step of a walkthrough that does nothing.
     setStatus(status, toggle.checked
-      ? 'Connected. Press Sync now to combine the two databases.'
-      : 'Connected. Switch “Sync the job database” on above to start syncing.', 'ok');
+      ? 'Connected. Press Sync now to combine the two browsers.'
+      : 'Connected. Switch “Sync this browser” on above to start syncing.', 'ok');
     await renderSync(s);
   });
 
@@ -1998,13 +1861,14 @@ async function initSync(): Promise<void> {
     // The database stays; only the tokens go. Saying so matters — "disconnect"
     // reads like "delete" next to a list of sixty postings.
     await renderSync(await sendBg<SyncState>(MSG.SYNC_DISCONNECT));
-    setStatus(status, 'Disconnected. The job database on this device is untouched.', 'ok');
+    setStatus(status, 'Disconnected. Everything on this browser is untouched.', 'ok');
   });
 
   $('sync-now').addEventListener('click', () => void runSync(false));
 
   async function runSync(confirmed: boolean): Promise<void> {
     setStatus(status, 'Syncing…');
+    const before = await deviceFingerprint();
     const s = await sendBg<SyncState>(MSG.SYNC_NOW, { confirmed });
     if (!s) return setStatus(status, 'No answer from the extension', 'err');
     // Same check as Connect and Save client beside it. Without it a throw from
@@ -2016,9 +1880,12 @@ async function initSync(): Promise<void> {
     }
     if (s.pending) {
       // The one check before the first merge: connecting the wrong account would
-      // fold a stranger's job list into this one, and only the counts show it.
+      // fold a stranger's job list, profile and lessons into this one, and only the
+      // counts show it.
       showToast(
-        `Combine ${s.pending.remote} posting(s) from ${s.account} with ${s.pending.local} here?`,
+        `Combine ${describeHoldings(s.pending.remote)} from ${s.account ?? 'that account'} `
+          + `with ${describeHoldings(s.pending.local)} here? Where both changed the same `
+          + 'thing, the newer change wins.',
         'Combine',
         () => void runSync(true),
       );
@@ -2026,15 +1893,15 @@ async function initSync(): Promise<void> {
       return;
     }
     await renderSync(s);
-    if (!s.lastError) setStatus(status, 'Synced', 'ok');
-    await renderQueue();
+    if (s.lastError) return;
+    await showArrived(before, status, 'Synced');
   }
 
-  /* --- The same database as a file --- */
+  /* --- The same state as a file --- */
 
   $('sync-export').addEventListener('click', async () => {
-    // Same anchor download as the archive export, and for the same reasons: no
-    // `downloads` permission, and a service worker has no `URL.createObjectURL`.
+    // An anchor download from this page: it needs no `downloads` permission, and a
+    // service worker has no `URL.createObjectURL` to do it with.
     const snapshot = await buildSnapshot();
     const blob = new Blob([JSON.stringify(snapshot)], { type: 'application/json' });
     const href = URL.createObjectURL(blob);
@@ -2043,7 +1910,7 @@ async function initSync(): Promise<void> {
     a.download = snapshotFilename(new Date());
     a.click();
     URL.revokeObjectURL(href);
-    setStatus(fileStatus, `Exported ${snapshot.jobUrls.length} posting(s)`, 'ok');
+    setStatus(fileStatus, `Exported ${describeHoldings(summarizeSnapshot(snapshot))}`, 'ok');
   });
 
   $('sync-import').addEventListener('click', () => importInput.click());
@@ -2052,17 +1919,11 @@ async function initSync(): Promise<void> {
     if (!file) return;
     importInput.value = '';
     try {
-      const before = (await buildSnapshot()).jobUrls.length;
+      const local = await buildSnapshot();
+      const before = await deviceFingerprint();
       const merged = await mergeIntoLocal(parseSnapshot(await file.text()));
-      const added = merged.jobUrls.length - before;
-      setStatus(
-        fileStatus,
-        added > 0
-          ? `Combined — ${added} posting(s) added, ${merged.jobUrls.length} in total`
-          : `Combined — nothing new, ${merged.jobUrls.length} in total`,
-        'ok',
-      );
-      await renderQueue();
+      const added = summarizeSnapshot(merged).postings - summarizeSnapshot(local).postings;
+      await showArrived(before, fileStatus, added > 0 ? `Combined — ${added} posting(s) added` : 'Combined');
     } catch (e) {
       setStatus(fileStatus, (e as Error).message, 'err');
     }

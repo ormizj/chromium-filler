@@ -466,9 +466,8 @@ label.check input {
   grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
   gap: var(--space-4);
   align-items: start;
-  /* What follows a list is prose about it — the simulator's two paragraphs sit
-     8px under the fullscreen switch, which read as one crammed block rather than
-     a card and its explanation. */
+  /* What follows a list is prose about it, or the next heading — 8px under the
+     last row read as one crammed block rather than a card and its explanation. */
   margin-bottom: var(--space-6);
 }
 
@@ -715,36 +714,20 @@ label.fld.inline input {
   background: var(--bg);
 }
 
-/* Applied is the number the whole queue exists to move — the one thing on this
-   row a user is actually working towards. As one of six identical paper tiles it
-   read as just another category, so it takes the tint as well as the colour. */
-.cf-stat.applied {
+/* Done is the number the whole queue exists to move — the one thing on this row
+   a user is actually working towards — so it takes the tint as well as the
+   colour, rather than reading as one more paper tile. Three tiles fit one row at
+   every width, so there is no narrow layout to arrange. */
+.cf-stat.done {
   background: var(--ok-weak);
   border-color: transparent;
 }
-.cf-stat.applied .cf-stat-n {
+.cf-stat.done .cf-stat-n {
   color: var(--ok);
 }
-.cf-stat.applied .cf-stat-k {
+.cf-stat.done .cf-stat-k {
   color: var(--ok);
   opacity: 0.85;
-}
-.cf-stat.redirected .cf-stat-n {
-  color: var(--accent);
-}
-.cf-stat.skipped .cf-stat-n,
-.cf-stat.markedDone .cf-stat-n {
-  color: var(--muted);
-}
-
-/* Seven tiles at three to a row leave the last one alone on a row of its own.
-   Narrow, Total takes the first row by itself — it is the sum of the six below,
-   so it reads as their heading — and the six statuses fill two even rows. Wide,
-   the grid fits all seven on one line and this would only break it. */
-@media (max-width: 640px) {
-  #url-stats .cf-stat.total {
-    grid-column: 1 / -1;
-  }
 }
 
 /* Session control block: start/stop plus the batch size that decides how many
@@ -1619,52 +1602,90 @@ label.fld.inline input {
   margin-bottom: var(--space-5);
 }
 
-/* ---------------- Archive: what to export ---------------- */
-
-/* A group of ticks with a title. The fieldset's own border would be a second box
-   inside the disclosure, so only the legend is kept. */
-.checkgroup {
-  border: none;
-  padding: 0;
-  margin: 0;
+/* The Google sync controls, shown only while "Sync this browser" is on. Said
+   outright: a wrapper that ever gains a `display` would beat the UA `[hidden]`. */
+.sync-when-on[hidden] {
+  display: none;
 }
 
-.checkgroup > legend {
-  padding: 0 0 var(--space-3);
-  font-size: var(--text-md);
-  font-weight: 600;
-  color: var(--fg);
-}
+/* ---------------- Sync: what syncs ---------------- */
 
-/* Fourteen columns as one list is a scroll; as auto-fill columns it is a glance.
-   140px rather than a comfortable 190 so that a 390px phone still gets *two*
-   columns — the grid is 298px wide there, and at one column this group alone is
-   a screen and a half. */
-.checks {
+/* Two lists side by side on a wide screen, stacked on a phone: what leaves this
+   browser, and what does not. They sit inside a `.reference` disclosure whose
+   body is transparent, so each column is still a paper object standing on the
+   recessed tab panel — the same level as the settings rows below it. */
+.sync-scope {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
-  gap: var(--space-1) var(--space-4);
+  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+  gap: var(--space-4);
+  padding: var(--space-5);
 }
 
-/* The whole row is the label, so the tap target is the text and not the 16px box
-   beside it — the same reason every button here is `--tap` tall. */
-.check {
+.sync-scope-col {
+  min-width: 0;
+  padding: var(--space-4) var(--space-5);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-card);
+  background: var(--bg);
+}
+
+/* The two column titles have to read as titles, not as one more item: at the
+   items' own size they did not. A step larger, a leading mark that says which
+   side this is (shape, not colour alone), and a hairline under it. */
+.sync-scope-title {
   display: flex;
   align-items: center;
   gap: var(--space-3);
-  min-height: var(--tap);
-  font-size: var(--text-md);
-  cursor: pointer;
+  margin: 0 0 var(--space-4);
+  padding-bottom: var(--space-3);
+  border-bottom: 1px solid var(--border);
+  font-size: var(--text-base);
+  font-weight: 600;
 }
 
-.check input {
-  width: auto;
+.sync-scope-title::before {
+  content: '';
   flex: none;
-  margin: 0;
+  width: 16px;
+  height: 16px;
+  background: var(--muted);
+  -webkit-mask: var(--icon-dash) center / contain no-repeat;
+  mask: var(--icon-dash) center / contain no-repeat;
 }
 
-#export-summary {
-  margin: var(--space-3) 0 0;
+.sync-scope-title.synced::before {
+  background: var(--accent);
+  -webkit-mask-image: var(--icon-check);
+  mask-image: var(--icon-check);
+}
+
+.scope-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  font-size: var(--text-md);
+}
+
+.scope-list b {
+  display: block;
+  font-weight: 500;
+}
+
+.scope-list small {
+  display: block;
+  color: var(--muted);
+  font-size: var(--text-sm);
+}
+
+/* The synced settings, named under their heading line. */
+.scope-list .scope-sub {
+  margin: var(--space-2) 0 0;
+  padding-left: var(--space-5);
+  color: var(--muted);
+  font-size: var(--text-sm);
 }
 
 /* A chip that is also a control — the config picker. */

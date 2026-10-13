@@ -58,7 +58,7 @@ const session = (over: Partial<SessionState['progress']> = {}): SessionState => 
   active: true,
   batchSize: 5,
   progress: {
-    total: 60, queued: 48, inFlight: 5, applied: 6, skipped: 1, markedDone: 0, done: 7, ratio: 7 / 60, ...over,
+    total: 60, queued: 48, inFlight: 5, done: 7, ratio: 7 / 60, ...over,
   },
 });
 
@@ -174,7 +174,7 @@ describe('popup render', () => {
 describe('queue session', () => {
   it('hides the session strip when no session is running', async () => {
     mockSession({ active: false, batchSize: 5, progress: {
-      total: 0, queued: 0, inFlight: 0, applied: 0, skipped: 0, markedDone: 0, done: 0, ratio: 0,
+      total: 0, queued: 0, inFlight: 0, done: 0, ratio: 0,
     } });
     await mountPopup(matched());
     expect(document.getElementById('session')!.hidden).toBe(true);
@@ -188,11 +188,9 @@ describe('queue session', () => {
     expect(document.getElementById('session-count')!.textContent).toBe('7');
     expect(document.getElementById('session-total')!.textContent).toBe(' / 60');
     const chips = document.getElementById('session-chips')!.textContent;
-    // "applied", not "filled": in this extension "filled" is a field that took a
-    // value, and calling a sent application that hid the session's real score.
-    expect(chips).toContain('6 applied');
+    // Not "filled": in this extension "filled" is a field that took a value.
+    expect(chips).toContain('5 open');
     expect(chips).not.toContain('filled');
-    expect(chips).toContain('1 skipped');
     expect(chips).toContain('48 waiting');
   });
 

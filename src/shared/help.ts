@@ -13,6 +13,7 @@
  */
 
 import type { Settings } from './types';
+import type { LocalSetting, SyncDomain } from './syncUnits';
 
 export interface HelpEntry {
   /** Heading shown above the explanation. */
@@ -53,36 +54,14 @@ export const SETTINGS_HELP: Record<keyof Settings, HelpEntry> = {
       + 'Login and sign-up forms, search boxes and card details are always left alone.',
     when: 'Turn it off to fill only when you press Fill in the popup.',
   },
-  openCardOnQueueTabs: {
-    title: 'Open the review on queue tabs',
-    short: 'Show the full card on postings the queue opened',
-    body: 'On a tab the queue opened, the review card opens by itself, with the posting '
-      + 'and what was filled. Everywhere else it starts folded to a small pill in the '
-      + 'corner, and only appears at all when something was filled — so filling a shop\'s '
-      + 'address form never puts a card over the page.',
-  },
-  markDoneOnClose: {
-    title: 'Closing a queue tab finishes it',
-    short: 'Close the tab when you are done; the next posting opens',
-    body: 'You submit on the site yourself, so closing the tab is how the queue hears '
-      + 'you are done with a posting: it is marked “Marked done” and the next waiting '
-      + 'posting opens. A posting you skipped or marked applied is left as it is.',
-    when: 'Turn it off to have closing a tab only free its place, recording nothing.',
-  },
-  closeTabOnSkip: {
-    title: 'Auto-close the tab after I skip',
-    short: 'Free the slot when a posting is skipped',
-    body: 'Closes the posting when you skip it — from the review card, or from the '
-      + 'popup\'s Skip → next during a queue session — which also frees a slot for the '
-      + 'next posting. It waits out the “Close delay” below first.',
-    when: 'Turn it off to keep skipped postings open for a second look. The queue moves '
-      + 'on either way — a skip frees its slot whether or not the tab goes.',
-  },
-  closeTabDelayMs: {
-    title: 'Close delay',
-    short: 'Milliseconds on screen before a skipped tab closes',
-    body: 'How long to leave the page on screen before closing a skipped tab, in milliseconds.',
-    example: '1500',
+  openCardWhenFilled: {
+    title: 'Open the review when a page is filled',
+    short: 'Show the full card, not just the pill, wherever something was filled',
+    body: 'When the extension fills something on a page, the review card opens by itself, '
+      + 'listing every question and what went in. With this off it waits folded to a '
+      + 'small pill in the corner — press it to see the same card. Pages where nothing '
+      + 'was filled get neither.',
+    when: 'Turn it on if you want to check every fill as it happens.',
   },
   keepInBrowser: {
     title: 'Keep queued links in the browser',
@@ -106,45 +85,75 @@ export const SETTINGS_HELP: Record<keyof Settings, HelpEntry> = {
       + 'that page only and leaves this default alone. Desktop only: at 640px wide and '
       + 'under, the card is always a full-width bottom sheet.',
   },
-  modalFullscreen: {
-    title: 'Fullscreen card',
-    short: 'Overrides the configured size and position until you turn it off.',
-    body: 'Opens the review card filling the whole browser window instead of as a card in '
-      + 'the corner: worth it for reading a long description. The card\'s own header button '
-      + 'toggles this same switch; it then stays on until you turn it off. Your configured '
-      + 'size and position are kept for when you do.',
-  },
   syncEnabled: {
-    title: 'Sync the job database',
-    short: 'Share your queue and its history with another browser',
-    body: 'Keeps the job database the same in two browsers — every posting in the queue, '
-      + 'what became of it, and the job text that was saved with it. Both browsers connect '
-      + 'to the same Google account, and the data is kept in a folder there that only this '
-      + 'extension can see. Your profile, your own fields, what you have taught the '
-      + 'extension, your CV and these settings stay on this device. Neither side '
-      + 'overwrites the other — the two histories are combined, and where they disagree '
-      + 'about a posting the most recent decision wins. It runs when you press Sync now '
-      + 'and once when the browser starts, never on a timer.',
-    when: 'You work through job postings from more than one computer.',
-  },
-  exportOptions: {
-    title: 'What the archive exports',
-    short: 'The columns, statuses and format the Export jobs button writes',
-    body: 'Which columns the archive file has, which postings go in it, and whether it '
-      + 'is written as JSON or as CSV for a spreadsheet. Ticked under Queue → Archive, '
-      + 'and kept for next time. Anything you leave alone keeps its default: every '
-      + 'column, and the postings you applied to.',
-    when: 'You only want part of what is saved — the descriptions to read back, or a '
-      + 'plain list of titles and companies to sort in a spreadsheet.',
+    title: 'Sync this browser',
+    short: 'Keep this browser and your others the same — everything listed under “What syncs”',
+    body: 'Keeps the whole extension the same in two browsers: your job list, your '
+      + 'profile, your own fields, what you have taught it, your CV and cover letter, and '
+      + 'your settings — all of it listed under “What syncs”, along with the few things '
+      + 'that stay on each browser. Both browsers connect to the same Google account, and '
+      + 'the data is kept in a folder there that only this extension can see. Neither side '
+      + 'overwrites the other: the two are combined, and where both changed the same thing '
+      + 'the more recent change wins. It runs when you press Sync now and once when the '
+      + 'browser starts, never on a timer.',
+    when: 'You fill applications from more than one computer, or a computer and a phone.',
   },
 };
+
+/* ---------------- What syncs ---------------- */
+
+/** One line of the Sync tab's "What syncs" list. */
+export interface ScopeLine {
+  title: string;
+  detail: string;
+}
+
+/**
+ * The synced side of the list, one line per family of synced data. Keyed on
+ * `SyncDomain` — the families `syncUnits.ts` sorts every synced value into — so a
+ * new kind of synced data fails `npm run typecheck` until it is described here,
+ * and the list cannot quietly fall behind what actually leaves the browser.
+ *
+ * `settings` is the heading; the settings themselves are listed under it by their
+ * `SETTINGS_HELP` titles, generated from `SYNCED_SETTINGS`.
+ */
+export const SYNC_SCOPE_TEXT: Record<SyncDomain, ScopeLine> = {
+  jobs: { title: 'Your job list', detail: 'Every posting, and whether it is new or done.' },
+  profile: { title: 'Your details', detail: 'Everything filled in under Profile → Your details.' },
+  wordings: { title: 'Other ways sites ask', detail: 'The extra wordings you gave the built-in fields.' },
+  customFields: { title: 'Your own fields', detail: 'Their names, answers, and the questions they answer.' },
+  lessons: { title: 'What it has learned', detail: 'Every question you taught it, and what it fills there.' },
+  resume: { title: 'Your CV', detail: 'The file itself.' },
+  coverLetter: { title: 'Your cover letter file', detail: 'The file itself.' },
+  settings: { title: 'Your settings', detail: 'These, from the Settings tab:' },
+};
+
+/**
+ * The other side: what stays on this browser. The local settings are keyed on
+ * `LocalSetting`, so a setting moved to that list has to say here why it stays.
+ */
+export const LOCAL_SCOPE_TEXT: Record<LocalSetting, ScopeLine> = {
+  modalLayout: {
+    title: 'Where the card sits, and its size',
+    detail: 'Measured against this screen — another screen needs its own.',
+  },
+  syncEnabled: { title: 'The “Sync this browser” switch', detail: 'Each browser decides for itself whether to sync.' },
+};
+
+/** What stays here that is not a setting at all. */
+export const DEVICE_ONLY_TEXT: ScopeLine[] = [
+  {
+    title: 'Your Google OAuth client and the connected account',
+    detail: 'Each browser has its own redirect address, and signs in for itself.',
+  },
+];
 
 /* ---------------- Concepts ---------------- */
 
 export type ConceptKey =
   | 'howItWorks' | 'neverSubmits' | 'teaching' | 'customFields' | 'dots' | 'picker'
-  | 'coverLetter' | 'leftAlone' | 'sessions' | 'queueChip' | 'markedDone'
-  | 'alreadyApplied' | 'exportJobs' | 'syncClient';
+  | 'coverLetter' | 'leftAlone' | 'sessions' | 'queueChip' | 'done'
+  | 'alreadyDone' | 'syncClient';
 
 /**
  * One numbered step of a guide the user follows with another site open beside it.
@@ -168,7 +177,7 @@ export interface GuideStep {
 export const SYNC_SETUP_STEPS: GuideStep[] = [
   {
     title: 'Open Google Cloud',
-    body: 'Sign in with the Google account whose Drive should keep your job list. If '
+    body: 'Sign in with the Google account whose Drive should keep your synced data. If '
       + 'Google asks you to accept its terms of service, accept them. This is free: '
       + 'nothing here needs a billing account or a card.',
     link: { label: 'Open Google Cloud', href: 'https://console.cloud.google.com/' },
@@ -234,10 +243,9 @@ export const SYNC_SETUP_STEPS: GuideStep[] = [
   },
   {
     title: 'Sync for the first time',
-    body: 'Check that “Sync the job database” is on — it is unless you turned it off — '
-      + 'and press Sync now. The first time, it '
-      + 'stops and shows which account it is about to use and how many postings each '
-      + 'side has; press Combine if that is right.',
+    body: 'Check that “Sync this browser” is on — it is unless you turned it off — and press Sync '
+      + 'now. The first time, it stops and shows which account it is about to use and '
+      + 'what each side holds; press Combine if that is right.',
   },
   {
     title: 'Your other browser',
@@ -382,41 +390,23 @@ export const CONCEPT_HELP: Record<ConceptKey, HelpEntry> = {
       + 'it — the employer\'s own form behind “Apply on company website” — carries it too. '
       + 'Tap it to open the review card.',
   },
-  markedDone: {
-    title: 'Marked done',
-    short: 'A posting you have finished with — closed, or marked by hand.',
-    body: 'Closing a tab the queue opened marks its posting “Marked done” and opens the '
-      + 'next one. “Mark opened as done” does the same for every posting still at '
-      + '“opened” in one go — the ones whose tabs you closed some other way. Only you set '
-      + 'it: the extension cannot see a site\'s Submit button being pressed, so it never '
-      + 'claims an application went in. Change any posting\'s status from its menu, '
-      + 'including to “Applied”.',
-    when: 'A session left a run of postings at “opened” and you are finished with them.',
+  done: {
+    title: 'New and Done',
+    short: 'A posting is waiting, or you have finished with it.',
+    body: 'Every posting is New until you finish it, then Done. Closing a tab the queue '
+      + 'opened marks its posting Done and opens the next one; so does Skip. You can also '
+      + 'set any posting either way from its row in Options → Queue. Only you set it: the '
+      + 'extension cannot see a site\'s Submit button being pressed, so it never claims an '
+      + 'application went in.',
+    when: 'You want to know what the two words in the queue mean.',
   },
-  alreadyApplied: {
-    title: 'This posting is already applied to',
-    short: 'The record says so; Skip is retired so it cannot be filed over.',
-    body: 'Your job database has this page down as applied. The form is still filled, in '
-      + 'case you are looking at it again on purpose, but Skip is retired — skipping would '
-      + 'file the posting as skipped over the record that you applied. If the record is '
-      + 'wrong, change it in Options → Queue.',
-  },
-  exportJobs: {
-    title: 'Export jobs',
-    short: 'Downloads the postings you choose, with their text, as one file.',
-    body: 'Downloads one file holding the postings you ask for: the job title, the '
-      + 'company, location and type, the description and requirements as they read '
-      + 'on the page, the URL, board, status and dates, and — on a two-step posting — '
-      + 'the page it came from and the one it was handed off to. Every column goes in '
-      + 'unless you say otherwise. “What to export” picks which of them go in it, which '
-      + 'postings — the ones you applied to, by default, but the text of a skipped one '
-      + 'is kept too — and whether the file is JSON or a CSV for a spreadsheet. The text '
-      + 'is saved automatically for every posting the extension reads and reports on, '
-      + 'so the file covers applications whose tabs were closed long ago. A '
-      + 'two-step posting is one '
-      + 'entry, not two — the board\'s description travels with the application it '
-      + 'handed off to.',
-    when: 'You want to look back over what you applied to and judge which roles fit.',
+  alreadyDone: {
+    title: 'This posting is already done',
+    short: 'You finished it earlier; Skip has nothing left to do.',
+    body: 'Your job database has this page down as done — you closed its queue tab, '
+      + 'skipped it, or marked it by hand. The form is still filled, in case you are '
+      + 'looking at it again on purpose, but Skip is retired: there is nothing left for it '
+      + 'to finish. If you are not done with it, set it back to New in Options → Queue.',
   },
   /**
    * The one thing sync cannot ship with: a Google OAuth client. It is a Google
@@ -431,19 +421,18 @@ export const CONCEPT_HELP: Record<ConceptKey, HelpEntry> = {
     // their own section at the bottom of Help. Both used to live in this one
     // paragraph, which is how a user got as far as Connect with the redirect URI
     // pasted into the wrong box and nothing saying which box was right.
-    body: 'Sync stores the job database in your own Google Drive, through a Google Cloud '
+    body: 'Sync stores everything it shares in your own Google Drive, through a Google Cloud '
       + 'project you own — nothing passes through anyone else — so the one-time errand is '
       + 'creating the client it signs in with. It is free and takes about ten minutes; '
       + 'the step-by-step guide, with a link to each Google Cloud page and the address '
       + 'this browser needs, is “Setting up sync” at the bottom of the Help tab. The '
-      + 'first Sync now after connecting stops and asks, naming the account and how many '
-      + 'postings are on each side; nothing is combined until you press Combine, because '
+      + 'first Sync now after connecting stops and asks, naming the account and what is on '
+      + 'each side; nothing is combined until you press Combine, because '
       + 'picking the wrong account in Google\'s chooser is a single misclick. The secret '
       + 'is not really a secret in an installed extension — Google requires it here and '
       + 'assumes anyone with the extension can read it; the redirect URI and PKCE are '
       + 'what actually protect it.',
-    when: 'You want the two browsers to share one job database without moving a file by '
-      + 'hand.',
+    when: 'You want two browsers to stay the same without moving a backup file by hand.',
   },
   coverLetter: {
     title: 'A cover letter as text or as a file',

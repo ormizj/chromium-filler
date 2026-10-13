@@ -95,30 +95,29 @@ function renderSession(): void {
 
   if (!active || !p) return;
   // The prominent progress card: a big done/total number, a caption, and the
-  // fill bar — the reference's popup lead. The per-status breakdown moves to the
-  // chips below, where applied / skipped / waiting read at a glance.
+  // fill bar — the reference's popup lead. The breakdown moves to the chips
+  // below, where open / waiting read at a glance.
   sessionCount.textContent = `${p.done}`;
   sessionTotal.textContent = ` / ${p.total}`;
-  // "in the queue", not "this session": `queueProgress` counts applied, skipped
-  // and redirected across the whole visible database against its whole length
+  // "in the queue", not "this session": `queueProgress` counts done postings
+  // across the whole visible database against its whole length
   // (`shared/queue.ts`), not against the postings this session has opened. Read
   // as a session tally it told anyone with a backlog that 40 of their 60
   // postings were done before the session's first one had been looked at.
   sessionDetail.textContent = 'postings done in the queue';
   sessionBar.style.width = `${Math.round(p.ratio * 100)}%`;
-  renderSessionChips(p.applied, p.skipped, p.queued);
+  renderSessionChips(p.inFlight, p.queued);
   // Only offer Skip on a page that is one of the session's postings — the
   // background answers that from the tab, and the content script passes it on.
   sessionSkip.disabled = !status?.inQueue;
 }
 
 /**
- * applied / skipped / waiting, as the three tinted chips the reference popup
- * shows. The first of these read "n filled" until now, which is a different fact
- * in this extension's vocabulary — "filled" is a field that took a value, and
- * using it here hid the one number a session is actually run for.
+ * open / waiting, as the tinted chips the reference popup shows. A posting is
+ * new or done, and done is the big number above — so the chips split what is
+ * left: the tabs on it now, and the postings still to come.
  */
-function renderSessionChips(applied: number, skipped: number, queued: number): void {
+function renderSessionChips(open: number, queued: number): void {
   const chip = (cls: string, text: string): HTMLSpanElement => {
     const s = document.createElement('span');
     s.className = cls;
@@ -126,8 +125,7 @@ function renderSessionChips(applied: number, skipped: number, queued: number): v
     return s;
   };
   sessionChips.replaceChildren(
-    chip('chip ok', `${applied} applied`),
-    chip('chip warn', `${skipped} skipped`),
+    chip('chip ok', `${open} open`),
     chip('chip', `${queued} waiting`),
   );
 }

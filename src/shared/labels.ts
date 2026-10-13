@@ -15,7 +15,6 @@
  */
 
 import type { JobUrlStatus, MatchConfidence } from './types';
-import type { ExportField } from './jobExport';
 import type { SelectorStrength } from './selector';
 
 export interface StatusText {
@@ -45,7 +44,7 @@ export const STATUS_TEXT: Record<MatchConfidence, StatusText> = {
  * presses the site's own button — so the states are only about the filling, and
  * about whether this posting was already done with.
  */
-export type FlowKey = 'alreadyApplied' | 'ready' | 'nothing' | 'empty';
+export type FlowKey = 'alreadyDone' | 'ready' | 'nothing' | 'empty';
 
 export interface FlowText {
   title: string;
@@ -54,9 +53,9 @@ export interface FlowText {
 
 export const FLOW_TEXT: Record<FlowKey, FlowText> = {
   // `{when}` is filled by `flowBanner`, or removed on an entry with no date.
-  alreadyApplied: {
-    title: 'Already applied',
-    detail: 'is recorded as applied{when}. The form was filled again anyway — change the status in Options → Queue if that record is wrong.',
+  alreadyDone: {
+    title: 'Already done',
+    detail: 'was marked done{when}. The form was filled again anyway — set it back to New in Options → Queue if you are not finished with it.',
   },
   // The resting state: the extension's part is done and the rest is the user's.
   // It names the site's own button because that is the one thing left, and the one
@@ -89,10 +88,6 @@ export type ActionKey =
   | 'wider'
   | 'deeper'
   | 'done'
-  | 'openOptions'
-  | 'more'
-  | 'fullscreen'
-  | 'exitFullscreen'
   | 'teach'
   | 'taught'
   | 'notThis'
@@ -119,13 +114,10 @@ export const ACTION_LABELS: Record<ActionKey, string> = {
   wider: 'Wider',
   deeper: 'Deeper',
   done: 'Done',
-  openOptions: 'Options',
-  more: '⋯',
-  // Icon-only in the card header, so these are read aloud rather than shown.
-  fullscreen: 'Fullscreen',
-  exitFullscreen: 'Exit fullscreen',
   // A row's way in to teaching, and its retired form — paired the way `confirm` is
   // with `confirmed`. Rows hold still, so the label is what says the lesson took.
+  // The card's footer and the popup use the same word for pointing at a field the
+  // report did not list: both end in the same chooser.
   teach: 'Teach',
   taught: 'Taught ✓',
   // A recognised row that is wrong. Opens the same chooser Teach does: correcting a
@@ -160,46 +152,14 @@ export const SELECTOR_STRENGTH_TEXT: Record<SelectorStrength, { word: string; ar
   fragile: { word: 'fragile', aria: 'fragile — identified only by its position' },
 };
 
-/* ---------------- The archive's columns and statuses ---------------- */
+/* ---------------- Posting statuses ---------------- */
 
 /**
- * Every column the archive can export, worded — and, being an ordered
- * `Record<ExportField, string>`, also the **order** they are written in and
- * offered in. `ExportField` is `keyof ExportedJob`, so a field added to the
- * export fails `npm run typecheck` until it is named here, and naming it is all
- * it takes: `EXPORT_FIELD_ORDER` is these keys, and Options draws one checkbox
- * per entry. A column nobody can name is a column nobody can choose.
- *
- * The words are what the *user* calls each one ("Job title"); the file itself
- * keeps the key (`title`), which is what a script reads.
- */
-export const EXPORT_FIELD_LABELS: Record<ExportField, string> = {
-  url: 'URL',
-  title: 'Job title',
-  site: 'Board',
-  company: 'Company',
-  location: 'Location',
-  employmentType: 'Employment type',
-  status: 'Status',
-  addedAt: 'Date added',
-  appliedAt: 'Date applied',
-  capturedAt: 'Date captured',
-  sourceUrl: 'Came from',
-  redirectUrl: 'Handed off to',
-  description: 'Description',
-  requirements: 'Requirements',
-};
-
-/**
- * What each posting status is called where it is offered as a choice. Keyed off
- * `JobUrlStatus` for the same reason as above: a new status must be given words
- * before it can be a checkbox, and `ALL_JOB_STATUSES` then makes it one.
+ * What each posting status is called where it is offered as a choice — the
+ * queue filters and a row's status control. Keyed off `JobUrlStatus`, so a new
+ * status must be given words before `ALL_JOB_STATUSES` can offer it.
  */
 export const JOB_STATUS_LABELS: Record<JobUrlStatus, string> = {
-  new: 'Not opened yet',
-  opened: 'Opened',
-  redirected: 'Handed off',
-  skipped: 'Skipped',
-  markedDone: 'Marked done',
-  applied: 'Applied',
+  new: 'New',
+  done: 'Done',
 };

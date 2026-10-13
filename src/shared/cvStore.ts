@@ -10,17 +10,19 @@
  * larger files.
  *
  * Two documents, one mechanism: the CV, and a cover letter for the sites that
- * take one as an upload rather than as a textarea. They are *device* state, like
- * the CV always was — never in the sync snapshot.
+ * take one as an upload rather than as a textarea. Both sync, as the same base64
+ * this file stores (`syncUnits.ts`), so every write here is stamped.
  */
 
-import type { CvFile, DocKind } from './types';
+import type { CvFile, DocKind, StoredDoc } from './types';
+import { docUnits } from './syncUnits';
+import { stampedSet } from './storage';
 
 /**
  * Storage key per document. `resume` is `'cv'` and not `'resumeFile'` because
  * renaming it would strand every CV already stored, to buy nothing.
  */
-const DOC_KEYS: Record<DocKind, string> = {
+export const DOC_KEYS: Record<DocKind, string> = {
   resume: 'cv',
   coverLetter: 'coverLetterFile',
 };
@@ -60,29 +62,33 @@ export function cvFileToFile(cv: CvFile): File {
   return new File([cv.data], cv.name, { type: cv.type || 'application/octet-stream' });
 }
 
-interface StoredCv {
-  name: string;
-  type: string;
-  dataBase64: string;
+async function getStored(kind: DocKind): Promise<StoredDoc | undefined> {
+  const raw = await chrome.storage.local.get(DOC_KEYS[kind]);
+  return raw[DOC_KEYS[kind]] as StoredDoc | undefined;
+}
+
+/** Write one document (or remove it, with `undefined`), stamping the change. */
+async function writeDoc(kind: DocKind, stored: StoredDoc | undefined): Promise<void> {
+  const before = await getStored(kind);
+  await stampedSet('docs', DOC_KEYS[kind], stored, docUnits({ [kind]: before }), docUnits({ [kind]: stored }));
 }
 
 export async function setDoc(kind: DocKind, file: File): Promise<CvFile> {
   const doc = await fileToCvFile(file);
-  const stored: StoredCv = { name: doc.name, type: doc.type, dataBase64: arrayBufferToBase64(doc.data) };
-  await chrome.storage.local.set({ [DOC_KEYS[kind]]: stored });
+  await writeDoc(kind, { name: doc.name, type: doc.type, dataBase64: arrayBufferToBase64(doc.data) });
   return doc;
 }
 
 export async function getDoc(kind: DocKind): Promise<CvFile | null> {
   const key = DOC_KEYS[kind];
   const raw = await chrome.storage.local.get(key);
-  const stored = raw[key] as StoredCv | undefined;
+  const stored = raw[key] as StoredDoc | undefined;
   if (!stored) return null;
   return { name: stored.name, type: stored.type, data: base64ToArrayBuffer(stored.dataBase64) };
 }
 
 export async function clearDoc(kind: DocKind): Promise<void> {
-  await chrome.storage.local.remove(DOC_KEYS[kind]);
+  await writeDoc(kind, undefined);
 }
 
 /* The CV's own names, kept because it is the document most of the code means. */

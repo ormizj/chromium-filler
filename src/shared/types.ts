@@ -3,7 +3,6 @@
  */
 
 import type { ModalLayout } from './modalLayout';
-import type { ExportSelection } from './jobExport';
 
 /** Every user-profile field the filler knows how to place. `resume` is the CV file. */
 export type FieldKey =
@@ -45,6 +44,16 @@ export interface Profile {
  * a file or as prose, and the user may supply either or both.
  */
 export type DocKind = 'resume' | 'coverLetter';
+
+/**
+ * A document as `chrome.storage.local` holds it, base64 and all — which is also
+ * exactly how sync carries it (`syncUnits.ts`).
+ */
+export interface StoredDoc {
+  name: string;
+  type: string;
+  dataBase64: string;
+}
 
 /** A stored document, kept in chrome.storage.local (base64-encoded bytes) plus its metadata. */
 export interface CvFile {
@@ -187,17 +196,14 @@ export interface FieldMatch {
 }
 
 /**
- * `markedDone` is set only by a user action: Options → Queue's "Mark opened as
- * done", or closing a tab the queue opened (`settings.markDoneOnClose`). The user
- * submits on the site by hand, so the extension cannot know an application went
- * in — this says "I am finished with this one", which is all it can honestly
- * record. Never from a timer or a heuristic.
- *
- * `redirected` and `applied` are no longer assigned by anything automatic — there
- * is no redirect following and no confirmation watch — but both stay: they are in
- * stored and synced histories, and `applied` is still set by hand in Options.
+ * A posting is waiting (`new`) or finished (`done`). Nothing else: the extension
+ * never submits, so it cannot tell "applied" from "skipped" from "looked and
+ * moved on" — `done` is the user's own word, set by closing a queue tab,
+ * by Skip, or by hand in Options. Never by a timer
+ * or a heuristic. Earlier builds' six statuses are mapped on read
+ * (`LEGACY_STATUS` in `jobUrls.ts`).
  */
-export type JobUrlStatus = 'new' | 'opened' | 'redirected' | 'applied' | 'skipped' | 'markedDone';
+export type JobUrlStatus = 'new' | 'done';
 
 /**
  * A status as it appears in the log — deliberately *open*, and the openness is
@@ -238,16 +244,8 @@ export interface JobUrlEntry {
    * carries it, and a build that does understand it will derive the same value.
    */
   status: JobLogStatus;
-  /** For a destination entry: the board posting that redirected here. */
-  sourceUrl?: string;
-  /** For a source posting: the external application URL it redirected to. */
-  redirectUrl?: string;
   addedAt: number;
   updatedAt: number;
-  /** First time the tab was opened. */
-  openedAt?: number;
-  /** First time a submission was detected for this URL. */
-  appliedAt?: number;
   /** Full status-transition log (most recent last). */
   history: JobStatusEvent[];
 }
@@ -255,16 +253,11 @@ export interface JobUrlEntry {
 export interface JobUrlStats {
   total: number;
   new: number;
-  opened: number;
-  redirected: number;
-  applied: number;
-  skipped: number;
-  markedDone: number;
+  done: number;
 }
 
 /** Re-exported so `types.ts` stays the one import for the data model. */
 export type { ModalLayout } from './modalLayout';
-export type { ExportSelection } from './jobExport';
 
 export interface Settings {
   /**
@@ -276,30 +269,12 @@ export interface Settings {
    */
   fillAutomatically: boolean;
   /**
-   * Open the review card expanded on a tab the queue opened. Everywhere else the
-   * card starts folded to its pill: a card over a shop's checkout, because its
-   * address form was filled, is the extension talking over a page nobody asked it
-   * about. On a queue tab the posting *is* what you asked about.
+   * Open the review card expanded, once, on a page where something was filled.
+   * Off by default: the card then waits folded to its pill, because a card over a
+   * shop's checkout, opened because its address form was filled, is the extension
+   * talking over a page nobody asked it about.
    */
-  openCardOnQueueTabs: boolean;
-  /**
-   * Closing a tab the queue opened finishes that posting (`markedDone`) and frees
-   * its slot for the next one. The user submits on the site by hand now, so closing
-   * the tab is the one gesture that says "done with this one" — without this, every
-   * posting the queue opened would sit at `opened` for ever.
-   *
-   * Only ever moves a posting *up* from `opened`: one already skipped or applied is
-   * left as it is. Off, closing a tab frees the slot and records nothing.
-   */
-  markDoneOnClose: boolean;
-  /**
-   * Close the tab when the review card's Skip is pressed. Turning it off never
-   * stalls a queue session — `skipUrl` frees the slot itself rather than waiting
-   * for the tab to go.
-   */
-  closeTabOnSkip: boolean;
-  /** Milliseconds to wait before closing the tab after a skip. */
-  closeTabDelayMs: number;
+  openCardWhenFilled: boolean;
   /**
    * Only ever open a queued link as a web page — never let one hand off to a phone
    * app. An `intent://` entry is opened at the `browser_fallback_url` it carries;
@@ -326,13 +301,6 @@ export interface Settings {
    */
   modalLayout: ModalLayout;
   /**
-   * Open the card filling the whole viewport instead of at `modalLayout`.
-   * Toggled from the card's own header button — the one setting the content script
-   * writes. It *overrides* `modalLayout` rather than replacing it, so turning it off
-   * returns the card to the rectangle the simulator configured.
-   */
-  modalFullscreen: boolean;
-  /**
    * Share the job database with another browser profile through a Google Drive
    * folder only this extension can see.
    *
@@ -344,16 +312,6 @@ export interface Settings {
    * the user enters an OAuth client in Options → Sync and presses Connect.
    */
   syncEnabled: boolean;
-  /**
-   * What the Queue tab's Archive button writes out: which columns, which
-   * posting statuses, and JSON or CSV. Device state.
-   *
-   * Stored as *sparse overrides* (`shared/jobExport.ts`), not as the resolved
-   * lists: a key this build has never heard of is ignored, and a column added by
-   * a later build takes its own default instead of being silently missing from
-   * every selection saved before it existed.
-   */
-  exportOptions: ExportSelection;
 }
 
 /** Everything persisted in chrome.storage.local (the CV bytes are stored separately, also in chrome.storage.local). */

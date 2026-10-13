@@ -30,7 +30,7 @@
 
 import type { ModalLayout } from '../shared/types';
 import {
-  clampLayout, fullscreenLayout, layoutLimits, nudgeLayout, snapLayout, NARROW_WIDTH,
+  clampLayout, layoutLimits, nudgeLayout, snapLayout, NARROW_WIDTH,
   type DragMode,
 } from '../shared/modalLayout';
 import { BASE_CSS } from '../ui/shadowCss';
@@ -42,18 +42,13 @@ export type SheetKind = 'review' | 'setup';
 /**
  * The geometry every sheet's render data carries.
  *
- * Both fields are *data* rather than instance state, unlike the peek and collapse
- * flags: those are this reader's state on this page, while these two arrive from
- * the controller, which rebuilds the render data from settings on every re-render.
- * Anything that has to outlive one re-render has to come from there — and holding
- * them here rather than beside them is what keeps `setFullscreen` from writing a
- * value the very next repaint reads back stale.
+ * It is *data* rather than instance state, unlike the peek and collapse flags:
+ * those are this reader's state on this page, while the layout arrives from the
+ * controller, which rebuilds the render data from settings on every re-render.
  */
 export interface SheetData {
   /** Desktop size/position. Ignored on narrow screens (bottom sheet). */
   layout?: ModalLayout;
-  /** Fill the whole viewport, overriding `layout` without discarding it. */
-  fullscreen?: boolean;
 }
 
 export interface SheetCallbacks {
@@ -66,12 +61,6 @@ export interface SheetCallbacks {
    * pointermove is what this split exists to avoid.
    */
   onLayoutPreview?(layout: ModalLayout): void;
-  /**
-   * The fullscreen toggle was pressed. Unlike a drag, this one *is* a preference:
-   * the controller persists it and hands it back on the next render, which is what
-   * keeps it on for the postings after this one.
-   */
-  onFullscreen?(on: boolean): void;
   /**
    * This sheet folded or unfolded. The controller's cue to re-arbitrate the slot:
    * an unfolding sheet takes it, and everything else drops to the rail. Fired for
@@ -90,12 +79,11 @@ const TAP_SLOP = 24;
  * The controls that live inside a drag handle, and so must never start a drag.
  *
  * The header *is* the handle, and everything a header carries is a button: close,
- * fullscreen, the review modal's view toggle, the setup panel's way back out of the
- * wizard. One list rather than one `stopPropagation` per control, because the cost
+ * the setup panel's way back out of the wizard. One list rather than one `stopPropagation` per control, because the cost
  * of forgetting is silent — the press does nothing on a mouse and, with the handle's
  * `touch-action: none`, may never resolve as a click at all on a phone.
  */
-const NOT_A_DRAG = '.cf-close, .cf-back, .cf-views, .cf-fullscreen, .cf-grab';
+const NOT_A_DRAG = '.cf-close, .cf-back, .cf-grab';
 
 /** What a rebuild would otherwise throw away. See `Sheet.userPlace`. */
 interface UserPlace {
@@ -188,9 +176,6 @@ export abstract class Sheet<D extends SheetData> {
     const card = this.buildCard();
     card.dataset.sheet = this.kind;
     if (this.peek) card.classList.add('peek');
-    // Desktop fullscreen is pure inline geometry (`applyLayout`); the class is
-    // what the narrow bottom sheet is styled off, where inline styles are barred.
-    if (this.data?.fullscreen) card.classList.add('cf-full');
     this.addResizeGrips(card);
     this.shadow.append(card);
     this.applyLayout();
@@ -345,11 +330,10 @@ export abstract class Sheet<D extends SheetData> {
   ];
 
   /**
-   * Size and place the card from the user's stored layout — or, when fullscreen is
-   * on, from the viewport — but only on desktop. Under 640px the card is a
-   * full-width bottom sheet, and an inline width would beat the media query that
-   * makes it one, so the properties are cleared there rather than merely left unset
-   * (fullscreen is a class there instead — see `.cf-card.cf-full`).
+   * Size and place the card from the user's stored layout, but only on desktop.
+   * Under 640px the card is a full-width bottom sheet, and an inline width would
+   * beat the media query that makes it one, so the properties are cleared there
+   * rather than merely left unset.
    *
    * The card is a FIXED size — the exact rectangle chosen in the Options simulator,
    * which is itself a fixed card drawn to scale. So `this.data.layout` is the intended
@@ -385,16 +369,9 @@ export abstract class Sheet<D extends SheetData> {
       return;
     }
 
-    // Fullscreen overrides the stored rectangle without touching it, and is
-    // recomputed from the live viewport every call — so the card tracks a window
-    // being resized, and the configured layout is still there to go back to.
-    const intent = this.data.fullscreen
-      ? fullscreenLayout(window.innerWidth, window.innerHeight)
-      : this.data.layout;
-
     // The clamp is the only thing keeping the card on screen — the CSS caps that
     // used to do it are being turned off below.
-    const l = clampLayout(intent, window.innerWidth, window.innerHeight);
+    const l = clampLayout(this.data.layout, window.innerWidth, window.innerHeight);
     setLimitAttrs(card, layoutLimits(l, window.innerWidth, window.innerHeight));
     card.style.width = `${l.width}px`;
     card.style.height = `${l.height}px`;
@@ -417,24 +394,6 @@ export abstract class Sheet<D extends SheetData> {
     this.applyLayout();
   }
 
-  /**
-   * Fill the viewport, or go back to the configured card.
-   *
-   * Writes the flag onto `this.data` *and* reports it, because the two have
-   * different jobs: the local write is what this paint sees, and the callback is
-   * what makes it true of the next posting. `this.data.layout` is deliberately
-   * left alone — it is what "exit" has to give back.
-   */
-  setFullscreen(on: boolean): void {
-    if (!this.data || !!this.data.fullscreen === on) return;
-    this.data.fullscreen = on;
-    // A 40vh peek and a full-height sheet are contradictory answers to "how much
-    // room does this sheet get"; the newer one wins.
-    if (on) this.peek = false;
-    this.repaint();
-    this.geom.onFullscreen?.(on);
-  }
-
   /* ---------------- Gestures ---------------- */
 
   /**
@@ -454,10 +413,6 @@ export abstract class Sheet<D extends SheetData> {
       // `touch-action: none` on the handle, on a phone that press may never
       // resolve as a click at all.
       if ((e.target as HTMLElement).closest(NOT_A_DRAG)) return;
-      // Nothing to drag while fullscreen: moving the card would take it out from
-      // under the flag, leaving it looking restored while the setting still said
-      // fullscreen — and on narrow it would strand a 40vh peek claiming to be one.
-      if (this.data?.fullscreen) return;
       narrow = window.innerWidth <= NARROW;
       startX = e.clientX;
       startY = e.clientY;
@@ -536,7 +491,7 @@ export abstract class Sheet<D extends SheetData> {
     const onDown = (e: PointerEvent) => {
       // A card with no stored rectangle is sized by CSS; there is nothing to
       // resize *from*, and the narrow sheet is the viewport's business.
-      if (window.innerWidth <= NARROW || !this.data?.layout || this.data.fullscreen) return;
+      if (window.innerWidth <= NARROW || !this.data?.layout) return;
       e.preventDefault();
       e.stopPropagation(); // the header's move-drag must not also claim this
       startX = e.clientX;

@@ -22,7 +22,7 @@ function setViewport(w: number, h: number): void {
 function modalCallbacks(over: Partial<ModalCallbacks> = {}): ModalCallbacks {
   return {
     onRerun: noop, onConfirm: noop, onTeach: noop, onPoint: noop,
-    onSkip: noop, onClose: noop, onOpenOptions: noop,
+    onSkip: noop, onClose: noop,
     ...over,
   };
 }
@@ -30,7 +30,6 @@ function modalCallbacks(over: Partial<ModalCallbacks> = {}): ModalCallbacks {
 function modalData(over: Partial<ModalData> = {}): ModalData {
   return {
     siteName: 'Acme',
-    jobTitle: 'Engineer',
     matches: [],
     choices: [],
     layout: DEFAULT_MODAL_LAYOUT,
@@ -54,7 +53,6 @@ interface Sheetish {
   minimize(): void;
   restore(): void;
   setSlot(slot: number | null): void;
-  setFullscreen(on: boolean): void;
   isMinimized: boolean;
   destroy(): void;
 }
@@ -79,7 +77,6 @@ const SURFACES: Surface[] = [
         minimize: () => modal.minimize(),
         restore: () => modal.restore(),
         setSlot: (s) => modal.setSlot(s),
-        setFullscreen: (on) => modal.setFullscreen(on),
         get isMinimized() { return modal.isMinimized; },
         destroy: () => modal.destroy(),
       };
@@ -159,19 +156,6 @@ describe.each(SURFACES)('$name — geometry', (surface) => {
       expect(card.style.getPropertyValue(prop), `${prop} must be left to the stylesheet`).toBe('');
     }
     expect(card.hasAttribute('data-limit-right')).toBe(false);
-  });
-
-  it('fills the viewport in fullscreen, and gives the configured card back on exit', () => {
-    setViewport(1440, 900);
-    const sheet = surface.open({ right: 24, bottom: 32, width: 500, height: 640 });
-    sheet.setFullscreen(true);
-    expect(sheet.card()!.style.width).toBe('1440px');
-    expect(sheet.card()!.style.height).toBe('900px');
-    expect(sheet.card()!.classList.contains('cf-full')).toBe(true);
-
-    sheet.setFullscreen(false);
-    expect(sheet.card()!.style.width).toBe('500px');
-    expect(sheet.card()!.style.right).toBe('24px');
   });
 
   it('carries resize handles on the far edges, and none on a bottom sheet', () => {

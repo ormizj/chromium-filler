@@ -49,7 +49,7 @@ function seedIfEmpty(): void {
   const all = readAll();
   // Versioned: bump it whenever the seed's shape changes, or a browser that ran the
   // harness before keeps the old store and shows none of the new data.
-  const mode = FRESH ? 'fresh' : 'full-v2';
+  const mode = FRESH ? 'fresh' : 'full-v4';
   // Keyed on the mode, not on a bare flag: the two share one localStorage, so
   // `?state=fresh` would otherwise inherit whatever the last page seeded — and
   // the page after it would inherit the empty store.
@@ -99,10 +99,7 @@ function seedJobUrls(): JobUrlEntry[] {
   const now = Date.now();
   return Array.from({ length: 14 }, (_, i) => {
     const entry = makeEntry(`https://${hosts[i % hosts.length]}/postings/${1000 + i}`, now - i * 3600_000);
-    if (i < 2) entry.status = 'applied';
-    else if (i === 2) entry.status = 'skipped';
-    else if (i === 3) entry.status = 'markedDone';
-    else if (i < 6) entry.status = 'opened';
+    if (i < 4) return applyStatus([entry], entry.url, 'done', now - i * 3600_000 + 600_000)[0];
     return entry;
   });
 }
@@ -189,7 +186,6 @@ function topUp(): void {
   const urls = nextBatch(readJobUrls(), openUrls, sessionBatch);
   if (urls.length === 0) return;
   openUrls = [...openUrls, ...urls];
-  writeJobUrls(urls.reduce((acc, url) => applyStatus(acc, url, 'opened'), readJobUrls()));
   // eslint-disable-next-line no-console
   console.log('[mock chrome] session opened', urls);
 }
@@ -232,7 +228,7 @@ function backgroundReply(
     case MSG.SESSION_SKIP:
       if (msg.url) {
         openUrls = openUrls.filter((u) => u !== msg.url);
-        writeJobUrls(applyStatus(readJobUrls(), msg.url, 'skipped'));
+        writeJobUrls(applyStatus(readJobUrls(), msg.url, 'done'));
       }
       topUp();
       return sessionSnapshot();

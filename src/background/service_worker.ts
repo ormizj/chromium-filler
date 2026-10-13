@@ -8,6 +8,7 @@
 
 import { MSG, type Message } from '../shared/messages';
 import { DEFAULT_STATE } from '../shared/defaults';
+import { dropRetiredKeys } from '../shared/storage';
 import {
   adoptChildTab, onTabClosed, openUrls, queueTab, sessionState, skipUrl, startSession, stopSession,
 } from './session';
@@ -21,6 +22,9 @@ chrome.runtime.onInstalled.addListener(async (details) => {
   if (details.reason === 'install') {
     const existing = await chrome.storage.local.get(['profile', 'settings']);
     if (!existing.profile && !existing.settings) await chrome.storage.local.set({ ...DEFAULT_STATE });
+  }
+  if (details.reason === 'update') {
+    await dropRetiredKeys().catch((e) => console.warn(LOG, 'cleanup failed', e));
   }
 });
 
@@ -106,8 +110,7 @@ chrome.runtime.onMessage.addListener((msg: Message, sender, sendResponse) => {
 });
 
 /**
- * A closed job tab frees its slot — and, under `markDoneOnClose`, finishes its
- * posting. The user submits on the site by hand, so closing the tab is the one
+ * A closed job tab frees its slot and finishes its posting. The user submits on the site by hand, so closing the tab is the one
  * thing the extension ever hears that means "done with this one".
  */
 chrome.tabs.onRemoved.addListener((tabId) => {

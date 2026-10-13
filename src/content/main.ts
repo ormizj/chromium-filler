@@ -12,10 +12,8 @@
  */
 
 import type { FieldId, Lesson, ModalLayout, Profile, Settings } from '../shared/types';
-import { statusForUrl } from '../shared/jobUrls';
 import { DEFAULT_PROFILE, DEFAULT_SETTINGS } from '../shared/defaults';
-import { getState, mutateJobDetails, mutateLessons, mutateProfile, patchSettings } from '../shared/storage';
-import { captureDetails, type JobDetails } from '../shared/jobDetails';
+import { getState, mutateLessons, mutateProfile } from '../shared/storage';
 import { BUILD_ID } from '../shared/buildId';
 import { getDoc, cvFileToFile } from '../shared/cvStore';
 import { fieldChoices, newCustomField } from '../shared/profileFields';
@@ -23,7 +21,6 @@ import { newLessonId, recordHits, teach } from '../shared/lessons';
 import { uniqueSignature } from '../shared/inputSignature';
 import { hostOf } from '../shared/url';
 import { MSG, type Message, type QueueTabState, type StatusResponse } from '../shared/messages';
-import { extractJob, type ExtractedJob } from './extract';
 import { FillEngine } from './fillEngine';
 import { startPicker } from './picker';
 import { FillerModal, type TeachChoice } from './modal/modal';
@@ -49,11 +46,9 @@ class Controller {
   private modal?: FillerModal;
   private chip?: QueueChip;
   private queue: QueueTabState = { inQueue: false };
-  /** The job database has this URL down as applied. Re-read on every storage change. */
-  private alreadyApplied = false;
-  private appliedAt?: number;
-  /** The URL is in the job database at all — its posting text is worth keeping. */
-  private tracked = false;
+  /** The job database has this URL down as done. Re-read on every storage change. */
+  private alreadyDone = false;
+  private doneAt?: number;
   /** Rows Confirm has been pressed on — an acknowledgement, never a status. */
   private confirmed = new Set<string>();
   private cancelPicker?: () => void;
@@ -61,8 +56,8 @@ class Controller {
   private draggedLayout?: ModalLayout;
   /** The user asked for the card (popup Fill, Teach, the chip) — show it whatever it holds. */
   private wanted = false;
-  private job?: ExtractedJob;
-  private capturedSignature?: string;
+  /** `openCardWhenFilled` has opened the card on this page. Once only: a × after it is the user's word. */
+  private autoOpened = false;
   private pendingHits: string[] = [];
   private hitsTimer?: ReturnType<typeof setTimeout>;
 
@@ -107,11 +102,10 @@ class Controller {
     this.profile = state.profile;
     this.lessons = state.lessons;
     this.settings = state.settings;
-    const status = statusForUrl(state.jobUrls, location.href);
-    this.tracked = status !== undefined;
-    this.alreadyApplied = status === 'applied';
-    this.appliedAt = this.alreadyApplied
-      ? state.jobUrls.find((e) => e.url === location.href)?.appliedAt
+    const entry = state.jobUrls.find((e) => e.url === location.href);
+    this.alreadyDone = entry?.status === 'done';
+    this.doneAt = this.alreadyDone
+      ? entry?.history.filter((e) => e.status === 'done').at(-1)?.at
       : undefined;
   }
 
@@ -192,7 +186,6 @@ class Controller {
     // A fresh look at everything still open, then anything new.
     this.engine.reconsider();
     this.engine.sweep();
-    this.job = undefined;
     this.render();
     this.modal?.restore();
   }
@@ -202,8 +195,9 @@ class Controller {
   /**
    * The engine reported. Whether to show anything is this file's call:
    *
-   *   - something was filled, or the user asked → the card exists (folded, unless…)
-   *   - a queue tab, with `openCardOnQueueTabs` → it opens expanded, once
+   *   - something was filled, or the user asked → the card exists, folded to its pill
+   *   - something was filled, with `openCardWhenFilled` → it opens expanded, once
+   *   - a queue tab → the pill, as soon as there is a row
    *   - otherwise → nothing at all. A page with a search box and a newsletter field
    *     the extension did not recognise is not a page to put a pill on.
    */
@@ -214,7 +208,7 @@ class Controller {
   private shouldShow(): boolean {
     if (this.wanted || this.modal) return true;
     const rows = this.engine.rows;
-    if (this.queue.inQueue) return rows.length > 0 || this.settings.openCardOnQueueTabs;
+    if (this.queue.inQueue) return rows.length > 0;
     return rows.some((r) => r.filled);
   }
 
@@ -228,45 +222,33 @@ class Controller {
         onTeach: (id, choice) => void this.teach(id, choice),
         onPoint: () => this.point(),
         onSkip: () => this.skipPosting(),
-        onOpenOptions: () => chrome.runtime.sendMessage({ type: MSG.OPEN_OPTIONS }),
         onClose: () => this.modal?.minimize(),
         onFold: () => this.chip?.setCardOpen(!this.modal?.isMinimized),
         onLayoutChange: (layout) => { this.draggedLayout = layout; },
-        onFullscreen: (on) => {
-          this.settings.modalFullscreen = on;
-          void patchSettings({ modalFullscreen: on });
-        },
       });
-      // A queue tab opens on the posting; anywhere else the card is about the form.
-      this.modal.setView(this.queue.inQueue ? 'job' : 'fields');
-      const expand = this.wanted || (this.queue.inQueue && this.settings.openCardOnQueueTabs);
-      if (!expand) this.modal.minimize();
+      if (!this.wanted) this.modal.minimize();
     }
 
-    if (!this.job) {
-      this.job = extractJob();
-      this.captureJob(this.job);
-    }
-    const job = this.job;
     this.modal.render({
       siteName: hostOf(location.href),
-      jobTitle: job.title,
-      jobDescription: job.description,
-      jobRequirements: job.requirements,
-      meta: job.meta,
       matches: this.engine.rows,
       confirmed: [...this.confirmed],
-      alreadyApplied: this.alreadyApplied,
-      appliedAt: this.appliedAt,
+      alreadyDone: this.alreadyDone,
+      doneAt: this.doneAt,
       profileEmpty: this.profileEmpty(),
       choices: fieldChoices(this.profile),
       queue: this.queue.inQueue && this.queue.progress
         ? { active: true, batchSize: 0, progress: this.queue.progress }
         : undefined,
       layout: this.draggedLayout ?? this.settings.modalLayout,
-      fullscreen: this.settings.modalFullscreen,
     });
+    // Decided on every report, not when the card is made: the first sweep of a
+    // page often fills nothing, and the form behind "Apply now" arrives later.
     if (first) this.chip?.setCardOpen(!this.modal.isMinimized);
+    if (this.settings.openCardWhenFilled && !this.autoOpened && this.engine.rows.some((r) => r.filled)) {
+      this.autoOpened = true;
+      this.modal.restore();
+    }
   }
 
   private profileEmpty(): boolean {
@@ -281,13 +263,7 @@ class Controller {
     if (!state?.inQueue || this.queue.inQueue) return;
     this.queue = state;
     this.showChip();
-    // A queue tab opens on the card, as it would have done had the first answer been yes.
-    if (this.settings.openCardOnQueueTabs) {
-      this.wanted = true;
-      this.render();
-      this.modal?.setView('job');
-      this.modal?.restore();
-    }
+    this.render();
   }
 
   private showChip(): void {
@@ -297,30 +273,6 @@ class Controller {
       this.modal?.restore();
     });
     this.chip.render(this.queue.progress);
-  }
-
-  /**
-   * Keep what this page said, so the posting can be judged after the tab is gone —
-   * but only for a page the job database knows: the queue opened it, or it was
-   * imported. The engine runs on every site, and a shop's product page is not a
-   * job posting to archive.
-   */
-  private captureJob(job: ExtractedJob): void {
-    if (!this.tracked && !this.queue.inQueue) return;
-    const details: JobDetails = {
-      url: this.queue.url ?? location.href,
-      title: job.title,
-      site: hostOf(location.href),
-      description: job.description,
-      requirements: job.requirements,
-      meta: job.meta,
-      capturedAt: Date.now(),
-    };
-    const signature = JSON.stringify([details.url, details.title, details.description, details.requirements, details.meta]);
-    if (signature === this.capturedSignature) return;
-    this.capturedSignature = signature;
-    void mutateJobDetails((map) => captureDetails(map, details))
-      .catch((e) => console.warn(LOG, 'capture failed', e));
   }
 
   /* ---------------- The card's actions ---------------- */
@@ -388,12 +340,11 @@ class Controller {
   }
 
   /**
-   * Mark this posting skipped; the background closes the tab and opens the next.
-   * Refuses on a posting already applied to: `recordStatus` is a blunt overwrite,
-   * so a skip here would file "skipped" over "applied" — and sync would carry it.
+   * Mark this posting done; the background closes the tab and opens the next.
+   * Refuses on a posting already done — there is nothing left for it to finish.
    */
   private skipPosting(): void {
-    if (this.alreadyApplied) return;
+    if (this.alreadyDone) return;
     chrome.runtime.sendMessage({ type: MSG.SESSION_SKIP, url: this.queue.url ?? location.href })
       .catch((e) => console.warn(LOG, 'skip failed', e));
   }
@@ -436,7 +387,7 @@ class Controller {
     this.engine.reset();
     this.confirmed.clear();
     this.wanted = false;
-    this.job = undefined;
+    this.autoOpened = false;
     this.modal?.destroy();
     this.modal = undefined;
     this.chip?.setCardOpen(false);

@@ -1,7 +1,7 @@
 /**
  * One sync: fetch, merge, write both ends.
  *
- * The interesting decisions are all next door — `syncJobs.mergeJobs` decides
+ * The interesting decisions are all next door — `syncState.mergeSnapshots` decides
  * what the answer is, `drive.ts` stops two devices overwriting each other. What
  * is left here is sequencing, and one rule: **runs never overlap**. Two triggers
  * landing together (the button pressed just as the browser starts) would
@@ -19,8 +19,8 @@ import {
   clientProblem, isSyncConfigured, normalizeClient, readSyncClient, saveSyncClient,
   type SyncClient,
 } from '../shared/syncConfig';
-import { SYNC_SCHEMA, emptySnapshot, mergeJobs, type JobSnapshot } from '../shared/syncJobs';
-import { buildSnapshot, applySnapshot, parseSnapshot } from '../shared/syncSnapshot';
+import { SYNC_SCHEMA, emptySnapshot, mergeSnapshots, type Snapshot } from '../shared/syncState';
+import { buildSnapshot, applySnapshot, parseSnapshot, summarize } from '../shared/syncSnapshot';
 import { connect, connectedAccount, disconnect, isConnected } from './googleAuth';
 import { RemoteConflictError, download, upload, type RemoteFile } from './drive';
 
@@ -102,14 +102,14 @@ export async function disconnectAccount(): Promise<SyncState> {
   return syncState();
 }
 
-function decode(text: string | undefined): JobSnapshot {
+function decode(text: string | undefined): Snapshot {
   // Absent means this account has never synced; unreadable is a different thing
   // and `parseSnapshot` throws rather than quietly starting over, which would
   // replace a database it merely failed to understand.
   //
   // Blank counts as absent. A zero-byte file is what an interrupted create or
   // PATCH leaves behind, and refusing it was a dead end: every later sync failed
-  // with "not a job database backup" and nothing in the UI can reset the remote
+  // with "not a backup from this extension" and nothing in the UI can reset the remote
   // copy. There is no content there to protect, which is the whole difference.
   return text === undefined || text.trim() === '' ? emptySnapshot() : parseSnapshot(text);
 }
@@ -126,7 +126,7 @@ async function runSync(): Promise<SyncState> {
     const remote = await download();
     // What is stored locally is what goes up: `applySnapshot` prunes, and both
     // ends should be holding the same answer when this returns.
-    const merged = await applySnapshot(mergeJobs(await buildSnapshot(), decode(remote.text)));
+    const merged = await applySnapshot(mergeSnapshots(await buildSnapshot(), decode(remote.text)));
     try {
       await upload(JSON.stringify({ ...merged, schema: SYNC_SCHEMA }), remote.file as RemoteFile);
       await writeStatus({ lastSyncAt: Date.now(), lastError: undefined, awaitingConfirm: false });
@@ -142,11 +142,11 @@ async function runSync(): Promise<SyncState> {
 /**
  * Sync now.
  *
- * The first run after connecting stops to report both counts. Connecting the
- * wrong Google account is the plausible mistake — the two profiles are meant to
- * share one account, and picking a different one in the chooser is a single
- * misclick — and it would quietly union a stranger's job list into this one.
- * Recoverable, but only by hand, so it is worth one look.
+ * The first run after connecting stops to report what each side holds. Connecting
+ * the wrong Google account is the plausible mistake — the two profiles are meant
+ * to share one account, and picking a different one in the chooser is a single
+ * misclick — and it would quietly fold a stranger's job list, profile and lessons
+ * into this one. Recoverable, but only by hand, so it is worth one look.
  */
 export async function syncNow(confirmed = false): Promise<SyncState> {
   return serialize(async () => {
@@ -162,10 +162,7 @@ export async function syncNow(confirmed = false): Promise<SyncState> {
         const remote = decode(remoteFile.text);
         return {
           ...(await syncState()),
-          pending: {
-            local: local.jobUrls.length,
-            remote: remote.jobUrls.length,
-          },
+          pending: { local: summarize(local), remote: summarize(remote) },
         };
       }
       return await runSync();

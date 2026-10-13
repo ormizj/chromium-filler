@@ -8,7 +8,7 @@
  *
  * A session is a sliding window instead: at most `batchSize` job tabs exist at
  * any moment, and *finishing one is what opens the next* — skipping it, or simply
- * closing the tab, which (under `markDoneOnClose`) also marks the posting done:
+ * closing the tab, which also marks the posting done:
  * the user submits on the site by hand, so closing the tab is the one "done" the
  * extension ever hears. The queue itself is derived from the job-URL database
  * (see `src/shared/queue.ts`), so nothing here duplicates that state.
@@ -20,8 +20,9 @@
  */
 
 import type { QueueTabState, SessionState } from '../shared/messages';
+import type { JobUrlEntry } from '../shared/types';
 import { getJobUrls, getSettings, mutateJobUrls } from '../shared/storage';
-import { applyStatus, finishOnClose, recordStatus } from '../shared/jobUrls';
+import { finishOnClose, recordStatus } from '../shared/jobUrls';
 import { nextBatch, queueProgress } from '../shared/queue';
 import { navigableUrl } from '../shared/appLink';
 import { DEFAULT_SETTINGS } from '../shared/defaults';
@@ -30,6 +31,11 @@ const LOG = '[chromium-filler:session]';
 
 /** Gap between opens, so a batch doesn't hit the network as one thundering herd. */
 const STAGGER_MS = 250;
+/**
+ * How long a skipped tab stays on screen before it closes: the tab vanishing under
+ * the press reads as a crash rather than as the skip landing.
+ */
+export const SKIP_CLOSE_DELAY_MS = 1500;
 
 const SESSION_KEY = 'queueSession';
 const TABS_KEY = 'queueTabs';
@@ -45,6 +51,13 @@ interface SessionRecord {
   active: boolean;
   batchSize: number;
   startedAt: number;
+  /**
+   * Every posting this session has opened. A posting is `new` until the user
+   * finishes it, so status alone cannot say "already had its turn" — and without
+   * this, one whose finish lost a race would reopen at the next top-up.
+   * Reset when a session starts, so the next one offers the unfinished again.
+   */
+  opened?: string[];
 }
 
 const NO_SESSION: SessionRecord = { active: false, batchSize: DEFAULT_SETTINGS.sessionBatchSize, startedAt: 0 };
@@ -79,17 +92,27 @@ async function setChildren(children: Record<string, string>): Promise<void> {
 }
 
 /**
- * The user closed a queue tab, so they are done with its posting — record that,
- * if `markDoneOnClose` says to. `finishOnClose` only ever moves `opened`, so a
- * posting already skipped (Skip removes the tab from the map first, so this never
- * even runs for it) or set by hand keeps its answer.
+ * The user closed a queue tab, so they are done with its posting — record that.
+ * `finishOnClose` only ever moves `new`, so a
+ * posting already done (Skip removes the tab from the map first, so this never
+ * even runs for it) or set by hand keeps its log as it is.
  */
 async function finishPostings(urls: string[]): Promise<void> {
   if (!urls.length) return;
-  const { markDoneOnClose } = await getSettings();
-  if (!markDoneOnClose) return;
   const now = Date.now();
-  await mutateJobUrls((list) => urls.reduce((acc, url) => finishOnClose(acc, url, now), list));
+  await writeJobs((list) => urls.reduce((acc, url) => finishOnClose(acc, url, now), list));
+}
+
+/**
+ * The session's writes to the job list, one at a time. Two tabs closing together
+ * each read-modify-write the whole list, and the second write would put back the
+ * first posting's `new` — the one fact that says it still needs doing.
+ */
+let writes: Promise<unknown> = Promise.resolve();
+
+function writeJobs(fn: (list: JobUrlEntry[]) => JobUrlEntry[]): Promise<unknown> {
+  writes = writes.then(() => mutateJobUrls(fn), () => mutateJobUrls(fn));
+  return writes;
 }
 
 /**
@@ -154,7 +177,7 @@ async function topUp(): Promise<void> {
   const tabs = await liveTabs();
   const inFlight = Object.values(tabs);
   const list = await getJobUrls();
-  const urls = nextBatch(list, inFlight, record.batchSize);
+  const urls = nextBatch(list, inFlight, record.batchSize, record.opened ?? []);
   if (urls.length === 0) {
     // Nothing left to open and nothing still open: the session is finished.
     if (inFlight.length === 0) {
@@ -165,9 +188,9 @@ async function topUp(): Promise<void> {
   }
 
   const next = { ...tabs };
-  // Only a posting that actually got a tab counts as opened. Marking one that
-  // failed to open leaves the queue with nothing to close and nothing to top up
-  // from — the posting would silently never be applied to.
+  // A posting that failed to open has no tab in the map, so it stays waiting and
+  // the next top-up tries it again. Nothing is written to the database here: a
+  // posting with a tab on it is still `new` until the user finishes it.
   const opened: string[] = [];
   const { keepInBrowser } = await getSettings();
   for (const url of urls) {
@@ -183,7 +206,9 @@ async function topUp(): Promise<void> {
     await delay(STAGGER_MS);
   }
   await setTabs(next);
-  await mutateJobUrls((all) => opened.reduce((acc, url) => applyStatus(acc, url, 'opened'), all));
+  // Re-read: a Stop pressed during the stagger must not be written back over.
+  const latest = await getRecord();
+  await setRecord({ ...latest, opened: [...(latest.opened ?? []), ...opened] });
   console.info(LOG, `opened ${opened.length}, ${Object.keys(next).length} in flight`);
 }
 
@@ -191,7 +216,11 @@ async function topUp(): Promise<void> {
 export async function startSession(batchSize?: number): Promise<SessionState> {
   const settings = await getSettings();
   const size = Math.max(1, batchSize ?? settings.sessionBatchSize);
-  await setRecord({ active: true, batchSize: size, startedAt: Date.now() });
+  const record = await getRecord();
+  // A resize keeps the running session's history; a fresh start forgets it.
+  await setRecord(record.active
+    ? { ...record, batchSize: size }
+    : { active: true, batchSize: size, startedAt: Date.now(), opened: [] });
   await serialize(topUp);
   return sessionState();
 }
@@ -207,17 +236,18 @@ export async function stopSession(): Promise<SessionState> {
 }
 
 /**
- * Mark a posting skipped, optionally close its tab, and pull in the next one.
+ * Mark a posting done, close its tab, and pull in the next one.
  *
  * `recordStatus`, not `applyStatus`: Skip is a button in the review modal, so it
  * is pressed just as often on a posting the user opened by hand as on a queued
  * one, and the latter is not in the database yet.
  *
- * The slot is freed here rather than by waiting for `onRemoved`, which is what
- * lets `closeTabOnSkip` be off without stalling the queue.
+ * The slot is freed here rather than by waiting for `onRemoved`, because the tab
+ * closes only after `SKIP_CLOSE_DELAY_MS` — and a skip from a hand-opened tab
+ * closes nothing the session owns.
  */
 export async function skipUrl(url: string, senderTabId?: number): Promise<SessionState> {
-  await mutateJobUrls((list) => recordStatus(list, url, 'skipped'));
+  await writeJobs((list) => recordStatus(list, url, 'done'));
 
   const tabs = await getTabs();
   // Skipped from the employer's form in a child tab: the slot is its parent's.
@@ -227,13 +257,7 @@ export async function skipUrl(url: string, senderTabId?: number): Promise<Sessio
   if (Number.isFinite(tabId)) {
     delete tabs[String(tabId)];
     await setTabs(tabs);
-    const settings = await getSettings();
-    if (settings.closeTabOnSkip) {
-      // Delayed like the submit path, and for the same reason: the tab vanishing
-      // under the press reads as a crash rather than as the skip landing.
-      const wait = Math.max(0, settings.closeTabDelayMs ?? 1500);
-      setTimeout(() => chrome.tabs.remove(tabId).catch(() => {}), wait);
-    }
+    setTimeout(() => chrome.tabs.remove(tabId).catch(() => {}), SKIP_CLOSE_DELAY_MS);
   }
   // Closing the tab fires onRemoved, which tops up — but only if the tab was
   // ours to begin with, so top up here too. `serialize` keeps that idempotent.
@@ -242,7 +266,7 @@ export async function skipUrl(url: string, senderTabId?: number): Promise<Sessio
 }
 
 /**
- * A tab closed. A queue tab finishes its posting (under `markDoneOnClose`) and
+ * A tab closed. A queue tab finishes its posting and
  * frees its slot for the next; a child tab just stops being one.
  */
 export async function onTabClosed(tabId: number): Promise<void> {
@@ -324,14 +348,11 @@ export async function sessionState(): Promise<SessionState> {
  * open as one burst.
  */
 export async function openUrls(urls: string[]): Promise<void> {
-  const opened: string[] = [];
   const { keepInBrowser } = await getSettings();
   for (const url of urls) {
-    const tab = await openJobTab(url, keepInBrowser);
-    if (tab) opened.push(url); // a posting with no tab is still waiting
+    await openJobTab(url, keepInBrowser);
     await delay(STAGGER_MS);
   }
-  await mutateJobUrls((list) => opened.reduce((acc, url) => applyStatus(acc, url, 'opened'), list));
 }
 
 function delay(ms: number): Promise<void> {

@@ -8,13 +8,12 @@
  */
 import { describe, it, expect } from 'vitest';
 import {
-  ACTION_LABELS, EXPORT_FIELD_LABELS, FLOW_TEXT, JOB_STATUS_LABELS, STATUS_TEXT,
+  ACTION_LABELS, FLOW_TEXT, JOB_STATUS_LABELS, STATUS_TEXT,
   queueChipText, type ActionKey,
 } from './labels';
 import { STATUS_LABELS } from './fieldStatus';
 import { DOT_LEGEND } from './help';
 import { ALL_JOB_STATUSES } from './jobUrls';
-import { EXPORT_FIELD_ORDER } from './jobExport';
 import type { MatchConfidence } from './types';
 
 const STATUSES: MatchConfidence[] = ['high', 'low', 'none'];
@@ -58,11 +57,7 @@ describe('labels — the wording catalog', () => {
     expect(new Set(DOT_LEGEND.map((r) => r.status))).toEqual(new Set(STATUSES));
   });
 
-  it('names every column the archive can export', () => {
-    for (const f of EXPORT_FIELD_ORDER) expect(EXPORT_FIELD_LABELS[f].trim(), f).not.toBe('');
-  });
-
-  it('names every status a posting can be exported in', () => {
+  it('names every status a posting can be in', () => {
     for (const s of ALL_JOB_STATUSES) expect(JOB_STATUS_LABELS[s].trim(), s).not.toBe('');
   });
 });

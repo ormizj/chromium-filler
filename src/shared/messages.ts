@@ -4,6 +4,7 @@
  */
 
 import type { QueueProgress } from './queue';
+import type { SnapshotSummary } from './syncSnapshot';
 
 export const MSG = {
   /**
@@ -30,7 +31,7 @@ export const MSG = {
   SESSION_STOP: 'CF_SESSION_STOP',
   /** any surface -> background: report session progress. */
   SESSION_STATE: 'CF_SESSION_STATE',
-  /** popup/modal -> background: mark this posting skipped, close it, open the next. */
+  /** popup/modal -> background: mark this posting done, close it, open the next. */
   SESSION_SKIP: 'CF_SESSION_SKIP',
   /**
    * content/popup -> background: did the queue open *this* tab? Answered from the
@@ -39,7 +40,7 @@ export const MSG = {
   QUEUE_TAB: 'CF_QUEUE_TAB',
   /** popup -> content: re-open the folded review card without sweeping again. */
   SHOW_REPORT: 'CF_SHOW_REPORT',
-  /** options -> background: authorize a Google account to sync the job database with. */
+  /** options -> background: authorize a Google account to sync through. */
   SYNC_CONNECT: 'CF_SYNC_CONNECT',
   /** options -> background: forget the account and its tokens; the data stays. */
   SYNC_DISCONNECT: 'CF_SYNC_DISCONNECT',
@@ -111,10 +112,10 @@ export interface SyncState {
   account?: string;
   lastSyncAt?: number;
   lastError?: string;
-  /** Postings held here and on the far side — the first-merge confirmation. */
+  /** What is held here and on the far side — the first-merge confirmation. */
   pending?: {
-    local: number;
-    remote: number;
+    local: SnapshotSummary;
+    remote: SnapshotSummary;
   };
 }
 

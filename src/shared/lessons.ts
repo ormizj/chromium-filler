@@ -13,6 +13,16 @@ export function sameSignature(a: InputSignature, b: InputSignature): boolean {
   return PARTS.every((k) => a[k] === b[k]);
 }
 
+/**
+ * A signature as one string — equal exactly when `sameSignature` says so. Sync
+ * keys a lesson on it rather than on its id: there is one lesson per signature,
+ * so two devices that each taught the same input converge on one lesson instead
+ * of keeping both.
+ */
+export function signatureKey(sig: InputSignature): string {
+  return JSON.stringify(PARTS.map((k) => sig[k] ?? null));
+}
+
 export interface NewLesson {
   signature: InputSignature;
   target: LessonTarget;

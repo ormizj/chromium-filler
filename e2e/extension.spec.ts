@@ -12,8 +12,6 @@
  */
 import { test, expect, chromium, type BrowserContext, type Page } from '@playwright/test';
 import type { JobUrlEntry } from '../src/shared/types';
-import type { JobDetailsMap } from '../src/shared/jobDetails';
-import type { ExportedJob } from '../src/shared/jobExport';
 import { MSG } from '../src/shared/messages';
 import { ACTION_LABELS } from '../src/shared/labels';
 import { HOSTS, queueSeedUrls, urlFor } from '../test/fixtures/scenarios.mjs';
@@ -70,7 +68,7 @@ test.beforeAll(async () => {
   await opts.goto(`chrome-extension://${extId}/src/options/options.html`);
   await opts.waitForFunction(() => document.body.dataset.ready === '1');
   await opts.evaluate(async ({ profile }) => {
-    await chrome.storage.local.set({ profile, lessons: [], settings: { closeTabDelayMs: 200 } });
+    await chrome.storage.local.set({ profile, lessons: [], settings: {} });
   }, { profile: PROFILE });
   await opts.setInputFiles('#cv-input', {
     name: 'cv.pdf', mimeType: 'application/pdf', buffer: Buffer.from('%PDF-1.4 test cv'),
@@ -92,9 +90,8 @@ test.afterAll(async () => {
  * Run something on an extension page, where the `chrome.*` APIs are available.
  *
  * Waits for the options page to finish booting first. `load` fires while `main`
- * is still awaiting, and the last thing it does is a read-modify-write of the
- * capture map — so a helper that writes storage the instant the page loads is
- * racing that write, and half the time loses to a snapshot taken before it ran.
+ * is still awaiting its reads — so a helper that writes storage the instant the
+ * page loads can be overtaken by a render of the state from before it ran.
  */
 async function onExtensionPage<T>(fn: (page: Page) => Promise<T>): Promise<T> {
   const page = await context.newPage();
@@ -116,40 +113,6 @@ async function readJobUrls(): Promise<JobUrlEntry[]> {
 /** What the database says about one URL, or nothing if it has never heard of it. */
 async function statusOf(url: string): Promise<string | undefined> {
   return (await readJobUrls()).find((e) => e.url === url)?.status;
-}
-
-async function readJobDetails(): Promise<JobDetailsMap> {
-  return onExtensionPage((page) => page.evaluate(
-    async () => ((await chrome.storage.local.get('jobDetails')).jobDetails ?? {}) as JobDetailsMap,
-  ));
-}
-
-/**
- * Press the real Export button on the options page and read back the file it
- * would have downloaded, by intercepting the object URL rather than letting
- * Chromium write to disk.
- */
-async function exportedText(page: Page): Promise<string> {
-  return page.evaluate(async () => {
-    let blob: Blob | null = null;
-    const realCreate = URL.createObjectURL;
-    const realClick = HTMLAnchorElement.prototype.click;
-    URL.createObjectURL = (b: Blob | MediaSource) => { blob = b as Blob; return realCreate.call(URL, b); };
-    HTMLAnchorElement.prototype.click = function () { /* don't actually download */ };
-    try {
-      document.getElementById('export-jobs')!.click();
-      await new Promise((r) => setTimeout(r, 500));
-      return blob ? await (blob as Blob).text() : '';
-    } finally {
-      URL.createObjectURL = realCreate;
-      HTMLAnchorElement.prototype.click = realClick;
-    }
-  });
-}
-
-async function exportedJobs(): Promise<ExportedJob[]> {
-  const json = await onExtensionPage(exportedText);
-  return json ? (JSON.parse(json) as ExportedJob[]) : [];
 }
 
 async function patchSettings(patch: Record<string, unknown>): Promise<void> {
@@ -225,16 +188,6 @@ test('SlowBoards: fills the late-injected form + attaches CV, with no config at 
   await expect(page.locator('#phone')).toHaveValue('+1 555 123 4567');
   expect(await filesIn(page, '#resume-file')).toEqual(['cv.pdf']);
 
-  // The card is folded off the queue; opened, the Job view reads the posting.
-  await openCard(page);
-  await page.locator('.cf-view', { hasText: 'Job' }).click();
-  await expect(page.locator('.cf-title')).toContainText('Staff Platform Engineer');
-  const chips = page.locator('.cf-jobmeta .chip');
-  await expect(chips).toHaveCount(3);
-  await expect(chips.nth(0)).toHaveText('SlowBoards');
-  // The description falls back to the posting, not to the button that expands it.
-  await expect(page.locator('.cf-body')).toContainText(/SlowBoards is hiring/i);
-  await expect(page.locator('.cf-body')).not.toContainText(/Show full description/i);
   await page.close();
 });
 
@@ -510,18 +463,20 @@ test('Session: the queue marks its tabs, and closing one finishes it and opens t
     ));
     await waitFor(() => jobTabs().length === BATCH, `${BATCH} job tabs`);
 
-    // A queue tab carries the chip, and opens on the card.
+    // A queue tab carries the chip, and the card folded to its pill — it opens
+    // by itself only with "Open the review when a page is filled" on.
     const first = jobTabs()[0];
     await first.waitForLoadState();
     await expect(first.locator('#chromium-filler-queue-chip .cf-qchip')).toContainText('Queue', { timeout: 20_000 });
-    await expect(first.locator('.cf-card')).toBeVisible({ timeout: 20_000 });
     await expect(first.locator('#email')).toHaveValue('ada@example.com');
+    await expect(first.locator('.cf-pill')).toBeVisible({ timeout: 20_000 });
+    await expect(first.locator('.cf-card')).toHaveCount(0);
 
     // Closing it finishes the posting and opens the next.
     const closedUrl = first.url();
     await first.close();
     await waitFor(() => jobTabs().length === BATCH && !jobTabs().some((p) => p.url() === closedUrl), 'a replacement posting');
-    await waitForJobUrl(closedUrl, (e) => e.status === 'markedDone');
+    await waitForJobUrl(closedUrl, (e) => e.status === 'done');
   } finally {
     await onExtensionPage((page) => page.evaluate(
       (type) => chrome.runtime.sendMessage({ type }), MSG.SESSION_STOP as string,
@@ -535,87 +490,6 @@ test('Session: the queue marks its tabs, and closing one finishes it and opens t
   await expect(plain.locator('#email')).toHaveValue('ada@example.com', { timeout: 20_000 });
   await expect(plain.locator('#chromium-filler-queue-chip')).toHaveCount(0);
   await plain.close();
-});
-
-test('Options: the archive exports what was ticked, and the ticks survive a reload', async () => {
-  // The whole feature in one pass: the checkboxes drive the file, and the choice
-  // is a *setting* rather than page state — a selection that lasted only as long
-  // as the tab was open would have to be re-made before every export.
-  const saved = await onExtensionPage((p) => p.evaluate(
-    () => chrome.storage.local.get(['jobUrls', 'jobDetails', 'settings']),
-  ));
-  const applied = 'https://board.test/kept';
-  const skipped = 'https://board.test/passed';
-  const page = await context.newPage();
-  try {
-    // Seeded from this page and then reloaded, deliberately: an options page
-    // collects captures whose posting has gone (`pruneDetails`) once per load,
-    // reading the URL list *before* this evaluate could set it. Writing the two
-    // together and reloading is what keeps the seed self-consistent.
-    //
-    // Waiting for `data-ready` is the other half. That prune is a
-    // read-modify-write, and `load` fires while it is still in flight — so a seed
-    // written before it finishes is overwritten by a map read before the seed
-    // existed, and the captures vanish. Nothing a user does looks like this; it
-    // is an artifact of writing storage underneath a page that is still booting.
-    await page.goto(`chrome-extension://${extId}/src/options/options.html`);
-    await page.waitForFunction(() => document.body.dataset.ready === '1');
-    await page.evaluate(async ([a, s]) => {
-      const now = Date.now();
-      const entry = (id: string, url: string, status: string) => ({
-        id, url, status, addedAt: now, updatedAt: now, history: [{ status, at: now }],
-        ...(status === 'applied' ? { appliedAt: now } : {}),
-      });
-      const details = (url: string, title: string) => ({
-        url, title, description: [{ kind: 'para', text: 'Body text' }],
-        requirements: [], meta: { company: 'Acme' }, capturedAt: now,
-      });
-      await chrome.storage.local.set({
-        jobUrls: [entry('k1', a, 'applied'), entry('k2', s, 'skipped')],
-        jobDetails: { [a]: details(a, 'Engineer, Senior'), [s]: details(s, 'Passed over') },
-        settings: {
-          ...(await chrome.storage.local.get('settings')).settings,
-          exportOptions: {},
-        },
-      });
-    }, [applied, skipped]);
-    await page.reload();
-    const openPanel = async () => {
-      if (!await page.locator('#export-options').evaluate((d: HTMLDetailsElement) => d.open)) {
-        await page.locator('#export-options > summary').click();
-      }
-    };
-    await openPanel();
-
-    // Everything off except the two columns wanted, plus the skipped postings
-    // and CSV. Each tick is its own storage write, which is why they are
-    // serialized — twelve of them in a row used to be where a lost update hid.
-    for (const field of [
-      'url', 'site', 'company', 'location', 'employmentType', 'addedAt', 'appliedAt',
-      'capturedAt', 'sourceUrl', 'redirectUrl', 'description', 'requirements',
-    ]) {
-      await page.locator(`#export-field-${field}`).uncheck();
-    }
-    await page.locator('#export-status-skipped').check();
-    await page.locator('#export-format-csv').check();
-
-    await page.reload();
-    await openPanel();
-    await expect(page.locator('#export-field-title')).toBeChecked();
-    await expect(page.locator('#export-field-description')).not.toBeChecked();
-    await expect(page.locator('#export-status-skipped')).toBeChecked();
-    await expect(page.locator('#export-format-csv')).toBeChecked();
-
-    const csv = await exportedText(page);
-    const lines = csv.replace(/^﻿/, '').split('\r\n');
-    // The header is the chosen columns, in the catalog's order — and a title
-    // holding a comma is quoted, or every row after it shifts by a column.
-    expect(lines[0]).toBe('title,status');
-    expect(lines.slice(1).sort()).toEqual(['"Engineer, Senior",applied', 'Passed over,skipped']);
-  } finally {
-    await page.close();
-    await onExtensionPage((p) => p.evaluate((prev) => chrome.storage.local.set(prev), saved));
-  }
 });
 
 /* ---------------- Getting-started checklist ---------------- */
@@ -676,7 +550,7 @@ test('Options: a checklist “Go →” lands on the section it names, not just 
 
 /* ---------------- Settings rows ---------------- */
 
-test('Options: a settings row keeps its disclosure inside the card, on either shape of row', async () => {
+test('Options: a settings row keeps its disclosure inside the card', async () => {
   // `.setrow.stacked` turns the row's flex axis vertical but every length in it
   // was written for a row: with `flex-wrap: wrap` still on, `.setrow-help`'s
   // `flex-basis: 100%` — of the card's *height*, in a column — could not fit
@@ -684,8 +558,7 @@ test('Options: a settings row keeps its disclosure inside the card, on either sh
   // left the card entirely and hung off its right-hand edge over the page.
   //
   // jsdom evaluates neither the cascade nor layout, so nothing but a real browser
-  // can see this. Both shapes of row are checked: the bug only ever hit the
-  // stacked one, and a fix that broke the ordinary one would be no fix.
+  // can see this. Both columns of the settings grid are checked.
   const page = await context.newPage();
   try {
     await page.setViewportSize({ width: 1280, height: 900 });
@@ -693,7 +566,7 @@ test('Options: a settings row keeps its disclosure inside the card, on either sh
     await page.waitForFunction(() => document.body.dataset.ready === '1');
     await page.locator('#tab-settings').click();
 
-    for (const id of ['close-delay', 'fill-auto']) {
+    for (const id of ['open-card-filled', 'keep-in-browser']) {
       const row = page.locator(`#${id}`).locator('xpath=ancestor::*[contains(@class,"setrow")][1]');
       await row.locator('.cf-help-btn').click();
       const panel = row.locator('.cf-help');
@@ -849,96 +722,57 @@ test('Modal: dragging the card on a posting moves it for that page only', async 
   }
 });
 
-test('Modal: the overflow reaches the options page and pointing at a field', async () => {
+test('Modal: the footer is Fill again and Teach, and no overflow menu', async () => {
   const page = await context.newPage();
   try {
     await page.goto(urlFor('quick-plain'));
     await openCard(page);
-    await page.locator('.cf-more button').first().click();
-    await expect(page.locator('.cf-more-menu button')).toHaveText(['Options', 'Point at a field']);
+    await expect(page.locator('.cf-footer-actions > button')).toHaveText(['Fill again', 'Teach']);
+    await expect(page.locator('.cf-more')).toHaveCount(0);
+    await expect(page.locator('.cf-fullscreen')).toHaveCount(0);
+    await expect(page.locator('.cf-view')).toHaveCount(0);
 
-    const opts = context.waitForEvent('page');
-    await page.getByRole('button', { name: 'Options', exact: true }).click();
-    const optsPage = await opts;
-    await optsPage.waitForLoadState();
-    await expect(optsPage.locator('.topbar')).toBeVisible();
-    await optsPage.close();
+    // Fill again is the footer's main action: three quarters of the row, Teach the
+    // last quarter. Layout, so only a browser can measure it.
+    const [fill, teach] = await Promise.all(
+      ['Fill again', 'Teach'].map(async (name) =>
+        (await page.locator('.cf-footer-actions > button', { hasText: name }).boundingBox())!.width),
+    );
+    expect(fill / teach, 'Fill again is three times Teach').toBeCloseTo(3, 0);
   } finally {
     await page.close();
   }
 });
 
-test('Modal: fullscreen fills the window and stays on for the next posting', async () => {
-  // The promise the button makes is "until you cancel it", so the test that
-  // matters is not the first click — it is the *second posting*, which is a fresh
-  // content script in a fresh tab that has to read the choice back out of storage.
-  // And the configured card has to survive being overridden, or there is nothing
-  // to come back to.
-  const chosen = { right: 40, bottom: 40, width: 420, height: 520 };
-  await patchSettings({ modalLayout: chosen, modalFullscreen: false });
-
+/**
+ * "Open the review when a page is filled": off, a filled page gets the pill; on,
+ * the card opens by itself — once, so a × afterwards is respected.
+ */
+test('Modal: the card opens by itself on a filled page only when asked to', async () => {
   const page = await context.newPage();
   try {
-    await page.setViewportSize({ width: 1280, height: 900 });
     await page.goto(urlFor('quick-plain'));
-    const card = page.locator('.cf-card');
-    await openCard(page);
-
-    const box = async () => (await card.boundingBox())!;
-    expect((await box()).width, 'starts at the configured size').toBeCloseTo(420, 0);
-
-    await page.locator('.cf-fullscreen').click();
-    await expect.poll(async () => (await box()).width).toBeCloseTo(1280, 0);
-    const filled = await box();
-    expect(filled.height).toBeCloseTo(900, 0);
-    expect(filled.x).toBeCloseTo(0, 0);
-    expect(filled.y).toBeCloseTo(0, 0);
-
-    const settings = async () => await onExtensionPage((p) => p.evaluate(
-      async () => (await chrome.storage.local.get('settings')).settings,
-    ));
-    expect((await settings()).modalFullscreen, 'the choice is persisted').toBe(true);
-    expect((await settings()).modalLayout, 'fullscreen overrides the layout, it does not overwrite it')
-      .toEqual(chosen);
-
-    // Re-run rebuilds `ModalData` from controller state — the path a per-instance
-    // flag would be thrown away by.
-    await page.getByRole('button', { name: ACTION_LABELS.fillAgain }).click();
-    await expect(card).toBeVisible({ timeout: 20_000 });
-    await expect.poll(async () => (await box()).width).toBeCloseTo(1280, 0);
+    await expect(page.locator('#email')).toHaveValue('ada@example.com', { timeout: 20_000 });
+    await expect(page.locator('.cf-pill')).toBeVisible({ timeout: 20_000 });
+    await expect(page.locator('.cf-card')).toHaveCount(0);
   } finally {
     await page.close();
   }
 
-  // A different posting, in a tab that never saw the click.
-  const next = await context.newPage();
+  await patchSettings({ openCardWhenFilled: true });
+  const opened = await context.newPage();
   try {
-    await next.setViewportSize({ width: 1280, height: 900 });
-    await next.goto(urlFor('quick-uploads'));
-    const card = next.locator('.cf-card');
-    await openCard(next);
-    const box = async () => (await card.boundingBox())!;
-    await expect.poll(async () => (await box()).width, {
-      message: 'the next posting opens fullscreen without being asked',
-    }).toBeCloseTo(1280, 0);
-
-    // And cancelling gives back exactly the card the simulator configured.
-    await next.locator('.cf-fullscreen').click();
-    await expect.poll(async () => (await box()).width).toBeCloseTo(420, 0);
-    const back = await box();
-    expect(back.height).toBeCloseTo(520, 0);
-    expect(back.x, 'right: 40 on a 1280 viewport').toBeCloseTo(1280 - 40 - 420, 0);
-
-    const stored = await onExtensionPage((p) => p.evaluate(
-      async () => (await chrome.storage.local.get('settings')).settings?.modalFullscreen,
-    ));
-    expect(stored, 'cancelling persists too').toBe(false);
+    await opened.goto(urlFor('quick-plain'));
+    await expect(opened.locator('.cf-card')).toBeVisible({ timeout: 20_000 });
+    await expect(opened.locator('.cf-report')).toContainText('Email');
+    await opened.locator('.cf-close').click();
+    await expect(opened.locator('.cf-pill')).toBeVisible();
+    await opened.locator('.cf-footer-actions').waitFor({ state: 'detached' });
   } finally {
-    await next.close();
+    await patchSettings({ openCardWhenFilled: false });
+    await opened.close();
   }
 });
-
-
 
 /**
  * Pointing at a field: a click selects, clicking the same spot again goes one
@@ -949,8 +783,7 @@ test('Modal: pointing at a field selects, steps in, and opens its chooser', asyn
   try {
     await page.goto(urlFor('quick-plain'));
     await openCard(page);
-    await page.locator('.cf-more button').first().click();
-    await page.getByRole('button', { name: 'Point at a field' }).click();
+    await page.locator('.cf-footer-actions').getByRole('button', { name: 'Teach', exact: true }).click();
 
     const bar = page.locator('[data-cf-picker="bar"]');
     const readout = page.locator('[data-cf-picker="readout"]');
@@ -997,28 +830,16 @@ test('Options: the `?` is a circle on a mouse, not a 28×44 pill', async () => {
   }
 });
 
-test('Modal: the two view segments are the same width, at one tap size', async () => {
-  // Content-sized segments measured Job 45px against Fields 74px, so the white
-  // active pill changed size as you switched — and the control resized whenever
-  // the Fields dot appeared or cleared, moving the header under a re-render.
-  // Both are layout facts, so only a real browser can see either.
+test('Modal: the header\'s close button is one tap tall', async () => {
+  // `--tap` on every pointer, like every other button — the header's icon button
+  // kept the pre-reskin 26px on a mouse once. Layout, so only a browser sees it.
   const page = await context.newPage();
   try {
     await page.setViewportSize({ width: 1280, height: 900 });
     await page.goto(urlFor('quick-plain'));
     await openCard(page);
-
-    const views = page.locator('.cf-view');
-    const job = (await views.nth(0).boundingBox())!;
-    const fields = (await views.nth(1).boundingBox())!;
-    expect(fields.width, 'equal segments').toBeCloseTo(job.width, 0);
-
-    // `--tap` on every pointer, like every other button — these two and the
-    // header's icon buttons kept the pre-reskin 32/26px on a mouse.
-    for (const sel of ['.cf-view', '.cf-fullscreen', '.cf-close']) {
-      const box = (await page.locator(sel).first().boundingBox())!;
-      expect(box.height, `${sel} is one tap tall`).toBeGreaterThanOrEqual(44);
-    }
+    const box = (await page.locator('.cf-close').boundingBox())!;
+    expect(box.height, '.cf-close is one tap tall').toBeGreaterThanOrEqual(44);
   } finally {
     await page.close();
   }
@@ -1144,31 +965,122 @@ test('Sync: saving a client enables Connect, and clearing the id takes the secre
   });
 });
 
-test('Sync: a backup file round-trips, and combines rather than replacing', async () => {
-  await seedJobUrls([jobEntry('https://backup.example/1')]);
+test('Sync: a backup file carries everything that syncs, and combines rather than replacing', async () => {
+  const KEYS = [
+    'jobUrls', 'profile', 'lessons', 'settings', 'cv',
+    'profileStamps', 'lessonStamps', 'settingsStamps', 'docStamps',
+  ];
+  const saved = await onExtensionPage((p) => p.evaluate((keys) => chrome.storage.local.get(keys), KEYS));
+  const lesson = {
+    id: 'l-backup', signature: { question: 'notice period', kind: 'text' }, target: { field: 'c_notice' },
+    label: 'Notice period', createdAt: Date.now(), hits: 2,
+  };
+  const field = { id: 'c_notice', label: 'Notice period', kind: 'text', value: '1 month', keywords: [] };
+  const layoutA = { right: 40, bottom: 40, width: 500, height: 600 };
+  const layoutB = { right: 16, bottom: 16, width: 420, height: 520 };
 
-  const text = await onExtensionPage(async (page) => {
-    await page.click('#tab-sync');
-    return downloadedText(page, 'sync-export');
-  });
+  try {
+    await seedJobUrls([jobEntry('https://backup.example/1')]);
+    await onExtensionPage((page) => page.evaluate(async ([f, l, layout]) => {
+      const settings = (await chrome.storage.local.get('settings')).settings ?? {};
+      await chrome.storage.local.set({
+        profile: { values: { email: 'backup@example.com' }, keywords: {}, customFields: [f] },
+        lessons: [l],
+        settings: { ...settings, sessionBatchSize: 6, modalLayout: layout },
+        cv: { name: 'cv.pdf', type: 'application/pdf', dataBase64: 'JVBERi0=' },
+      });
+    }, [field, lesson, layoutA] as const));
 
-  const snapshot = JSON.parse(text);
-  expect(snapshot.jobUrls.map((e: JobUrlEntry) => e.url)).toEqual(['https://backup.example/1']);
+    const text = await onExtensionPage(async (page) => {
+      await page.click('#tab-sync');
+      return downloadedText(page, 'sync-export');
+    });
+    const snapshot = JSON.parse(text);
+    expect(snapshot.jobUrls.map((e: JobUrlEntry) => e.url)).toEqual(['https://backup.example/1']);
 
-  // A different posting is here now. Importing must not put the machine back to
-  // how it was — the file is combined in, exactly as syncing would.
-  await seedJobUrls([jobEntry('https://backup.example/2')]);
+    // A wiped browser with a different posting and its own card layout.
+    await seedJobUrls([jobEntry('https://backup.example/2')]);
+    await onExtensionPage((page) => page.evaluate(async (layout) => {
+      const settings = (await chrome.storage.local.get('settings')).settings ?? {};
+      // Stamps too: a fresh browser has never dated anything.
+      await chrome.storage.local.remove(['profile', 'lessons', 'cv', 'profileStamps', 'lessonStamps', 'docStamps']);
+      await chrome.storage.local.set({ settings: { ...settings, sessionBatchSize: 2, modalLayout: layout } });
+    }, layoutB));
 
+    await onExtensionPage(async (page) => {
+      await page.click('#tab-sync');
+      await page.setInputFiles('#sync-import-input', {
+        name: 'job-filler-backup-test.json', mimeType: 'application/json', buffer: Buffer.from(text),
+      });
+      // The page reloads to show what arrived, carrying its status line across.
+      await expect(page.locator('#sync-file-status')).toContainText('Combined', { timeout: 10_000 });
+    });
+
+    const after = await onExtensionPage((p) => p.evaluate((keys) => chrome.storage.local.get(keys), KEYS));
+    // Combined, not replaced: both postings.
+    expect((after.jobUrls as JobUrlEntry[]).map((e) => e.url).sort())
+      .toEqual(['https://backup.example/1', 'https://backup.example/2']);
+    expect(after.profile.values.email).toBe('backup@example.com');
+    expect(after.profile.customFields).toEqual([field]);
+    expect(after.lessons).toEqual([lesson]);
+    expect(after.cv.name).toBe('cv.pdf');
+    expect(after.settings.sessionBatchSize).toBe(6);
+    // Measured against one screen, so it never travels.
+    expect(after.settings.modalLayout).toEqual(layoutB);
+  } finally {
+    await onExtensionPage((p) => p.evaluate(async ([keys, prev]) => {
+      await chrome.storage.local.remove(keys as string[]);
+      await chrome.storage.local.set(prev as Record<string, unknown>);
+    }, [KEYS, saved] as const));
+  }
+});
+
+test('Sync: the tab lists what syncs and what stays on this browser', async () => {
   await onExtensionPage(async (page) => {
     await page.click('#tab-sync');
-    await page.setInputFiles('#sync-import-input', {
-      name: 'job-database-test.json', mimeType: 'application/json', buffer: Buffer.from(text),
-    });
-    await expect(page.locator('#sync-file-status')).toContainText('Combined');
+    const synced = page.locator('#sync-scope-synced');
+    const local = page.locator('#sync-scope-local');
+    // Folded until asked, and folds again.
+    await expect(synced).toBeHidden();
+    await page.click('#sync-scope-heading');
+    await expect(page.locator('#sync-scope-synced-title')).toHaveText('Synced between your browsers');
+    await expect(page.locator('#sync-scope-local-title')).toHaveText('Stays on this browser');
+    await expect(synced).toBeVisible();
+    await expect(local).toBeVisible();
+    for (const text of ['Your job list', 'Your details', 'Your own fields', 'What it has learned', 'Your CV']) {
+      await expect(synced).toContainText(text);
+    }
+    await expect(synced).toContainText('Fill automatically');
+    await expect(local).toContainText('Where the card sits');
+    await expect(local).toContainText('OAuth client');
+    await expect(synced).not.toContainText('Where the card sits');
+    await page.click('#sync-scope-heading');
+    await expect(synced).toBeHidden();
   });
+});
 
-  expect((await readJobUrls()).map((e) => e.url).sort())
-    .toEqual(['https://backup.example/1', 'https://backup.example/2']);
+test('Sync: turning the switch off hides the Google controls, not the list or the backup', async () => {
+  await onExtensionPage(async (page) => {
+    await page.click('#tab-sync');
+    await expect(page.locator('#sync-now')).toBeVisible();
+    await expect(page.locator('#sync-client-id')).toBeVisible();
+
+    await page.locator('#sync-enabled + .switch-track').click();
+    await expect(page.locator('#sync-enabled')).not.toBeChecked();
+    for (const id of ['#sync-account', '#sync-connect', '#sync-now', '#sync-disconnect', '#sync-client-heading', '#sync-client-id']) {
+      await expect(page.locator(id), id).toBeHidden();
+    }
+    await expect(page.locator('#sync-scope-heading')).toBeVisible();
+    await expect(page.locator('#sync-export')).toBeVisible();
+
+    // A reload reads the stored switch, and back on brings it all back.
+    await page.reload();
+    await page.click('#tab-sync');
+    await expect(page.locator('#sync-now')).toBeHidden();
+    await page.locator('#sync-enabled + .switch-track').click();
+    await expect(page.locator('#sync-now')).toBeVisible();
+    await expect(page.locator('#sync-client-id')).toBeVisible();
+  });
 });
 
 test('Sync: an unreadable backup is refused without touching the database', async () => {
@@ -1179,7 +1091,7 @@ test('Sync: an unreadable backup is refused without touching the database', asyn
     await page.setInputFiles('#sync-import-input', {
       name: 'holiday-photo.json', mimeType: 'application/json', buffer: Buffer.from('not json at all'),
     });
-    await expect(page.locator('#sync-file-status')).toContainText('not a job database backup');
+    await expect(page.locator('#sync-file-status')).toContainText('not a backup from this extension');
   });
 
   // Refusing is the safe failure: merging is all-or-nothing.
@@ -1225,7 +1137,7 @@ test('Options: nothing link-shaped in the box says so, rather than adding nothin
 test('Options: the queue filters and searches, and Remove can be undone', async () => {
   await seedJobUrls([
     jobEntry('https://alpha.example/jobs/1'),
-    jobEntry('https://beta.example/jobs/2', { status: 'applied' }),
+    jobEntry('https://beta.example/jobs/2', { status: 'done' }),
   ]);
 
   await onExtensionPage(async (page) => {
@@ -1234,7 +1146,7 @@ test('Options: the queue filters and searches, and Remove can be undone', async 
 
     // Filter chips carry their own counts, so the filter is legible before it
     // is pressed.
-    await page.click('#url-filters button:has-text("Applied")');
+    await page.click('#url-filters button:has-text("Done")');
     await expect(page.locator('#urls-list li')).toHaveCount(1);
     await expect(page.locator('#urls-list')).toContainText('beta.example');
 
@@ -1253,33 +1165,6 @@ test('Options: the queue filters and searches, and Remove can be undone', async 
   });
 });
 
-test('Options: Mark opened as done confirms, then closes every opened posting and nothing else', async () => {
-  await seedJobUrls([
-    jobEntry('https://stuck.example/jobs/1', { status: 'opened' }),
-    jobEntry('https://stuck.example/jobs/2', { status: 'opened' }),
-    jobEntry('https://stuck.example/jobs/3', { status: 'opened' }),
-    jobEntry('https://sent.example/jobs/4', { status: 'applied' }),
-  ]);
-
-  await onExtensionPage(async (page) => {
-    await page.click('#tab-queue');
-    await page.click('#mark-opened-done');
-    await expect(page.locator('#mark-done-confirm-label')).toContainText('3 opened');
-
-    await page.click('#mark-done-cancel');
-    await expect(page.locator('#urls-list .chip', { hasText: 'Marked done' })).toHaveCount(0);
-
-    await page.click('#mark-opened-done');
-    await page.click('#mark-done-really');
-    await expect(page.locator('#queue-status')).toContainText('Marked 3');
-    await expect(page.locator('#urls-list .chip', { hasText: 'Marked done' })).toHaveCount(3);
-  });
-
-  const raw = await readJobUrls();
-  expect(raw.filter((e) => e.status === 'markedDone')).toHaveLength(3);
-  expect(raw.find((e) => e.url === 'https://sent.example/jobs/4')?.status).toBe('applied');
-});
-
 test('Options: Clear all confirms, then tombstones rather than emptying the list', async () => {
   await seedJobUrls([
     jobEntry('https://gone.example/jobs/1'),
@@ -1289,7 +1174,7 @@ test('Options: Clear all confirms, then tombstones rather than emptying the list
   await onExtensionPage(async (page) => {
     await page.click('#tab-queue');
     await page.click('#clear-urls');
-    // Named count, and a warning that the archive goes too — this one is not undoable.
+    // Named count — this one is not undoable.
     await expect(page.locator('#clear-confirm-label')).toContainText('2');
 
     await page.click('#clear-cancel');

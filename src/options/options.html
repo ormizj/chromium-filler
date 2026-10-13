@@ -79,7 +79,6 @@
 
           <div class="row">
             <button id="open-new">Open all “new” now</button>
-            <span id="mark-done-label" class="with-help"><button id="mark-opened-done">Mark opened as done</button></span>
             <button id="clear-urls" class="btn-danger">Clear all</button>
             <span id="queue-status" class="status" role="status" aria-live="polite"></span>
           </div>
@@ -88,39 +87,7 @@
             <button id="clear-cancel">Cancel</button>
             <button id="clear-really" class="btn-danger">Delete</button>
           </div>
-          <div id="mark-done-confirm" class="confirm calm" hidden>
-            <span class="label" id="mark-done-confirm-label"></span>
-            <button id="mark-done-cancel">Cancel</button>
-            <button id="mark-done-really">Mark done</button>
-          </div>
 
-          <h3 id="archive-heading">Archive</h3>
-          <!-- The three groups inside are rendered by options.ts from
-               EXPORT_FIELD_LABELS / ALL_JOB_STATUSES, never written out here: a
-               column or a status added to the model has to become a checkbox on
-               its own, or a selection saved today quietly outlives the schema. -->
-          <details id="export-options" class="reference">
-            <summary><span id="export-options-label">What to export</span></summary>
-            <div class="reference-body">
-              <fieldset class="checkgroup">
-                <legend>Columns</legend>
-                <div id="export-fields" class="checks"></div>
-              </fieldset>
-              <fieldset class="checkgroup">
-                <legend>Postings</legend>
-                <div id="export-statuses" class="checks"></div>
-              </fieldset>
-              <fieldset class="checkgroup">
-                <legend>Format</legend>
-                <div id="export-format" class="checks"></div>
-              </fieldset>
-            </div>
-          </details>
-          <div class="row">
-            <button id="export-jobs">Export jobs</button>
-            <span id="export-status" class="status" role="status" aria-live="polite"></span>
-          </div>
-          <p id="export-summary" class="hint"></p>
         </section>
 
         <section id="import-section">
@@ -240,19 +207,8 @@
               <label class="switch"><input type="checkbox" id="fill-auto" class="switch-input" /><span class="switch-track" aria-hidden="true"><i></i></span></label>
             </div>
             <div class="setrow">
-              <div class="setrow-text"><h5>Auto-close the tab after I skip</h5></div>
-              <label class="switch"><input type="checkbox" id="close-on-skip" class="switch-input" /><span class="switch-track" aria-hidden="true"><i></i></span></label>
-            </div>
-            <!-- A value on the right of its own row, as the reference's "Batch size"
-                 is — as a bare labelled input it was the one loose control on the
-                 body while everything around it sat on a card. -->
-            <div class="setrow">
-              <label class="setrow-text" for="close-delay">
-                <!-- "Close delay", matching SETTINGS_HELP.closeTabDelayMs's title;
-                     the unit is in the caption `attachRowHelp` renders under it. -->
-                <span class="setrow-title" id="close-delay-label">Close delay</span>
-              </label>
-              <input type="number" id="close-delay" class="setrow-value" min="0" step="250" />
+              <div class="setrow-text"><h5>Open the review when a page is filled</h5></div>
+              <label class="switch"><input type="checkbox" id="open-card-filled" class="switch-input" /><span class="switch-track" aria-hidden="true"><i></i></span></label>
             </div>
           </div>
           <p id="settings-status" class="status" role="status" aria-live="polite"></p>
@@ -260,29 +216,12 @@
           <h3 id="queue-settings-heading">Queue tabs</h3>
           <div class="settings-list">
             <div class="setrow">
-              <div class="setrow-text"><h5>Closing a queue tab finishes it</h5></div>
-              <label class="switch"><input type="checkbox" id="mark-done-on-close" class="switch-input" /><span class="switch-track" aria-hidden="true"><i></i></span></label>
-            </div>
-            <div class="setrow">
-              <div class="setrow-text"><h5>Open the review on queue tabs</h5></div>
-              <label class="switch"><input type="checkbox" id="open-card-queue" class="switch-input" /><span class="switch-track" aria-hidden="true"><i></i></span></label>
-            </div>
-            <div class="setrow">
               <div class="setrow-text"><h5>Keep queued links in the browser</h5></div>
               <label class="switch"><input type="checkbox" id="keep-in-browser" class="switch-input" /><span class="switch-track" aria-hidden="true"><i></i></span></label>
             </div>
           </div>
 
           <h3 id="panels-heading">Review card — size &amp; position</h3>
-          <!-- Above the simulator, because it overrides it: reading the drag
-               instructions first and only then learning the card is fullscreen
-               anyway is the wrong order. Caption comes from SETTINGS_HELP. -->
-          <div class="settings-list">
-            <div class="setrow">
-              <div class="setrow-text"><h5>Fullscreen card</h5></div>
-              <label class="switch"><input type="checkbox" id="modal-fullscreen" class="switch-input" /><span class="switch-track" aria-hidden="true"><i></i></span></label>
-            </div>
-          </div>
           <p class="hint">
             Drag the card to move it; drag its top-left corner to resize, or its left
             or top edge to resize one direction only. Edges snap to the screen edge
@@ -364,72 +303,99 @@
                the caption on screen twice, thirty pixels apart. -->
           <div class="settings-list">
             <div class="setrow">
-              <div class="setrow-text"><h5>Sync the job database</h5></div>
+              <div class="setrow-text"><h5>Sync this browser</h5></div>
               <label class="switch"><input type="checkbox" id="sync-enabled" class="switch-input" /><span class="switch-track" aria-hidden="true"><i></i></span></label>
             </div>
           </div>
-          <!-- Which account this browser is pointed at is the thing that actually
-               goes wrong, so it is shown rather than buried behind Connect. -->
-          <p id="sync-account" class="status" role="status" aria-live="polite"></p>
-          <div class="row" style="margin-top: 8px;">
-            <button id="sync-connect" class="btn">Connect</button>
-            <button id="sync-now" class="btn">Sync now</button>
-            <button id="sync-disconnect" class="btn">Disconnect</button>
+          <!-- Everything that drives the Google sync is shown only while the switch
+               is on (`.sync-when-on`, toggled in options.ts): with it off none of it
+               can run, and a Sync now button that can never be pressed is noise.
+               The status line stays outside, so "Sync off" is still said. -->
+          <div id="sync-controls" class="sync-when-on">
+            <!-- Which account this browser is pointed at is the thing that actually
+                 goes wrong, so it is shown rather than buried behind Connect. -->
+            <p id="sync-account" class="status" role="status" aria-live="polite"></p>
+            <div class="row" style="margin-top: 8px;">
+              <button id="sync-connect" class="btn">Connect</button>
+              <button id="sync-now" class="btn">Sync now</button>
+              <button id="sync-disconnect" class="btn">Disconnect</button>
+            </div>
           </div>
           <p id="sync-status" class="status" role="status" aria-live="polite"></p>
 
-          <!-- Below Connect, not above it: this is a once-per-device errand and
-               the everyday state of this tab is "which account, when did it last
-               run". The account line points down here while it is unset. The
-               steps themselves come from CONCEPT_HELP.syncClient via the `?` —
-               the catalog is the only place the extension explains itself. -->
-          <h3 id="sync-client-heading">Google OAuth client</h3>
-          <p class="hint">
-            Not set up yet? The step-by-step guide walks you through Google Cloud
-            from scratch, with a link to every page you need.
-          </p>
-          <div class="row guide-open-row">
-            <button id="sync-guide-open" class="btn">Open the setup guide ›</button>
-          </div>
-          <div class="settings-list">
-            <div class="setrow stacked">
-              <label class="setrow-text" for="sync-client-id">
-                <span class="setrow-title">Client ID</span>
-              </label>
-              <input type="text" id="sync-client-id" spellcheck="false"
-                     placeholder="…apps.googleusercontent.com" />
+          <!-- Everything sync moves happens in the background, so what it covers is
+               one click away, as its own titled section rather than behind a `?`.
+               It starts folded: the everyday state of this tab is the account line
+               above. Both lists are rendered by options.ts from SYNC_SCOPE_TEXT /
+               LOCAL_SCOPE_TEXT and the synced settings, never written out here —
+               the same model the sync itself runs on, so the list cannot fall
+               behind what actually leaves. -->
+          <details id="sync-scope-section" class="reference">
+            <summary id="sync-scope-heading"><span>What syncs</span></summary>
+            <div class="sync-scope">
+              <section class="sync-scope-col" aria-labelledby="sync-scope-synced-title">
+                <h4 id="sync-scope-synced-title" class="sync-scope-title synced">Synced between your browsers</h4>
+                <ul id="sync-scope-synced" class="scope-list"></ul>
+              </section>
+              <section class="sync-scope-col" aria-labelledby="sync-scope-local-title">
+                <h4 id="sync-scope-local-title" class="sync-scope-title local">Stays on this browser</h4>
+                <ul id="sync-scope-local" class="scope-list"></ul>
+              </section>
             </div>
-            <div class="setrow stacked">
-              <label class="setrow-text" for="sync-client-secret">
-                <span class="setrow-title">Client secret</span>
-              </label>
-              <input type="password" id="sync-client-secret" spellcheck="false"
-                     placeholder="GOCSPX-…" />
+          </details>
+
+          <div id="sync-client-block" class="sync-when-on">
+            <!-- Below Connect, not above it: this is a once-per-device errand and
+                 the everyday state of this tab is "which account, when did it last
+                 run". The account line points down here while it is unset. The
+                 steps themselves come from CONCEPT_HELP.syncClient via the `?` —
+                 the catalog is the only place the extension explains itself. -->
+            <h3 id="sync-client-heading">Google OAuth client</h3>
+            <p class="hint">
+              Not set up yet? The step-by-step guide walks you through Google Cloud
+              from scratch, with a link to every page you need.
+            </p>
+            <div class="row guide-open-row">
+              <button id="sync-guide-open" class="btn">Open the setup guide ›</button>
             </div>
-            <!-- The one value that has to travel the other way: Google will not
-                 accept the sign-in unless this exact string is on the client, and
-                 it is derived from this browser's extension ID, so it cannot be
-                 written down anywhere ahead of time. -->
-            <div class="setrow stacked span">
-              <label class="setrow-text" for="sync-redirect-uri">
-                <span class="setrow-title">Redirect URI — add this to the client in Google Cloud</span>
-              </label>
-              <input type="text" id="sync-redirect-uri" readonly />
+            <div class="settings-list">
+              <div class="setrow stacked">
+                <label class="setrow-text" for="sync-client-id">
+                  <span class="setrow-title">Client ID</span>
+                </label>
+                <input type="text" id="sync-client-id" spellcheck="false"
+                       placeholder="…apps.googleusercontent.com" />
+              </div>
+              <div class="setrow stacked">
+                <label class="setrow-text" for="sync-client-secret">
+                  <span class="setrow-title">Client secret</span>
+                </label>
+                <input type="password" id="sync-client-secret" spellcheck="false"
+                       placeholder="GOCSPX-…" />
+              </div>
+              <!-- The one value that has to travel the other way: Google will not
+                   accept the sign-in unless this exact string is on the client, and
+                   it is derived from this browser's extension ID, so it cannot be
+                   written down anywhere ahead of time. -->
+              <div class="setrow stacked span">
+                <label class="setrow-text" for="sync-redirect-uri">
+                  <span class="setrow-title">Redirect URI — add this to the client in Google Cloud</span>
+                </label>
+                <input type="text" id="sync-redirect-uri" readonly />
+              </div>
             </div>
+            <div class="row">
+              <button id="sync-client-save" class="btn">Save client</button>
+              <button id="sync-redirect-copy" class="btn">Copy redirect URI</button>
+            </div>
+            <p id="sync-client-status" class="status" role="status" aria-live="polite"></p>
           </div>
-          <div class="row">
-            <button id="sync-client-save" class="btn">Save client</button>
-            <button id="sync-redirect-copy" class="btn">Copy redirect URI</button>
-          </div>
-          <p id="sync-client-status" class="status" role="status" aria-live="polite"></p>
 
           <h3>Backup file</h3>
           <p class="hint">
-            The same database as a file you can move yourself — with your site setups
-            in it while “Sync site setups too” is on. Importing combines it with what
-            is here rather than replacing it, exactly as syncing does. This
-            is not the applied-jobs export on the Queue tab, which is written for
-            reading rather than for loading back in.
+            Everything listed under “What syncs”, as one file you can keep or move
+            yourself — no Google account needed. Importing combines it with what is
+            here rather than replacing it, exactly as syncing does.
           </p>
           <div class="row">
             <button id="sync-export" class="btn">Export backup</button>

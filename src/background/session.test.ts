@@ -50,14 +50,13 @@ afterEach(() => {
 });
 
 describe('startSession — the first window', () => {
-  it('opens at most batchSize tabs and marks exactly those opened', async () => {
+  it('opens at most batchSize tabs, and leaves every posting waiting until it is finished', async () => {
     await seed(5);
     await settled(startSession(2));
 
     expect(openTabs.size).toBe(2);
-    expect(await statuses()).toEqual({
-      'https://j.test/1': 'opened', 'https://j.test/2': 'opened', 'https://j.test/3': 'new', 'https://j.test/4': 'new', 'https://j.test/5': 'new',
-    });
+    expect((await sessionTabs()).map(([, url]) => url)).toEqual(['https://j.test/1', 'https://j.test/2']);
+    expect(new Set(Object.values(await statuses()))).toEqual(new Set(['new']));
   });
 
   it('reports the window and the progress it opened', async () => {
@@ -85,9 +84,8 @@ describe('startSession — the first window', () => {
 
   it('leaves a posting queued when its tab could not be opened', async () => {
     // The open is allowed to fail (a malformed URL, a browser refusing the
-    // scheme) and the failure is swallowed. Marking it `opened` anyway drops it
-    // out of the queue for good: nothing is left to close, so nothing ever tops
-    // up, and the posting is silently never applied to.
+    // scheme) and the failure is swallowed. It must not take a slot, or nothing
+    // is left to close, nothing ever tops up, and the posting is never reached.
     await seed(3);
     const create = chrome.tabs.create as unknown as ReturnType<typeof vi.fn>;
     const real = create.getMockImplementation()!;
@@ -126,20 +124,7 @@ describe('finishing a posting opens the next one', () => {
     closeTab(tab);
     await settled(onTabClosed(tab));
 
-    expect((await statuses())['https://j.test/1']).toBe('markedDone');
-  });
-
-  it('with markDoneOnClose off, closing frees the slot and records nothing', async () => {
-    await saveSettings({ ...(await getSettings()), markDoneOnClose: false });
-    await seed(3);
-    await settled(startSession(1));
-    const [[tab]] = await sessionTabs();
-
-    closeTab(tab);
-    await settled(onTabClosed(tab));
-
-    expect((await statuses())['https://j.test/1']).toBe('opened');
-    expect((await sessionTabs()).map(([, url]) => url)).toEqual(['https://j.test/2']);
+    expect((await statuses())['https://j.test/1']).toBe('done');
   });
 
   it('two finishes landing together do not both claim the same slot', async () => {
@@ -182,7 +167,7 @@ describe('finishing a posting opens the next one', () => {
 
     expect((await sessionTabs()).map(([, url]) => url)).toEqual(['https://j.test/3', 'https://j.test/4']);
     // …and finishes its posting, exactly as the event would have.
-    expect((await statuses())['https://j.test/1']).toBe('markedDone');
+    expect((await statuses())['https://j.test/1']).toBe('done');
   });
 
   it('ends the session once the queue drains and the last tab closes', async () => {
@@ -198,14 +183,14 @@ describe('finishing a posting opens the next one', () => {
 });
 
 describe('skipUrl', () => {
-  it('marks the posting skipped, closes its tab, and opens the next', async () => {
+  it('marks the posting done, closes its tab, and opens the next', async () => {
     await seed(3);
     await settled(startSession(1));
     const [[tab, url]] = await sessionTabs();
 
     await settled(skipUrl(url, tab));
 
-    expect((await statuses())[url]).toBe('skipped');
+    expect((await statuses())[url]).toBe('done');
     expect(openTabs.has(tab)).toBe(false);
     expect((await sessionTabs()).map(([, u]) => u)).toEqual(['https://j.test/2']);
   });
@@ -217,7 +202,7 @@ describe('skipUrl', () => {
 
     await settled(skipUrl(url));
 
-    expect((await statuses())[url]).toBe('skipped');
+    expect((await statuses())[url]).toBe('done');
     expect(openTabs.has(tab)).toBe(false);
   });
 });
@@ -280,14 +265,14 @@ describe('urlForTab', () => {
 });
 
 describe('openUrls — the "open these now" path outside a session', () => {
-  it('opens every URL and marks them opened', async () => {
+  it('opens every URL and records nothing — opening is not finishing', async () => {
     await seed(3);
     await settled(openUrls(['https://j.test/1', 'https://j.test/2']));
     expect(openTabs.size).toBe(2);
-    expect(await statuses()).toEqual({ 'https://j.test/1': 'opened', 'https://j.test/2': 'opened', 'https://j.test/3': 'new' });
+    expect(await statuses()).toEqual({ 'https://j.test/1': 'new', 'https://j.test/2': 'new', 'https://j.test/3': 'new' });
   });
 
-  it('leaves a URL untouched when its tab could not be opened', async () => {
+  it('carries on past a URL whose tab could not be opened', async () => {
     await seed(2);
     const create = chrome.tabs.create as unknown as ReturnType<typeof vi.fn>;
     const real = create.getMockImplementation()!;
@@ -298,7 +283,7 @@ describe('openUrls — the "open these now" path outside a session', () => {
 
     await settled(openUrls(['https://j.test/1', 'https://j.test/2']));
 
-    expect(await statuses()).toEqual({ 'https://j.test/1': 'new', 'https://j.test/2': 'opened' });
+    expect([...openTabs.values()].map((t) => t.url)).toEqual(['https://j.test/2']);
   });
 });
 
@@ -306,13 +291,14 @@ describe('queued links that would leave the browser', () => {
   const APP = 'linkedin://jobs/view/7';
 
   it('never opens a tab for an app-handoff URL, and leaves it queued', async () => {
-    // Nothing could be filled or recorded there, and marking it `opened` would
-    // drop it out of the queue for good — the same reasoning as a failed open.
+    // Nothing could be filled there, and giving it a slot would stall the queue
+    // for good — the same reasoning as a failed open.
     await saveJobUrls(addUrls([], [APP, 'https://j.test/2'], 1000).list);
     await settled(startSession(2));
 
     expect([...openTabs.values()].map((t) => t.url)).toEqual(['https://j.test/2']);
-    expect(await statuses()).toEqual({ [APP]: 'new', 'https://j.test/2': 'opened' });
+    expect(await statuses()).toEqual({ [APP]: 'new', 'https://j.test/2': 'new' });
+    expect((await sessionTabs()).map(([, url]) => url)).toEqual(['https://j.test/2']);
   });
 
   it('opens the web address an intent: URL carries, at that address', async () => {
@@ -323,7 +309,7 @@ describe('queued links that would leave the browser', () => {
 
     expect([...openTabs.values()].map((t) => t.url)).toEqual(['https://ats.test/jobs/7']);
     // Recorded against the database's own key, not the address it opened at.
-    expect(await statuses()).toEqual({ [intent]: 'opened' });
+    expect((await sessionTabs()).map(([, url]) => url)).toEqual([intent]);
   });
 
   it('hands the app link over when keepInBrowser is off', async () => {
@@ -373,7 +359,7 @@ describe('queue membership — what a page is told about itself', () => {
 
     await settled(onTabClosed(500));
 
-    expect((await statuses())['https://j.test/1']).toBe('opened');
+    expect((await statuses())['https://j.test/1']).toBe('new');
     expect(openTabs.size).toBe(1);
     expect((await queueTab(500)).inQueue).toBe(false);
   });
@@ -393,7 +379,7 @@ describe('queue membership — what a page is told about itself', () => {
 
     await settled(skipUrl(url, 500));
 
-    expect((await statuses())[url]).toBe('skipped');
+    expect((await statuses())[url]).toBe('done');
     expect((await sessionTabs()).map(([, u]) => u)).toEqual(['https://j.test/2']);
   });
 });

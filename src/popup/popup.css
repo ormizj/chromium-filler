@@ -182,7 +182,7 @@ button.reset-link {
   transition: width 200ms ease;
 }
 
-/* The filled / skipped / waiting chip row. */
+/* The open / waiting chip row. */
 .meta {
   display: flex;
   gap: var(--space-3);

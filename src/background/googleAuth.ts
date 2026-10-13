@@ -1,5 +1,5 @@
 /**
- * Authorizing a Google account to sync the job database through.
+ * Authorizing a Google account to sync through.
  *
  * `chrome.identity.launchWebAuthFlow` rather than `getAuthToken`, and the
  * difference is the whole feature: `getAuthToken` returns a token for whatever
@@ -210,7 +210,7 @@ export async function connect(): Promise<string | undefined> {
   return account;
 }
 
-/** Forget the tokens. The job database itself is untouched. */
+/** Forget the tokens. Everything stored on this browser is untouched. */
 export async function disconnect(): Promise<void> {
   await chrome.storage.local.remove(KEY);
 }

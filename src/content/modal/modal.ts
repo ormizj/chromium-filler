@@ -1,13 +1,10 @@
 /**
- * Shadow-DOM review card. Two views behind one header toggle:
+ * Shadow-DOM review card: the report — one row per question on the page, what it
+ * asked, what went in, and, for anything not recognised, a way to teach it.
  *
- *   Job     the posting — title, description, requirements, as real prose.
- *   Fields  the report: one row per question on the page — what it asked, what
- *           went in, and, for anything not recognised, a way to teach it.
- *
- * The card never sends anything. Its footer used to carry Apply; now the one
- * thing left after the fill is the user's own press of the site's Submit button,
- * so the footer is "Fill again" and the ways out — and, on a queue tab, Skip.
+ * The card never sends anything. The one thing left after the fill is the user's
+ * own press of the site's Submit button, so the footer is "Fill again" and
+ * "Teach" (point at a field the report did not list) — and, on a queue tab, Skip.
  *
  * Closing collapses to a pill instead of destroying the card: the report is the
  * only record of what was filled, and on mobile the card is the primary control.
@@ -16,8 +13,6 @@
 import type { FieldId, FieldMatch, MatchConfidence } from '../../shared/types';
 import type { SessionState } from '../../shared/messages';
 import { progressDots } from '../../shared/queue';
-import type { JobBlock } from '../../shared/jobText';
-import type { JobMeta } from '../../shared/jobMeta';
 import type { FieldChoice } from '../../shared/profileFields';
 import { STATUS_LABELS, matchStatus } from '../../shared/fieldStatus';
 import { ACTION_LABELS, STATUS_TEXT } from '../../shared/labels';
@@ -42,32 +37,22 @@ export interface ModalCallbacks extends SheetCallbacks {
   onConfirm(rowId: string): void;
   /** Teach one row: a field, a new field, or "ignore this question". */
   onTeach(rowId: string, choice: TeachChoice): void;
-  /** Point at a field on the page the report did not list. */
+  /** Teach: point at a field on the page the report did not list. */
   onPoint(): void;
-  /** Mark this posting skipped, and move a session on to the next one. */
+  /** Mark this posting done, and move a session on to the next one. */
   onSkip(): void;
-  onOpenOptions(): void;
   onClose(): void;
 }
 
-/** Which of the two views the card is showing. */
-export type ModalView = 'job' | 'fields';
-
 export interface ModalData extends SheetData {
   siteName: string;
-  jobTitle?: string;
-  /** The posting, as blocks — see shared/jobText.ts. */
-  jobDescription?: JobBlock[];
-  jobRequirements?: JobBlock[];
-  /** Company / location / employment type, as far as the posting states them. */
-  meta?: JobMeta;
   /** The report, in its settled order. Rows never move; see `fillEngine.ts`. */
   matches: FieldMatch[];
   /** Rows Confirm has been pressed on — an acknowledgement, never a status. */
   confirmed?: string[];
-  /** The job database already has this URL down as applied. */
-  alreadyApplied?: boolean;
-  appliedAt?: number;
+  /** The job database already has this URL down as done. */
+  alreadyDone?: boolean;
+  doneAt?: number;
   /** The profile has nothing to fill with at all. */
   profileEmpty?: boolean;
   /** What a row can be taught as. */
@@ -97,12 +82,10 @@ interface TeachState {
 
 export class FillerModal extends Sheet<ModalData> {
   private cb: ModalCallbacks;
-  /** Kept across renders: the engine re-renders as fields appear. */
-  private view: ModalView = 'fields';
   /** The open `?` on the banner. */
   private helpOpen = false;
-  /** The open Teach chooser, and what has been typed into it. On the instance for
-   *  the reason `view` is: the engine re-renders the card while the user works in it. */
+  /** The open Teach chooser, and what has been typed into it. On the instance
+   *  because the engine re-renders the card while the user works in it. */
   private teaching?: TeachState;
 
   constructor(cb: ModalCallbacks) {
@@ -125,9 +108,9 @@ export class FillerModal extends Sheet<ModalData> {
     const data = this.data!;
     const card = el('div', 'cf-card');
     card.setAttribute('role', 'dialog');
-    card.setAttribute('aria-label', `${data.siteName} — ${data.jobTitle ?? 'fill report'}`);
+    card.setAttribute('aria-label', `${data.siteName} — fill report`);
     card.append(this.header(data, card));
-    card.append(this.view === 'fields' ? this.fieldsBody(data) : this.jobBody(data));
+    card.append(this.fieldsBody(data));
     if (data.queue) card.append(this.sessionStrip(data.queue));
     card.append(this.footer(data));
     return card;
@@ -135,13 +118,6 @@ export class FillerModal extends Sheet<ModalData> {
 
   protected buildPill(): HTMLElement {
     return this.pill(this.data!);
-  }
-
-  /** Which view is showing — the controller and the dev harness choose one. */
-  setView(view: ModalView): void {
-    if (this.view === view) return;
-    this.view = view;
-    if (this.data) this.render(this.data);
   }
 
   /**
@@ -152,7 +128,6 @@ export class FillerModal extends Sheet<ModalData> {
   openTeach(rowId: string, opts: { newField?: boolean } = {}): void {
     const row = this.data?.matches.find((m) => m.id === rowId);
     if (!row) return;
-    this.view = 'fields';
     this.teaching = {
       rowId,
       choice: opts.newField ? NEW_FIELD : row.field ?? '',
@@ -182,52 +157,31 @@ export class FillerModal extends Sheet<ModalData> {
     close.setAttribute('aria-label', 'Minimize');
     close.onclick = () => this.cb.onClose();
 
-    const full = document.createElement('button');
-    full.className = 'cf-fullscreen';
-    full.setAttribute('aria-pressed', String(!!data.fullscreen));
-    full.setAttribute('aria-label', data.fullscreen ? ACTION_LABELS.exitFullscreen : ACTION_LABELS.fullscreen);
-    full.onclick = () => this.setFullscreen(!data.fullscreen);
-
     header.append(site);
-    if (data.alreadyApplied) {
+    if (data.alreadyDone) {
       const chip = el('span', 'chip ok cf-sent-chip');
-      chip.textContent = 'Applied';
+      chip.textContent = 'Done';
       header.append(chip);
     }
-    header.append(this.viewToggle(data), full, close);
+    // The report's worst status, so a question still waiting for the user shows
+    // on the header even with the rows scrolled away. An empty report has none.
+    if (data.matches.some((m) => !m.ignored)) {
+      const worst = worstStatus(data.matches);
+      const dot = el('span', `cf-dot cf-header-dot ${worst}`);
+      dot.setAttribute('role', 'img');
+      dot.setAttribute('aria-label', STATUS_LABELS[worst]);
+      header.append(dot);
+    }
+    header.append(close);
     this.makeDraggable(card, header);
     return header;
   }
 
   /**
-   * The Job/Fields switch. The Fields tab carries the report's worst status as a
-   * dot, so a question still waiting for the user is advertised on the closed tab.
-   */
-  private viewToggle(data: ModalData): HTMLElement {
-    const wrap = el('div', 'cf-views');
-    wrap.setAttribute('role', 'tablist');
-    const tab = (view: ModalView, label: string, dot?: MatchConfidence) => {
-      const b = document.createElement('button');
-      b.className = `cf-view${this.view === view ? ' active' : ''}`;
-      b.setAttribute('role', 'tab');
-      b.setAttribute('aria-selected', String(this.view === view));
-      if (dot) {
-        const d = el('span', `cf-dot ${dot}`);
-        d.setAttribute('role', 'img');
-        d.setAttribute('aria-label', STATUS_LABELS[dot]);
-        b.append(d);
-      }
-      b.append(document.createTextNode(label));
-      b.onclick = () => this.setView(view);
-      return b;
-    };
-    wrap.append(tab('job', 'Job'), tab('fields', 'Fields', worstStatus(data.matches)));
-    return wrap;
-  }
-
-  /**
-   * Fill again, and the ways out. Skip is visible only on a queue tab, where it is
-   * the decision the strip above it is read for ("posting 8 of 13 — skip it?");
+   * Fill again, Teach, and — on a queue tab — Skip. Teach is the popup's Teach:
+   * point at a field the report did not list. Skip is visible only on a queue tab,
+   * where it is the decision the strip above it is read for ("posting 8 of 13 —
+   * skip it?");
    * anywhere else there is no queue to skip through, and the job database has no
    * business learning about a shop's checkout page.
    */
@@ -237,25 +191,25 @@ export class FillerModal extends Sheet<ModalData> {
     if (banner.classList.contains('quiet')) footer.append(banner);
 
     const actions = el('div', 'cf-footer-actions');
-    actions.append(btn(ACTION_LABELS.fillAgain, () => this.cb.onRerun()));
+    const fill = btn(ACTION_LABELS.fillAgain, () => this.cb.onRerun());
+    fill.classList.add('cf-fill-again');
+    actions.append(
+      fill,
+      btn(ACTION_LABELS.teach, () => this.cb.onPoint()),
+    );
 
     if (data.queue) {
       const skip = btn(ACTION_LABELS.skipNext, () => this.cb.onSkip());
-      // Skip on an applied posting would file "skipped" over "applied" — a blunt
-      // overwrite, carried to the other device by sync. Retired, never removed, so
-      // the press can still say why.
-      if (data.alreadyApplied) {
+      // Skip on a posting already done has nothing left to finish. Retired, never
+      // removed, so the press can still say why.
+      if (data.alreadyDone) {
         skip.setAttribute('aria-disabled', 'true');
-        skip.setAttribute('aria-label', 'Skip — this posting is already applied to, press to find out why');
+        skip.setAttribute('aria-label', 'Skip — this posting is already done, press to find out why');
         skip.onclick = () => { this.helpOpen = !this.helpOpen; this.repaint(); };
       }
       actions.append(skip);
     }
 
-    actions.append(this.overflow([
-      btn(ACTION_LABELS.openOptions, () => this.cb.onOpenOptions()),
-      btn('Point at a field', () => this.cb.onPoint()),
-    ]));
     footer.append(actions);
     return footer;
   }
@@ -265,8 +219,8 @@ export class FillerModal extends Sheet<ModalData> {
   private flowBanner(data: ModalData): HTMLElement {
     const counts = statCounts(data.matches);
     const flow = flowBanner({
-      alreadyApplied: data.alreadyApplied,
-      appliedAt: data.appliedAt,
+      alreadyDone: data.alreadyDone,
+      doneAt: data.doneAt,
       profileEmpty: data.profileEmpty,
       total: data.matches.filter((m) => !m.ignored).length,
       filled: counts.high,
@@ -279,7 +233,7 @@ export class FillerModal extends Sheet<ModalData> {
     if (flow.tone === 'ok' || flow.tone === 'warn') {
       const dot = el('span', `cf-dot ${flow.tone}`);
       dot.setAttribute('role', 'img');
-      dot.setAttribute('aria-label', flow.tone === 'ok' ? 'applied' : 'attention');
+      dot.setAttribute('aria-label', flow.tone === 'ok' ? 'done' : 'attention');
       head.append(dot);
     }
     const titleLine = el('div', 'cf-flow-titleline');
@@ -297,71 +251,9 @@ export class FillerModal extends Sheet<ModalData> {
     return box;
   }
 
-  /* ---------------- The two views ---------------- */
+  /* ---------------- The report ---------------- */
 
-  private jobBody(data: ModalData): HTMLElement {
-    const body = el('div', 'cf-body');
-    const banner = this.flowBanner(data);
-    if (!banner.classList.contains('quiet')) body.append(banner);
-
-    if (data.jobTitle) {
-      const t = el('h2', `cf-title${data.alreadyApplied ? ' cf-title-sub' : ''}`);
-      t.textContent = data.jobTitle;
-      body.append(t);
-    }
-
-    const meta = [data.meta?.company, data.meta?.location, data.meta?.employmentType]
-      .filter((v): v is string => !!v);
-    if (meta.length) {
-      const row = el('div', 'cf-jobmeta');
-      for (const value of meta) {
-        const chip = el('span', 'chip accent');
-        chip.textContent = value;
-        row.append(chip);
-      }
-      body.append(row);
-    }
-
-    const description = data.jobDescription ?? [];
-    if (description.length) body.append(prose(description));
-    const requirements = data.jobRequirements ?? [];
-    if (requirements.length) {
-      const label = el('div', 'cf-section');
-      label.textContent = 'Requirements';
-      body.append(label, prose(requirements));
-    }
-    if (!description.length && !requirements.length) {
-      const empty = el('p', 'cf-empty');
-      empty.textContent = 'No description found on this page.';
-      body.append(empty);
-    }
-
-    if (data.matches.length) body.append(this.statSummary(data.matches));
-    return body;
-  }
-
-  /** The three-stat summary — the same counts the Fields summary line carries. */
-  private statSummary(matches: FieldMatch[]): HTMLElement {
-    const counts = statCounts(matches);
-    const wrap = el('div', 'cf-stats');
-    for (const status of ['high', 'low', 'none'] as const) {
-      const tile = el('div', `cf-stat ${status}`);
-      const n = el('div', 'cf-stat-n');
-      n.textContent = String(counts[status]);
-      const k = el('div', 'cf-stat-k');
-      const dot = el('span', `cf-dot ${status}`);
-      dot.setAttribute('role', 'img');
-      dot.setAttribute('aria-label', STATUS_LABELS[status]);
-      const word = el('span');
-      word.textContent = STATUS_TEXT[status].tile;
-      k.append(dot, word);
-      tile.append(n, k);
-      wrap.append(tile);
-    }
-    return wrap;
-  }
-
-  /** The report: every question on the page, and what became of it. */
+  /** Every question on the page, and what became of it. */
   private fieldsBody(data: ModalData): HTMLElement {
     const body = el('div', 'cf-body');
     const banner = this.flowBanner(data);
@@ -402,11 +294,11 @@ export class FillerModal extends Sheet<ModalData> {
   private pill(data: ModalData): HTMLElement {
     const pill = el('button', 'cf-pill');
     const counts = statCounts(data.matches);
-    const dot = el('span', `cf-dot ${data.alreadyApplied ? 'ok' : worstStatus(data.matches)}`);
+    const dot = el('span', `cf-dot ${data.alreadyDone ? 'ok' : worstStatus(data.matches)}`);
     pill.setAttribute('aria-label', 'Reopen the fill report');
     const label = el('span');
-    label.textContent = data.alreadyApplied
-      ? 'Already applied'
+    label.textContent = data.alreadyDone
+      ? 'Already done'
       : counts.none
         ? `${counts.high} filled · ${counts.none} to teach`
         : `${counts.high} filled`;
@@ -430,32 +322,6 @@ export class FillerModal extends Sheet<ModalData> {
       strip.append(row);
     }
     return strip;
-  }
-
-  /** A "more" button whose menu holds the secondary footer actions. */
-  private overflow(items: HTMLButtonElement[]): HTMLElement {
-    const wrap = el('div', 'cf-more');
-    const toggle = btn('⋯', () => {});
-    toggle.setAttribute('aria-label', 'More actions');
-    toggle.setAttribute('aria-expanded', 'false');
-    const menu = el('div', 'cf-more-menu');
-    (menu as HTMLElement).hidden = true;
-    const setOpen = (open: boolean) => {
-      menu.hidden = !open;
-      toggle.setAttribute('aria-expanded', String(open));
-    };
-    for (const item of items) {
-      item.classList.add('btn-ghost');
-      const choose = item.onclick!;
-      item.onclick = (e) => { setOpen(false); choose.call(item, e); };
-    }
-    menu.append(...items);
-    toggle.onclick = (e) => {
-      e.stopPropagation();
-      setOpen(menu.hidden);
-    };
-    wrap.append(toggle, menu);
-    return wrap;
   }
 
   /* ---------------- Rows ---------------- */
@@ -647,36 +513,11 @@ function statCounts(matches: FieldMatch[]): Record<MatchConfidence, number> {
   return counts;
 }
 
-/** The worst outcome in the report — what the closed Fields tab advertises. */
+/** The worst outcome in the report — what the header dot advertises. */
 function worstStatus(matches: FieldMatch[]): MatchConfidence {
   const statuses = matches.filter((m) => !m.ignored).map(matchStatus);
   if (statuses.includes('none')) return 'none';
   return statuses.includes('low') ? 'low' : 'high';
-}
-
-/** Render extracted blocks as the prose they were on the page. */
-function prose(blocks: JobBlock[]): HTMLElement {
-  const wrap = el('div', 'cf-prose');
-  for (const block of blocks) {
-    if (block.kind === 'heading') {
-      const h = document.createElement('h4');
-      h.textContent = block.text;
-      wrap.append(h);
-    } else if (block.kind === 'list') {
-      const ul = document.createElement('ul');
-      for (const item of block.items) {
-        const li = document.createElement('li');
-        li.textContent = item;
-        ul.append(li);
-      }
-      wrap.append(ul);
-    } else {
-      const p = document.createElement('p');
-      p.textContent = block.text;
-      wrap.append(p);
-    }
-  }
-  return wrap;
 }
 
 function el(tag: string, className = ''): HTMLElement {

@@ -4,7 +4,7 @@ import { makeEntry } from './jobUrls';
 import { nextBatch, queueProgress, progressDots, type QueueProgress } from './queue';
 
 /** Build a list from `[url, status]` pairs, preserving order. */
-function list(...pairs: Array<[string, JobUrlStatus]>): JobUrlEntry[] {
+function list(...pairs: Array<[string, JobUrlStatus | (string & {})]>): JobUrlEntry[] {
   return pairs.map(([url, status]) => ({ ...makeEntry(url, 1000), status }));
 }
 
@@ -15,12 +15,12 @@ describe('nextBatch', () => {
   });
 
   it('only counts free slots — in-flight tabs occupy the batch', () => {
-    const l = list(['a', 'opened'], ['b', 'new'], ['c', 'new'], ['d', 'new']);
+    const l = list(['a', 'new'], ['b', 'new'], ['c', 'new'], ['d', 'new']);
     expect(nextBatch(l, ['a'], 3)).toEqual(['b', 'c']);
   });
 
   it('returns nothing when the batch is already full', () => {
-    const l = list(['a', 'opened'], ['b', 'opened'], ['c', 'new']);
+    const l = list(['a', 'new'], ['b', 'new'], ['c', 'new']);
     expect(nextBatch(l, ['a', 'b'], 2)).toEqual([]);
   });
 
@@ -30,11 +30,19 @@ describe('nextBatch', () => {
     expect(nextBatch(l, ['a'], 5)).toEqual(['b']);
   });
 
-  it('skips every status except "new" — opened, applied, skipped and redirected are dealt with', () => {
-    const l = list(
-      ['a', 'opened'], ['b', 'applied'], ['c', 'skipped'], ['d', 'redirected'], ['e', 'new'],
-    );
+  it('skips every status except "new" — done and a newer peer\'s status are dealt with', () => {
+    const l = list(['a', 'done'], ['b', 'interviewing'], ['c', 'deleted'], ['e', 'new']);
     expect(nextBatch(l, [], 5)).toEqual(['e']);
+  });
+
+  /**
+   * A posting stays `new` while its tab is open, and after it closes when
+   * `markDoneOnClose` is off. Without the session's own record of what it has
+   * opened, it would come straight back in the next top-up.
+   */
+  it('never re-opens a posting this session already opened', () => {
+    const l = list(['a', 'new'], ['b', 'new'], ['c', 'new']);
+    expect(nextBatch(l, [], 2, ['a'])).toEqual(['b', 'c']);
   });
 
   it('returns an empty batch for an empty queue, a zero batch size, or a negative one', () => {
@@ -45,41 +53,22 @@ describe('nextBatch', () => {
 
   it('does not go negative when more tabs are open than the batch allows', () => {
     // The user can lower the batch size mid-session, or open tabs by hand.
-    const l = list(['a', 'opened'], ['b', 'opened'], ['c', 'opened'], ['d', 'new']);
+    const l = list(['a', 'new'], ['b', 'new'], ['c', 'new'], ['d', 'new']);
     expect(nextBatch(l, ['a', 'b', 'c'], 2)).toEqual([]);
   });
 });
 
 describe('queueProgress', () => {
+  /** A posting with a tab on it is still waiting — the tab map says it is live. */
   it('summarizes the queue for the session headers', () => {
-    const l = list(
-      ['a', 'new'], ['b', 'new'], ['c', 'opened'], ['d', 'applied'], ['e', 'skipped'],
-    );
+    const l = list(['a', 'new'], ['b', 'new'], ['c', 'new'], ['d', 'done'], ['e', 'done']);
     expect(queueProgress(l, ['c'])).toEqual({
       total: 5,
       queued: 2,
       inFlight: 1,
-      applied: 1,
-      skipped: 1,
-      markedDone: 0,
       done: 2,
       ratio: 0.4,
     });
-  });
-
-  it('counts a redirected posting as done — the application moved on to the ATS', () => {
-    const l = list(['a', 'redirected'], ['b', 'new']);
-    const p = queueProgress(l, []);
-    expect(p.done).toBe(1);
-    expect(p.queued).toBe(1);
-  });
-
-  it('counts a posting the user marked done as done', () => {
-    const l = list(['a', 'markedDone'], ['b', 'opened']);
-    const p = queueProgress(l, []);
-    expect(p.markedDone).toBe(1);
-    expect(p.done).toBe(1);
-    expect(p.ratio).toBe(0.5);
   });
 
   it('ignores in-flight URLs that are no longer in the database', () => {
@@ -89,14 +78,14 @@ describe('queueProgress', () => {
 
   it('reports a zero ratio for an empty database rather than dividing by zero', () => {
     expect(queueProgress([], [])).toEqual({
-      total: 0, queued: 0, inFlight: 0, applied: 0, skipped: 0, markedDone: 0, done: 0, ratio: 0,
+      total: 0, queued: 0, inFlight: 0, done: 0, ratio: 0,
     });
   });
 });
 
 describe('progressDots', () => {
   const progress = (over: Partial<QueueProgress> = {}): QueueProgress => ({
-    total: 0, queued: 0, inFlight: 0, applied: 0, skipped: 0, markedDone: 0, done: 0, ratio: 0,
+    total: 0, queued: 0, inFlight: 0, done: 0, ratio: 0,
     ...over,
   });
 
@@ -125,7 +114,7 @@ describe('progressDots', () => {
   });
 
   it('fills the row when everything is done', () => {
-    expect(progressDots(progress({ total: 4, done: 4, applied: 4, ratio: 1 })))
+    expect(progressDots(progress({ total: 4, done: 4, ratio: 1 })))
       .toEqual(['done', 'done', 'done', 'done']);
   });
 

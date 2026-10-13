@@ -165,9 +165,8 @@ describe('blocksToText', () => {
 /**
  * The walk only ever tested the elements it descended into, so a container that
  * was itself chrome passed straight through — `extractBlocks(button)` returned
- * the button's label as the posting. `content/extract.ts` can hand this a button:
- * its `[id*="description" i]` fallback matches a "Show full description" control
- * before it matches the description.
+ * the button's label as the posting. A selector like `[id*="description" i]`
+ * matches a "Show full description" control before it matches the description.
  */
 describe('extractBlocks — the root is chrome too', () => {
   const el = (html: string): HTMLElement => {

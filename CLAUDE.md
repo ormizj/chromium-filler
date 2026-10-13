@@ -30,24 +30,24 @@ assertion. New MCP servers load on Claude Code restart.
 For UI work also start `npm run dev` and open `http://localhost:5173/dev/`, which
 renders every surface against a mocked `chrome.*`, including a **390px phone
 frame**. `dev/frame.html?page=…` takes `popup`, `options`, `modal`, `chip` and
-`picker`. The mock's seed is versioned (`full-v2` in `dev/mock-chrome.ts`): bump it
+`picker`. The mock's seed is versioned (`full-v4` in `dev/mock-chrome.ts`): bump it
 whenever its shape changes, or a browser that ran the harness before keeps the old
 store.
 
 - **`page=modal`** renders the real review card over a fake posting.
-  `&state=` picks the rendering: `long`, `flush`, `fullscreen`, `failed-fill`,
-  `confirmed`, `taught`, `appeared-later`, `already-applied`, `nothing`, `empty`,
+  `&state=` picks the rendering: `long`, `flush`, `failed-fill`,
+  `confirmed`, `taught`, `appeared-later`, `already-done`, `nothing`, `empty`,
   `bare`, `pill-only`. `&teach=<n>` opens the Teach chooser on row n (and `&new=1`
-  with it opens "New field…"); `&queue=1` (or `&session=1`) makes it a queue tab;
-  `&view=job|fields` picks the view. Most of these are reachable on a real page
+  with it opens "New field…"); `&queue=1` (or `&session=1`) makes it a queue tab.
+  Most of these are reachable on a real page
   only by pressing something, which a screenshot cannot do.
 - **`page=chip`** is the queue chip beside the card's folded pill — the two marks
   the extension leaves on a queue tab. `&open=1` expands the card (on a phone the
   chip then hides).
 - **`page=options`** takes `&state=profile|custom-fields|wordings|learned` (the
   Profile tab's sections, via the same `#tab&at=` deep links the extension uses),
-  `export`, `sync-guide`, and `fresh` (an empty store — the getting-started
-  checklist).
+  `sync` (the Sync tab at its "What syncs" lists), `sync-guide`, and `fresh` (an
+  empty store — the getting-started checklist).
 - **`page=picker`** runs the real click-to-pick toolbar over a deliberately
   nested posting; `&label=` names what it says it is picking, `&state=long`
   previews a full-length description.
@@ -68,8 +68,9 @@ It used to be much more: per-site configs, a recorder and a six-step setup wizar
 prep clicks, two-step redirect following, and an Apply that pressed the site's
 Send button and watched for a confirmation. All of that is gone (October 2026):
 real sites have too much custom logic for the automation to pay for itself. What
-stayed is the fill, the queue, the archive and the sync. Do not reintroduce
-submit automation or per-site configs.
+stayed is the fill, the queue and the sync. Do not reintroduce submit automation
+or per-site configs. (The Archive export and the posting capture behind it went
+too, the same month: nothing else read the captured text.)
 
 ### How a page is filled
 
@@ -84,9 +85,11 @@ submit automation or per-site configs.
    no scroll/resize) re-sweeps as the page changes, so the form behind "Apply now"
    and step 2 of a wizard are filled as they appear. It pauses while the tab is
    hidden and stands down after ten idle minutes.
-3. **The card** (`src/content/modal/modal.ts`) shows the report. Off the queue it
-   appears only as a folded pill, and only when something was filled; on a queue
-   tab it opens expanded (`settings.openCardOnQueueTabs`).
+3. **The card** (`src/content/modal/modal.ts`) shows the report. It appears as a
+   folded pill, and only when something was filled (on a queue tab, as soon as
+   there is a row). With `settings.openCardWhenFilled` (off by default) it opens
+   expanded the first time something is filled — decided on every report, not when
+   the card is made, and once only, so a × afterwards is the user's word.
 
 ### What is a candidate, and what never is
 `collectCandidates` (`src/content/fieldDetect.ts`): text-like inputs, textareas,
@@ -169,29 +172,29 @@ row (`.cf-teach`, never a popover — it has to work at 390px): a `<select>` gro
 question`). `Controller.teach` creates the new field if asked, builds the
 signature against `engine.allCandidates()`, stores the lesson (`shared/lessons.ts`
 — one lesson per signature; teaching again replaces), and `engine.applyTeaching`
-fills the row in place. The popup's **Teach** and the card's ⋯ → "Point at a field"
-start the picker for an input no sweep listed; Confirm there opens the card on that
+fills the row in place. The popup's **Teach** and the card's footer **Teach** (one
+word, one action) start the picker for an input no sweep listed; Confirm there opens the card on that
 input's chooser (`engine.rowForElement` adds a row for it).
 
-Lessons and custom fields are **device state, never synced** — same as the profile.
+Lessons and custom fields **sync**, like the profile (see Syncing).
 Options → Profile lists them: "Your own fields" (cards: name, kind, answer,
 "Answers questions like" chips), "Other ways sites ask for these" (extra wordings
 for the built-ins, behind a disclosure), and "What it has learned" (lessons by
 field, with Forget; `index`/`host` lessons are flagged).
 
 ### The card
-`FillerModal` extends `Sheet`. Two views behind a header toggle: **Fields** (the
-default off the queue) and **Job** (the default on a queue tab — the posting,
-read by `extract.ts` from generic containers and JSON-LD). Footer: `Fill again`
-(sweep again, never over an answer), on a queue tab `Skip → next`, and ⋯ with
-`Options` · `Point at a field`. **There is no coral primary** — the one thing left
+`FillerModal` extends `Sheet`. It is the report and nothing else — the Job view
+(the posting, re-read from the page), the fullscreen toggle and the ⋯ menu are gone
+(October 2026). Header: site name · `Done` chip · the report's worst-status dot ·
+×. Footer: `Fill again` (sweep again, never over an answer), `Teach` (point at a
+field), and on a queue tab `Skip → next`. **There is no coral primary** — the one thing left
 to do is the user's own submit on the site. **Reset is deliberately not on the
 card**: it blanks every field just filled and throws the report away; it lives on
 the popup as a quiet "Reset this page" link.
 
 ### The flow banner
 `src/shared/flowState.ts` (pure) picks one of four states, worded in
-`labels.FLOW_TEXT`: `alreadyApplied` (the job database has this URL as applied —
+`labels.FLOW_TEXT`: `alreadyDone` (the job database has this URL as `done` —
 shown first, Skip retired), `empty` (the profile has nothing to fill with —
 worded about the profile, never the page), `nothing` (a page whose questions are
 all new — an invitation to teach), `ready` ("Filled — submit on the site when you
@@ -206,9 +209,11 @@ the batch — the page asks as soon as it loads — and the content script asks 
 more 1.5s later in case it still won. `queueTab(sender.tab.id)` answers only for
 the sender's own tab.
 
-**Closing a queue tab finishes it** (`settings.markDoneOnClose`, default on):
-`finishOnClose` moves an `opened` posting to `markedDone` and nothing else, then
-the next posting opens. Tabs that closed while the worker slept are finished the
+**Closing a queue tab finishes it**, always — it is not a setting: the user
+submits by hand, so closing the tab is the one "done" the extension hears.
+`finishOnClose` moves a `new` posting to `done` and nothing else, then the next
+posting opens. **Skip always closes its tab** too, `SKIP_CLOSE_DELAY_MS` after
+the press (so the skip is seen to land), and frees the slot at once. Tabs that closed while the worker slept are finished the
 same way in `liveTabs()`. A child tab finishes nothing.
 
 `content/queueChip.ts` draws "Queue · n/total" bottom-left (the pill rail is
@@ -271,8 +276,8 @@ on hover, the reference's outlined button. Nor is a **per-row action ever the
 primary fill**: Confirm shipped as a primary once and turned a sixteen-row report
 into sixteen CTAs. The card has no primary at all now (`modal.test.ts` asserts
 it): the one thing left after a fill is the user's own press on the site. Buttons
-inside a popover are `.btn-ghost` (the overflow menu): the popover already has a
-border, and one per item makes it a stack of boxes.
+inside a popover are `.btn-ghost`: the popover already has a border, and one per
+item makes it a stack of boxes.
 
 The popup is itself a panel (`--bg`), not a page, so its progress card has
 something to recess into. Labels *inside* a surface are sentence case: uppercase
@@ -316,7 +321,7 @@ simulator's handles already carried the same line.
 
 Geometry is otherwise invisible to vitest — jsdom evaluates neither the cascade
 nor layout — so the rest is measured in the E2E: the `?` is square on a *fine*
-pointer, and the two `.cf-view` segments are equal at one tap size.
+pointer, and the card's `.cf-close` is one tap tall.
 
 Mobile is the priority target (Kiwi). `--tap: 44px` is the height of every
 button on *every* pointer (the reskin matched `design/reference-updated/` and
@@ -329,11 +334,10 @@ review card becomes a full-width bottom sheet under 640px.
 **values** (it supersedes `design/design-system.md`): rounder than the first cut
 (`--radius-btn/-card/-xl` = 13/14/20), buttons and chips at weight 500, a
 two-layer `--shadow-2`, a third text level `--muted-2`, and a dark palette whose
-insets are *darker* than the paper (not lighter). The Job/Fields toggle is a
-rounded-rectangle segmented control; the options Settings tab uses folder tabs,
-`.switch` toggles and a **two-column** grid of setting rows; the popup leads with a
-progress card + status chips; the Job view leads with company / location / type
-chips and the session strip carries progress dots.
+insets are *darker* than the paper (not lighter). The options Settings tab uses
+folder tabs, `.switch` toggles and a **two-column** grid of setting rows; the popup
+leads with a progress card + status chips, and the card's session strip carries
+progress dots.
 
 `design/reference/states-gallery.html` is the source of truth for the **flows** the
 mockup never drew — the modal's redirect/applied/blocked states, the pill, the
@@ -369,9 +373,14 @@ disclosure wraps into a second column and hangs off the card.
   shape (the old unused `custom` map is dropped).
 - `lessons` — `Lesson[]`: signature, target (`{field}` or `{ignore: true}`),
   label, taughtOn, hits. Hits are counted, batched, by the content script.
-- `jobUrls`, `jobDetails` (the archive), `settings`; the CV and cover letter in
-  `cvStore.ts` (base64 — content scripts share the *page's* origin, so not
-  extension IndexedDB). Old `siteConfigs` keys left by earlier builds are ignored.
+- `jobUrls`, `settings`; the CV and cover letter in `cvStore.ts` (base64 —
+  content scripts share the *page's* origin, so not extension IndexedDB).
+- `profileStamps`, `lessonStamps`, `settingsStamps`, `docStamps` — when each
+  synced unit last changed (see Syncing). Written in the same `set` as the data,
+  by `stampedSet`; every save of synced state goes through it.
+- `dropRetiredKeys` (on update) removes what older builds left: `jobDetails`,
+  `siteConfigs`, and the `RETIRED_SETTINGS` inside the settings (`exportOptions`,
+  `openCardOnQueueTabs`, `modalFullscreen`, …).
 
 `FieldKey` is the built-in sixteen (`resume` = the CV file); `FieldId` is a
 `FieldKey` or a custom id. `shared/profileFields.ts` is the one catalog over both
@@ -384,14 +393,13 @@ big it is on desktop. **The drag-and-resize simulator in Options → Settings is
 only thing that writes it**; a drag on a page is a page-lifetime override
 (`Controller.draggedLayout`). Desktop only — at or below `NARROW_WIDTH` (640px) the
 card is a full-width bottom sheet and inline styles are cleared. Every read goes
-through `clampLayout`. `settings.modalFullscreen` overrides the layout without
-writing it, and is the only setting a content script writes (`patchSettings`).
+through `clampLayout`.
 
 ### The sheet
 `src/content/sheet.ts` (`abstract class Sheet<D extends SheetData>`) is the shell
 behind the review card: `FillerModal` supplies only `buildCard`/`buildPill`/
 `repaint`. Mount, `applyLayout`, drag, the
-three resize grips, fullscreen, collapse-to-pill and `destroy` all live there once.
+three resize grips, collapse-to-pill and `destroy` all live there once.
 
 **A repaint must not lose the user's place.** `paint` replaces the whole
 `.cf-card`, which is how these surfaces show any change at all — so without
@@ -478,90 +486,117 @@ job-URL database (status `new`), never copied.
 tabs exist at once, and *finishing one opens the next* — closing it (which marks
 it done) or `SESSION_SKIP`. Opens are staggered (`STAGGER_MS`) and serialized
 through a promise chain, because two events landing together would otherwise both
-claim the same slot. State splits by lifetime: `{ active, batchSize }` in
-`chrome.storage.local`, the tab maps in `chrome.storage.session`. Never restore
+claim the same slot. State splits by lifetime: `{ active, batchSize, opened }` in
+`chrome.storage.local`, the tab maps in `chrome.storage.session`.
+
+A posting with a tab on it is still `new` — there is no `opened` status — so the
+session record keeps **`opened`, every URL this session has opened**, and
+`nextBatch` skips them (`seen`). Without it a tab whose finish lost a race would
+reopen at the next top-up. A fresh
+`startSession` resets it (a resize keeps it). The session's own job-list writes
+(`finishPostings`, Skip) are serialized through `writeJobs`, because two tabs
+closing together each read-modify-write the whole list. Never restore
 the old behaviour of opening every URL in one loop — 60 links meant 60 tabs.
 
 ### Job-URL database
 `src/shared/jobUrls.ts` (pure) — `addUrls` dedupes by URL (the unique key),
-`applyStatus` records status transitions with timestamped history
-(new → opened → markedDone / skipped / applied), `jobUrlStats` aggregates for the
-dashboard. `redirected` and `applied` are no longer set by anything automatic (no
-redirect following, no confirmation watch) but stay in the type: they are in
-stored and synced histories, and `applied` is still set by hand in Options.
-`urlImport.ts` extracts/normalizes/dedupes URLs from a pasted text blob.
+`applyStatus` records status transitions with timestamped history,
+`jobUrlStats` aggregates for the dashboard. `urlImport.ts`
+extracts/normalizes/dedupes URLs from a pasted text blob.
 
-**`markedDone` is set only by a user action**: closing a tab the queue opened
-(`finishOnClose`, under `markDoneOnClose`), or Options → Queue's bulk button. The
-extension cannot see a site's submit button being pressed, so it never claims an
-application went in. Options → Queue's
-**Mark opened as done** (`markOpenedDone`, pure) moves every visible `opened`
-posting to it after a confirm naming the count; `redirected` is left alone, the
-queue already counting it done. It ranks between `skipped` and `applied` (the
-user's final word, but not a confirmation anyone saw), counts toward
-`queueProgress.done`, and is an ordinary history event, so sync needs no schema
-bump. **No timer or heuristic may assign it** — that is what keeps it meaning
-"I said so". Its confirm is `.confirm.calm`, not the red Clear-all box:
-it is undoable row by row, and danger colours would overstate it.
+**A posting is `new` or `done`, nothing else.** The extension never submits, so
+it cannot tell applied from skipped from looked-and-moved-on; `done` is the user's
+own word — closing a queue tab (`finishOnClose`), Skip,
+or the row's control in Options → Queue. **No timer or heuristic may assign it.**
+Earlier builds' six statuses are mapped on read by `normalizeEntry`
+(`LEGACY_STATUS`: `opened` → `new`; `redirected`/`applied`/`skipped`/`markedDone` →
+`done`), in the status *and* every history event, and the two-step fields
+(`openedAt`, `appliedAt`, `sourceUrl`, `redirectUrl`) are dropped. It stays
+idempotent — the sync merge normalizes its own output again — which is why two
+events the mapping made identical collapse but different consecutive ones stay.
 
-`STATUS_RANK` names how far through the flow each status is. It exists because
-two callers needed it for different reasons: `linkRedirect` must not demote a
-posting by re-visiting it (it used to spell that as two inline
-`!== 'applied'` checks, which silently *did* demote a skipped one), and the sync
-merge needs a deterministic tie-break. Both now go through `promote()`.
+`STATUS_RANK` (`new` 0, `done` 1, `deleted` 2) is the sync merge's deterministic
+tie-break for two events in one millisecond, and `ALL_JOB_STATUSES` is derived
+from it.
 
-### Syncing the job database
-Two browser profiles on different Google accounts, one database: **the job
-database** — `jobUrls` and `jobDetails` — and nothing else. The profile, the own
-fields, the lessons, the CV and every setting are device state: `modalLayout` alone settles it, being a rectangle
-measured against *one* screen (`sampleScreen`), so replicating it is the stranding
-`clampLayout` exists to undo.
+### Syncing
+Two browser profiles on different Google accounts, one state: **everything**,
+except the card's `modalLayout` (a rectangle measured
+against *one* screen — replicating it is the stranding `clampLayout` exists to
+undo), the `syncEnabled` switch itself, and the OAuth client and tokens. Those
+are `LOCAL_SETTINGS` (`syncUnits.ts`) and `DEVICE_ONLY_TEXT`; every other
+setting syncs, including one added later, unless it is named there.
 
-**Site configs from older builds ride through opaque.** This build has none, but
-a peer on an older build still reads and writes `siteConfigs` in the shared file,
-and dropping the key on upload would delete them there. So `mergeJobs` carries
-`siteConfigs`/`deletedSiteConfigs` as `OpaqueConfig`s — union by id, newest wins,
-sorted — and this device never writes them locally or sends its own.
-`SYNC_SCHEMA` stays 2 for the same reason.
+**The Sync tab says what syncs** (a "What syncs" disclosure, folded by default: synced vs stays
+on this browser), because all of it happens in the background. It is rendered
+from the model — `SYNC_DOMAINS` worded by `SYNC_SCOPE_TEXT: Record<SyncDomain, …>`,
+the synced settings by their `SETTINGS_HELP` titles, `LOCAL_SCOPE_TEXT:
+Record<LocalSetting, …>` — so a new family of synced data fails typecheck until
+it is worded, and `help.test.ts` asserts every setting is on exactly one side.
 
-`src/shared/syncJobs.ts` (pure) is the whole correctness story. Two devices write
-with nobody arbitrating, so `mergeJobs` is **commutative, associative and
-idempotent** — asserted directly in `syncJobs.test.ts`, not just implied. That is
-also what makes the compare-and-swap retry safe: a lost race is repaired by
-merging again. It is bought by making every rule a *join*:
+The wire format (`syncState.ts`, `SYNC_SCHEMA` 3) is `{ schema, jobUrls, state }`:
 
-- **`history` is set-unioned and `status` is *derived* from it** (newest event
-  wins; same-millisecond ties by `STATUS_RANK`). The obvious rule — "the stronger
-  status wins" — reads well and is wrong: rank is monotonic, so a posting could
-  never be **un-skipped**, and every later sync would silently re-skip it. A union
-  of events also needs no special case for a manual edit; a correction is just a
-  later event.
-- `jobDetails` reuses `captureDetails`' rule: an empty capture never overwrites a
-  populated one.
-- Conflicts tie-break **symmetrically** (newest, then a stable content key).
-  "The left-hand side wins" would quietly destroy commutativity, and the bug shows
-  only as two devices disagreeing forever.
+- **`jobUrls` is the storage format verbatim** — no mapping layer to drift. Its
+  merge: **`history` is set-unioned and `status` is *derived* from it** (newest
+  event wins; same-millisecond ties by `STATUS_RANK`). The obvious rule — "the
+  stronger status wins" — is wrong: rank is monotonic, so a posting could never
+  be set back to `new`. A correction is just a later event.
+- **`state` is everything else as stamped units** (`syncUnits.ts`):
+  `profile.values.<k>`, `profile.keywords.<k>`, `customField.<id>`,
+  `lesson.<signatureKey>`, `settings.<k>`, `doc.resume`/`doc.coverLetter`, each
+  `{ at, value }` (`null` = removed). The merge is a **last-writer-wins register
+  per unit**: newest `at`; at the same instant a value beats a removal, then a
+  stable content key (`canonical`, sorted-key JSON). Small units are what make it
+  fair — two devices editing different fields both keep their edit. A lesson is
+  keyed by its **signature**, not its id (one lesson per signature, so two devices
+  teaching the same input converge), and keeps the **higher hit count** whichever
+  side wins; the hit count is left out of the content key and of change
+  detection, so a hit never outvotes a re-teach.
 
-Three things that follow, each with a test:
+**Stamps are written when a change is saved, not when it is synced**:
+`saveProfile`/`saveLessons`/`saveSettings`/`setDoc`/`clearDoc` diff the units
+before and after (`diffStamps`) and date what changed. A unit with no stamp
+predates the feature and travels at `at: 0` — and a setting still at its default
+with no stamp is not sent at all, so on the first merge an untouched default
+cannot outvote a value the other user chose. `applySnapshot` writes merged state
+**raw**, adopting the far side's stamps — re-stamping would date every synced
+value to now.
 
-- **Deletion is a `'deleted'` log event, never a splice** (`deleteUrl`). A union
-  can only grow, so a spliced entry returns on the next sync — the delete appears
-  to work and then undoes itself. That includes Options' Clear button, which
-  tombstones every entry rather than writing `[]`. `visibleUrls` hides them;
-  `pruneTombstones` forgets them after 90 days, at the storage edge rather than in
-  the merge (it depends on `now`, and a merge that changed with the clock could
-  not be idempotent).
-- **The wire format *is* the storage format** — `JobUrlEntry[]` and
-  `JobDetailsMap` verbatim, plus a `schema`. No mapping layer to drift, and the
-  round-trip is lossless by construction. Contrast `jobExport.ts`, which flattens
-  and reformats for a human and is therefore unusable here.
+The whole merge is **commutative, associative and idempotent** —
+`syncState.test.ts` asserts it directly. That is also what makes the
+compare-and-swap retry safe: a lost race is repaired by merging again.
+
+Things that follow, each with a test:
+
+- **Deletion is a tombstone, never a splice**: a `'deleted'` log event for a
+  posting (`deleteUrl` — including Clear all), a `null` unit for everything else.
+  A union can only grow, so a spliced entry returns on the next sync. Both kinds
+  of tombstone are pruned after 90 days at the storage edge (`pruneTombstones`,
+  `pruneUnits`), never in the merge, which must not depend on `now`.
+- **Schema 3 replaced the opaque site-config carry.** A schema-2 build refuses a
+  schema-3 file ("written by a newer version — update this device") instead of
+  rebuilding it from the keys it knows and deleting the rest on the far side —
+  which is also why the Drive file is still `jobs.json`: a new name would let
+  not-yet-updated browsers keep syncing their job lists without a word. Schema 1
+  and 2 files (an old backup, the remote file on first run) are read as a job
+  list with no other state.
 - **Forward compatibility is a one-shot decision.** `JobLogStatus` is
-  deliberately open (`| (string & {})`), inbound entries go through
-  `normalizeEntry`, and unknown fields are preserved by spreading both sides.
-  Tolerance lives in the *older* build, which is frozen once installed — so an
-  unrecognised status is carried through the log untouched rather than validated
-  away. `parseSnapshot` refuses an unknown `schema` outright: merging is
+  deliberately open (`| (string & {})`), unknown entry fields survive by spreading
+  both sides, and a unit this build cannot place is carried in the uploaded
+  snapshot (`applySnapshot` returns the merged `state`, not one rebuilt from
+  storage). `parseSnapshot` refuses an unknown `schema` outright: merging is
   all-or-nothing, so a stale peer can be *blocked* but must never corrupt.
+- **The first merge asks** (`pending`: postings, profile fields and lessons on
+  each side), because connecting the wrong account would fold a stranger's
+  profile into this one.
+- **After a sync or import, the options page reloads** if anything besides the
+  job list changed (`showArrived` compares values, not stamps), carrying its
+  status line across in `sessionStorage` — a dozen sections read storage once at
+  load. Not while a savebar is showing: it says to reload instead.
+
+The **backup file** (Sync → Export/Import backup) is the same snapshot, and
+importing it is the same merge — so it combines rather than restores, and a
+removal made after the backup was taken wins over it.
 
 `src/background/` — `googleAuth.ts` uses `launchWebAuthFlow` + PKCE, **not
 `getAuthToken`**, and that is the feature: `getAuthToken` returns a token for
@@ -581,7 +616,7 @@ anything anyone was looking for. Triggers are the **Sync now** button and
 constant — a Google Cloud project is per-person, and as two constants an
 installed build could only ever tell its user to go and edit a source file they
 may not have. `syncConfig.ts` holds it in `chrome.storage.local` under
-`syncClient` (device state; never in the snapshot), and the steps for creating
+`syncClient` (this device only; never in the snapshot), and the steps for creating
 one are in `CONCEPT_HELP.syncClient`, behind the section's `?`, because it is a
 thing the extension explains to the person doing it. Three rules there:
 
@@ -598,7 +633,12 @@ thing the extension explains to the person doing it. Three rules there:
   one string instead, but adding both URIs works without it.
 
 Until a client is entered, Connect is disabled and says so, and the backup file
-still moves the database by hand.
+still moves everything by hand.
+
+**With "Sync this browser" off, the Google controls are not shown** — the account
+line, Connect / Sync now / Disconnect and the OAuth client form (`.sync-when-on`).
+None of it can run then. "What syncs" and the backup file stay: one says what
+turning it on would do, the other works without it.
 
 **The how lives in one place: Help → "Setting up sync"**, the Help tab's last
 section, rendered from `SYNC_SETUP_STEPS` and `SYNC_TROUBLESHOOTING` (`help.ts`).
@@ -610,67 +650,6 @@ URI missing from, or pasted into the wrong box of, the client). The Sync tab
 deep-links there rather than carrying a copy, and `CONCEPT_HELP.syncClient` says
 *why* and points at it — the numbered steps used to be one paragraph inside it, and
 `help.test.ts` keeps them out.
-
-### The archive (captured postings + export)
-`extractJob` ran for the modal alone and threw its result away every re-render,
-so a posting became unreadable the moment its tab closed. `jobDetails.ts` (pure)
-keeps it: `Controller.captureJob` writes what the page said — title, description,
-requirements, chips — for every page the job database knows (a queue tab, or an
-imported URL; the engine runs on every site and a shop's product page is not a
-posting to archive), and Options → Queue → **Archive** exports them as one file
-(`jobExport.ts`).
-
-**What goes in that file is ticked, not fixed** — the columns, the statuses and
-JSON vs CSV, in the Archive panel's "What to export". Two rules make that
-survive the schema growing, and both are the same decision:
-
-- **The choice is stored as sparse *overrides*, never as the list of what to
-  include** (`ExportSelection` → `resolveExport`). A stored list of columns would
-  silently omit any column a later build adds, for everyone who had ever opened
-  the panel; a map of decisions lets an unmentioned key take its coded default
-  (a column is on, a status is off unless it is `applied`). Same forward
-  compatibility as `normalizeEntry`, and an unknown key is ignored rather than
-  validated away.
-- **The checkboxes are rendered from the model, never written into
-  `options.html`**: the columns walk `EXPORT_FIELD_LABELS`
-  (`Record<ExportField, string>`, and `ExportField` is `keyof ExportedJob`, so a
-  new field fails `npm run typecheck` until it is named — and naming it is all it
-  takes to get a checkbox), the statuses walk `ALL_JOB_STATUSES`, which is
-  *derived* from `STATUS_RANK` for the same reason. `EXPORT_FIELD_LABELS` is also
-  the column **order**, so there is one list rather than two.
-
-The edits are serialized through a promise chain (`session.ts`'s trick): each
-tick is a read-modify-write of one settings object, and ticking columns off is
-exactly the gesture people repeat quickly. A selection with no columns — or no
-statuses — disables Export and says which tick is missing, rather than
-downloading a file of empty objects. `?page=options&state=export` in the dev
-harness opens the panel, which is otherwise behind a closed `<details>` and so
-invisible to a screenshot.
-
-Kept under its **own storage key**, not as fields on `JobUrlEntry`: the job-URL
-list is read and rewritten whole on every status change, session tick and queue
-render, and prose is orders of magnitude bigger than the entry it belongs to.
-`mutateJobDetails` skips the write when the pure helper returns the map
-unchanged, and `captureJob` holds a signature of the last text written so the
-re-renders (`confirmField`, `pick`, `apply`, every message) don't rewrite it.
-
-Three rules the two-step case forces, each with a test:
-- **An empty capture never overwrites a non-empty one.** A re-run or a Reset
-  re-extracts against a page whose container may be gone, and writing that
-  through trades good text for nothing, silently.
-- **`resolveDetails` merges up the `sourceUrl` chain field by field**, not by
-  picking the nearest non-empty record. The ATS end always has *a* title
-  (`extractJob` falls back to `document.title`) and routinely no description, so
-  record-level resolution returns that title with an empty body and leaves the
-  board's description one hop away unread. This is what the E2E MixedBoard
-  assertion caught.
-- **`buildExport` collapses a chain to its destination.** `applyStatusChain`
-  marks both ends applied, so one application would otherwise arrive as two rows
-  — one holding the description, one holding the outcome.
-
-The download is an anchor + `URL.createObjectURL` on the **options page**: it
-needs no `downloads` permission, and an MV3 service worker has no
-`createObjectURL` to do it with. Do not add the permission.
 
 ## Non-obvious constraints (do not regress)
 
@@ -695,16 +674,18 @@ needs no `downloads` permission, and an MV3 service worker has no
   every site is the extension talking over the web.
 - **The report holds still.** Rows are ordered once and later arrivals are
   appended; statuses change in place, rows never move.
-- **Skip must never run on an applied posting**: it ends in `recordStatus`, a
-  blunt overwrite, which would file `skipped` over `applied` and sync the loss. The
-  card retires Skip (`aria-disabled`, never the `disabled` property, so the press
-  can still explain itself) and `skipPosting` refuses.
-- **Closing a queue tab only ever moves `opened` → `markedDone`** (`finishOnClose`).
-  A skipped, applied or already-done posting keeps its answer; a child tab finishes
-  nothing.
-- **Lessons, custom fields and the profile are device state.** Never add them to
-  the sync snapshot without a `SYNC_SCHEMA` bump and a decision about lessons that
-  point at fields the other device does not have.
+- **Two statuses: `new` and `done`.** Do not add more without asking; `done` is
+  only ever the user's word. On a posting already done the card retires Skip
+  (`aria-disabled`, never the `disabled` property, so the press can still explain
+  itself) and `skipPosting` refuses.
+- **Closing a queue tab only ever moves `new` → `done`** (`finishOnClose`). A
+  child tab finishes nothing.
+- **Everything syncs except `LOCAL_SETTINGS` and the OAuth client/tokens**, and
+  every synced thing is listed in the Sync tab's "What syncs", rendered from the
+  model. A new kind of synced data needs a `SyncDomain` and its wording.
+- **Every save of synced state is stamped** (`stampedSet`). A write to
+  `profile`/`lessons`/`settings`/`cv`/`coverLetterFile` that bypasses the
+  wrappers is undated, and an undated change loses to the other device.
 - **Content scripts share the PAGE's origin**, not the extension's — so the CV
   is stored in `chrome.storage.local` (base64, needs `unlimitedStorage`), NOT
   extension IndexedDB. See `cvStore.ts`.
@@ -720,11 +701,10 @@ needs no `downloads` permission, and an MV3 service worker has no
   past), and `syncOnStartup` runs on `chrome.runtime.onStartup` — precisely when
   a resuming laptop has no network. Disconnecting there costs a full trip
   through the consent screen to repair nothing.
-- **Upload what `applySnapshot` stored, not what `mergeJobs` returned.** It
-  returns the pruned snapshot for exactly this reason: writing the unpruned
-  merge back meant the remote `jobs.json` never shed a tombstone or an orphaned
-  capture and grew for the life of the account, carrying job text for postings
-  that no longer exist. Both ends hold the same answer when a sync returns.
+- **Upload what `applySnapshot` stored, not what `mergeSnapshots` returned.** It
+  returns the pruned snapshot for exactly this reason: writing the unpruned merge
+  back meant the remote `jobs.json` never shed a tombstone and grew for the life
+  of the account. Both ends hold the same answer when a sync returns.
 - **The file's write token is `version`, and there is no other.** Drive v3
   dropped resource etags; an `If-Match` built from the *list* response describes
   the query, not the file, and honouring it would 412 every write on a single
@@ -751,10 +731,10 @@ needs no `downloads` permission, and an MV3 service worker has no
   *nothing*, never to a guess.
 - **Never read a job container with `textContent`.** It welds every heading,
   paragraph and bullet into one string and preserves the HTML source's own
-  indentation, which is what made the description unreadable. `shared/jobText.ts`
-  walks it into blocks instead — and drops `form`/`nav`/`aside`/`footer`, because
-  the broad `jobDescription` fallbacks (`main`, `article`, `[class*="content"]`)
-  otherwise quote the application form and the decoy sidebar back at the user.
+  indentation. `shared/jobText.ts` walks it into blocks instead (the picker's
+  preview reads through it) — and drops `form`/`nav`/`aside`/`footer`, because a
+  broad container (`main`, `article`, `[class*="content"]`) otherwise quotes the
+  application form and the decoy sidebar back at the user.
   `clip` lives there too — one line, cut to *n* — because every place that shows a
   snippet of page text (the picker's preview among them) is making the same
   decision about the same text.
@@ -838,5 +818,4 @@ card opens it the way a user does (`openCard`). Rows that need teaching are list
 
 **Wait for `document.body.dataset.ready` before writing storage under an options
 page.** `main()` ends by setting it; `load` fires long before, while the boot is
-still awaiting a read-modify-write of the capture map. `onExtensionPage` waits for
-it.
+still awaiting its reads. `onExtensionPage` waits for it.

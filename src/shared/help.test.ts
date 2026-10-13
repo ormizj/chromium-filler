@@ -1,8 +1,10 @@
 import { describe, it, expect } from 'vitest';
 import {
-  CONCEPT_HELP, DOT_LEGEND, SETTINGS_HELP, SYNC_SETUP_STEPS, SYNC_TROUBLESHOOTING,
-  type HelpEntry,
+  CONCEPT_HELP, DEVICE_ONLY_TEXT, DOT_LEGEND, LOCAL_SCOPE_TEXT, SETTINGS_HELP, SYNC_SCOPE_TEXT,
+  SYNC_SETUP_STEPS, SYNC_TROUBLESHOOTING, type HelpEntry,
 } from './help';
+import { LOCAL_SETTINGS, SYNCED_SETTINGS, SYNC_DOMAINS } from './syncUnits';
+import { DEFAULT_SETTINGS } from './defaults';
 
 /** Every catalog, flattened, so the shape rules are asserted once for all of them. */
 const ALL: Array<[string, HelpEntry]> = [
@@ -131,5 +133,36 @@ describe('sync setup guide', () => {
   // cannot drift into two different sets of instructions.
   it('keeps the steps out of the concept entry', () => {
     expect(CONCEPT_HELP.syncClient.body).not.toMatch(/\(1\)/);
+  });
+});
+
+/**
+ * The Sync tab's "What syncs" list is the user's only view of what leaves the
+ * browser in the background, so it has to be complete — rendered from the same
+ * model the sync uses, and asserted here to cover all of it.
+ */
+describe('what syncs', () => {
+  it('words every family of synced data', () => {
+    for (const d of SYNC_DOMAINS) {
+      expect(SYNC_SCOPE_TEXT[d].title.trim(), d).not.toBe('');
+      expect(SYNC_SCOPE_TEXT[d].detail.trim(), d).not.toBe('');
+    }
+  });
+
+  it('lists every setting on exactly one side', () => {
+    for (const key of Object.keys(DEFAULT_SETTINGS)) {
+      const synced = (SYNCED_SETTINGS as string[]).includes(key);
+      const local = key in LOCAL_SCOPE_TEXT;
+      expect(synced !== local, key).toBe(true);
+    }
+    expect(Object.keys(LOCAL_SCOPE_TEXT).sort()).toEqual([...LOCAL_SETTINGS].sort());
+  });
+
+  it('names every synced setting by a real title', () => {
+    for (const key of SYNCED_SETTINGS) expect(SETTINGS_HELP[key].title.trim(), key).not.toBe('');
+  });
+
+  it('says what stays on this browser beyond the settings', () => {
+    expect(DEVICE_ONLY_TEXT.some((l) => /OAuth/.test(l.title))).toBe(true);
   });
 });

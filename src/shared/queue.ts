@@ -5,8 +5,7 @@
  * The queue is *derived* from the job-URL database rather than copied into a
  * separate list: an entry with status `new` is waiting, and anything else has
  * already been dealt with. That keeps one source of truth, so importing more
- * URLs, editing a status by hand, or the redirect linker marking a posting
- * `redirected` all feed the queue automatically.
+ * URLs or editing a status by hand feed the queue automatically.
  *
  * The session itself is a window, not a dump: at most `batchSize` tabs exist at
  * once, and closing one is what pulls in the next.
@@ -22,19 +21,24 @@ const WAITING = 'new';
  * The URLs to open right now: the oldest waiting entries, enough to bring the
  * number of open tabs back up to `batchSize`.
  *
- * `inFlight` is passed in rather than inferred from status because the two can
- * disagree — a tab is open the instant `chrome.tabs.create` resolves, which may
- * be before its `opened` status has been written. Trusting status alone would
- * open the same posting twice.
+ * `inFlight` is passed in rather than inferred from status because status does
+ * not say it: a posting with a tab on it is still `new` until the user finishes
+ * it. Trusting status alone would open the same posting twice.
+ *
+ * `seen` is everything this session has already opened, for the same reason: a
+ * posting whose tab was closed without finishing it (a finish that lost a
+ * race) is still `new`, and must not come straight back.
+ * It takes no slot — only `inFlight` does.
  */
 export function nextBatch(
   list: JobUrlEntry[],
   inFlight: string[],
   batchSize: number,
+  seen: string[] = [],
 ): string[] {
   const slots = Math.min(batchSize, batchSize - inFlight.length);
   if (slots <= 0) return [];
-  const open = new Set(inFlight);
+  const open = new Set([...inFlight, ...seen]);
   const out: string[] = [];
   for (const entry of list) {
     if (out.length >= slots) break;
@@ -49,13 +53,9 @@ export interface QueueProgress {
   total: number;
   /** Waiting to be opened. */
   queued: number;
-  /** Tabs open right now. */
+  /** Tabs open right now. Their postings are still `new`, but not `queued`. */
   inFlight: number;
-  applied: number;
-  skipped: number;
-  /** Postings the user closed by hand (see `JobUrlStatus`). */
-  markedDone: number;
-  /** Postings that need no further action: applied, skipped, marked done, or handed off. */
+  /** Postings the user finished — closed, skipped or marked done by hand. */
   done: number;
   /** `done / total`, clamped to 0 for an empty database. */
   ratio: number;
@@ -92,29 +92,18 @@ export function queueProgress(rawList: JobUrlEntry[], inFlight: string[]): Queue
   const list = visibleUrls(rawList);
   const open = new Set(inFlight);
   let queued = 0;
-  let applied = 0;
-  let skipped = 0;
-  let redirected = 0;
-  let markedDone = 0;
+  let done = 0;
   let live = 0;
   for (const entry of list) {
     if (open.has(entry.url)) live++;
-    if (entry.status === WAITING) queued++;
-    else if (entry.status === 'applied') applied++;
-    else if (entry.status === 'skipped') skipped++;
-    else if (entry.status === 'redirected') redirected++;
-    else if (entry.status === 'markedDone') markedDone++;
+    // A waiting posting with a tab on it is in flight, not queued.
+    if (entry.status === WAITING && !open.has(entry.url)) queued++;
+    else if (entry.status === 'done') done++;
   }
-  // A redirected posting is finished as far as the queue is concerned — the
-  // application continues on the ATS entry, which is tracked in its own right.
-  const done = applied + skipped + redirected + markedDone;
   return {
     total: list.length,
     queued,
     inFlight: live,
-    applied,
-    skipped,
-    markedDone,
     done,
     ratio: list.length === 0 ? 0 : done / list.length,
   };

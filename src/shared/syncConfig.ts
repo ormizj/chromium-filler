@@ -1,7 +1,6 @@
 /**
  * The OAuth client sync authorizes through — **entered by the user**, in
- * Options → Sync, and kept in `chrome.storage.local` like every other piece of
- * device state.
+ * Options → Sync, and kept in `chrome.storage.local` on this device only.
  *
  * It used to be a pair of build-time constants, which meant an installed build
  * with nothing pasted into them could only ever say "sync is not configured in
@@ -18,9 +17,10 @@
  * attacker nothing on its own: the redirect URI is bound to this extension's ID,
  * and PKCE binds the code to the request that asked for it.
  *
- * It is deliberately **not** part of the sync snapshot. Nothing but the job
- * database crosses between devices, and the second browser needs its own
- * redirect URI on the client anyway, so there is a setup step there regardless.
+ * It is deliberately **not** part of the sync snapshot — one of the few things
+ * that is not (`DEVICE_ONLY_TEXT`). The second browser needs its own redirect
+ * URI on the client anyway, so there is a setup step there regardless, and a
+ * credential that travelled through the file it unlocks would be no use.
  */
 
 export interface SyncClient {
@@ -108,5 +108,10 @@ export const SYNC_SCOPES = [
   'email',
 ].join(' ');
 
-/** The one file in the app folder. The CV and the profile never go near it. */
+/**
+ * The one file in the app folder — the whole synced state (`syncState.ts`).
+ * Still named for what it first held: an older build looks for this name, and
+ * finding a schema it refuses is what tells it to update, where a new name would
+ * leave two not-yet-updated browsers syncing their job lists without a word.
+ */
 export const SYNC_FILENAME = 'jobs.json';

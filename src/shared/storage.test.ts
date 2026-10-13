@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { fileToCvFile, cvFileToFile, setCv, getCv, clearCv } from './cvStore';
 import {
   saveJobUrls, getJobUrls, getSettings, saveSettings, getProfile, getState,
-  getLessons, mutateLessons, mutateProfile, normalizeProfile,
+  getLessons, mutateLessons, mutateProfile, normalizeProfile, dropRetiredKeys,
 } from './storage';
 import type { Lesson } from './types';
 
@@ -25,11 +25,11 @@ describe('settings', () => {
   it('backfills a setting an older install never stored', async () => {
     // Written before sessionBatchSize existed; reading must not yield undefined,
     // or the session would open zero tabs.
-    await chrome.storage.local.set({ settings: { closeTabOnSkip: false } });
+    await chrome.storage.local.set({ settings: { keepInBrowser: false } });
     const settings = await getSettings();
     expect(settings.sessionBatchSize).toBe(2);
-    expect(settings.closeTabOnSkip).toBe(false);
-    expect(settings.markDoneOnClose).toBe(true);
+    expect(settings.keepInBrowser).toBe(false);
+    expect(settings.openCardWhenFilled).toBe(false);
   });
 
   it('keeps a stored batch size over the default', async () => {
@@ -113,5 +113,29 @@ describe('job urls', () => {
     const list = await getJobUrls();
     expect(list).toHaveLength(1);
     expect(list[0].url).toBe('https://x.com/1');
+  });
+});
+
+describe('dropRetiredKeys', () => {
+  it('forgets the captured postings and the retired settings, and nothing else', async () => {
+    await chrome.storage.local.set({
+      jobDetails: { 'a://1': { url: 'a://1' } },
+      settings: {
+        fillAutomatically: false,
+        exportOptions: { format: 'csv' },
+        autoRunOnLoad: true,
+        markDoneOnClose: false,
+        closeTabOnSkip: false,
+        closeTabDelayMs: 200,
+        openCardOnQueueTabs: true,
+        modalFullscreen: true,
+      },
+      profile: { values: { email: 'a@x' } },
+    });
+    await dropRetiredKeys();
+    const raw = await chrome.storage.local.get(null);
+    expect(raw.jobDetails).toBeUndefined();
+    expect(raw.settings).toEqual({ fillAutomatically: false });
+    expect(raw.profile).toEqual({ values: { email: 'a@x' } });
   });
 });

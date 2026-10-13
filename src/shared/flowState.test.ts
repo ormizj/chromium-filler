@@ -29,15 +29,15 @@ describe('flowBanner', () => {
 
   it('an applied record outranks everything, with its date when it has one', () => {
     const at = new Date(2026, 4, 12).getTime();
-    const b = flowBanner({ ...base, profileEmpty: true, alreadyApplied: true, appliedAt: at, siteName: 'jobs.acme.test' });
-    expect(b.key).toBe('alreadyApplied');
+    const b = flowBanner({ ...base, profileEmpty: true, alreadyDone: true, doneAt: at, siteName: 'jobs.acme.test' });
+    expect(b.key).toBe('alreadyDone');
     expect(b.detail).toContain(new Date(at).toLocaleDateString());
     expect(b.detail.startsWith('jobs.acme.test')).toBe(true);
-    expect(flowBanner({ ...base, alreadyApplied: true }).detail).not.toMatch(/undefined|\{when\}/);
+    expect(flowBanner({ ...base, alreadyDone: true }).detail).not.toMatch(/undefined|\{when\}/);
   });
 
   it('never returns a key without words for it', () => {
-    const inputs: FlowInput[] = [base, { total: 0, filled: 0, toTeach: 0 }, { ...base, alreadyApplied: true }, { ...base, profileEmpty: true }, { total: 1, filled: 0, toTeach: 1 }];
+    const inputs: FlowInput[] = [base, { total: 0, filled: 0, toTeach: 0 }, { ...base, alreadyDone: true }, { ...base, profileEmpty: true }, { total: 1, filled: 0, toTeach: 1 }];
     for (const i of inputs) expect(FLOW_TEXT[flowBanner(i).key]).toBeDefined();
   });
 });

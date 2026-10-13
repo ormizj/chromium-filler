@@ -1,18 +1,16 @@
 /**
- * Turns a job-posting container into readable blocks.
+ * Turns a container of page text into readable blocks — today for the picker's
+ * preview of what a selection says.
  *
- * The modal used to show `container.textContent`, which is two bugs in one: every
- * heading, paragraph and bullet welds into a single string, and the HTML source's
- * own newlines and indentation survive into a `pre-wrap` box — so a posting
- * rendered as a ragged wall of text in a 160px window. Reading the posting is the
- * main thing the modal is for, so the structure has to survive the extraction.
+ * `container.textContent` is two bugs in one: every heading, paragraph and bullet
+ * welds into a single string, and the HTML source's own newlines and indentation
+ * survive into it — a ragged wall of text. So the structure survives the walk.
  *
- * The other half of the job is exclusion. The generic `jobDescription` fallbacks
- * in content/extract.ts (`main`, `article`, `[class*="content"]`) routinely
- * swallow the application form and the "similar jobs" sidebar, and quoting the
- * user's own field labels back at them is noise at best — at worst, as in
- * test/fixtures/sites/quick-board.html, it is a decoy "Apply on company website"
- * link presented as part of the posting.
+ * The other half of the job is exclusion. A broad container (`main`, `article`,
+ * `[class*="content"]`) routinely swallows the application form and the "similar
+ * jobs" sidebar, and quoting the user's own field labels back at them is noise at
+ * best — at worst, as in test/fixtures/sites/quick-board.html, it is a decoy
+ * "Apply on company website" link presented as part of the posting.
  */
 
 export type JobBlock =
@@ -61,10 +59,9 @@ function normalize(text: string): string {
  * walk applies to children, exposed so the *container* can be checked before it
  * is walked.
  *
- * It has to be: the fallbacks in content/extract.ts match on substrings of `id`
- * and `class`, and a board's "Show full description" **button** matches
- * `[id*="description"]` better than the description does, because it comes first
- * in the document. `extractBlocks` would then be handed a `<button>` as its root,
+ * It has to be: a selector matching on substrings of `id` and `class` finds a
+ * board's "Show full description" **button** before the description, because it
+ * comes first in the document. `extractBlocks` would then be handed a `<button>` as its root,
  * where `SKIP_TAGS` never applied — the walk only ever tested children — and emit
  * its label as the whole posting. That is what shipped, on the slow-boards
  * fixture, and it is why this predicate is public.

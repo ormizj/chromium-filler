@@ -1,39 +1,51 @@
 /**
  * Pure logic for the job-URL database: the URL is the unique key, and every
- * status change is timestamped and logged so the dashboard can show history and
- * track which applications were actually sent.
+ * status change is timestamped and logged — the log is what the sync merge
+ * unions. A posting is `new` (waiting) or `done`.
  */
 
 import type { JobLogStatus, JobUrlEntry, JobUrlStats, JobUrlStatus } from './types';
 
 /**
- * How far through the flow each status is. Two callers need it and they need it
- * for different reasons, which is why it is a constant rather than a comparison
- * written twice: `linkRedirect` below must not demote a posting by re-visiting
- * it, and the sync merge needs a *deterministic* tie-break when two devices log
- * different statuses in the same millisecond.
+ * How far through the flow each status is. There are two statuses now — a
+ * posting is waiting or it is done — and the rank is what the sync merge uses
+ * as a *deterministic* tie-break when two devices log different statuses in the
+ * same millisecond.
  *
  * Tombstones outrank everything ordinary — a removal is the user's most recent
  * word on a posting. An unrecognised status (a newer peer's) ranks -1: it is
  * never chosen as a tie-break winner by a build that cannot interpret it, while
  * the event itself is still carried in the log.
- *
- * `markedDone` sits between the two final statuses: above `skipped`, being the
- * user's own last word, and below `applied`, which is a confirmation the
- * extension actually saw.
  */
 export const STATUS_RANK: Record<JobUrlStatus | 'deleted', number> = {
-  new: 0, opened: 1, redirected: 2, skipped: 3, markedDone: 4, applied: 5, deleted: 6,
+  new: 0, done: 1, deleted: 2,
 };
 
 /**
- * Every status a posting can be *in*, in flow order — derived from the rank
- * table rather than written out a second time.
+ * What the six statuses of earlier builds mean now. Everything that said "dealt
+ * with" — skipped, applied, marked done, handed off to another site — is `done`.
+ * `opened` said "a tab is on it", which the queue's tab map says on its own, so
+ * that posting is still waiting.
  *
- * Everything that offers the statuses as a choice renders from this: the queue
- * filters and the archive's status checkboxes. Deriving it is what makes a new
- * status show up in both places, since it cannot be added to the model without
- * joining `STATUS_RANK` first. The tombstone is not one of them — a deleted
+ * Applied on every read by `normalizeEntry`, so stored lists, imported backups
+ * and an old remote file all arrive in today's two.
+ */
+const LEGACY_STATUS: Record<string, JobUrlStatus> = {
+  opened: 'new',
+  redirected: 'done',
+  applied: 'done',
+  skipped: 'done',
+  markedDone: 'done',
+};
+
+function currentStatus(status: JobLogStatus): JobLogStatus {
+  return LEGACY_STATUS[status] ?? status;
+}
+
+/**
+ * Every status a posting can be *in*, in flow order — derived from the rank
+ * table rather than written out a second time. The queue filters and the row
+ * status control render from it. The tombstone is not one of them — a deleted
  * posting is not shown, let alone filtered for.
  */
 export const ALL_JOB_STATUSES: JobUrlStatus[] = (
@@ -71,17 +83,41 @@ export function makeEntry(url: string, now: number): JobUrlEntry {
   };
 }
 
-/** Backfill legacy entries that predate updatedAt/history. */
+/** Fields the two-step flow wrote, which nothing reads any more. */
+const DROPPED_FIELDS = ['openedAt', 'appliedAt', 'sourceUrl', 'redirectUrl'] as const;
+
+/**
+ * Today's shape, whatever build wrote the entry: missing `updatedAt`/`history`
+ * backfilled, old statuses mapped (`LEGACY_STATUS`) in the status *and* the log,
+ * and the two-step fields dropped.
+ *
+ * Idempotent, which the sync merge relies on: it normalizes both sides and its
+ * output again on the next run. That is why two events the mapping made identical
+ * (`skipped` and `applied` at one instant) collapse to one, but two *different*
+ * consecutive events are kept — collapsing those would make a merged log differ
+ * from the same log normalized again.
+ */
 export function normalizeEntry(entry: JobUrlEntry): JobUrlEntry {
-  const status = entry.status ?? 'new';
+  const status = currentStatus(entry.status ?? 'new');
   const addedAt = entry.addedAt ?? Date.now();
-  return {
+  const seen = new Set<string>();
+  const history = (entry.history?.length ? entry.history : [{ status, at: addedAt }])
+    .map((e) => ({ status: currentStatus(e.status), at: e.at }))
+    .filter((e) => {
+      const key = `${e.status} ${e.at}`;
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    });
+  const out: JobUrlEntry = {
     ...entry,
     status,
     addedAt,
     updatedAt: entry.updatedAt ?? addedAt,
-    history: entry.history?.length ? entry.history : [{ status, at: addedAt }],
+    history,
   };
+  for (const key of DROPPED_FIELDS) delete (out as unknown as Record<string, unknown>)[key];
+  return out;
 }
 
 /** Add only URLs not already present (unique by URL). Returns the count added. */
@@ -119,47 +155,22 @@ export function applyStatus(
       updatedAt: now,
       history: [...e.history, { status, at: now }],
     };
-    if (status === 'opened' && next.openedAt == null) next.openedAt = now;
-    if (status === 'applied' && next.appliedAt == null) next.appliedAt = now;
     return next;
   });
 }
 
 /**
- * Mark every posting stuck at `opened` as done — the Queue tab's bulk action.
- *
- * `opened` is a mid-flow status, so a session whose postings were dealt with
- * outside the extension leaves them unfinished for ever, and the queue's progress
- * with them. Only `opened` moves: `redirected` is already counted done by the
- * queue, and every other status is either waiting or final. Tombstones are not
- * `opened`, so they fall out on their own. Each change is an ordinary history
- * event, which is all the sync merge needs.
- */
-export function markOpenedDone(
-  list: JobUrlEntry[],
-  now: number = Date.now(),
-): { list: JobUrlEntry[]; changed: number } {
-  let changed = 0;
-  const out = list.map((entry) => {
-    if (entry.status !== 'opened') return entry;
-    changed++;
-    return applyStatus([entry], entry.url, 'markedDone', now)[0];
-  });
-  return changed === 0 ? { list, changed } : { list: out, changed };
-}
-
-/**
  * A tab the queue opened was closed: the user is done with that posting.
  *
- * Only an `opened` posting moves, and only to `markedDone` — the user's own word,
- * which closing the tab is. One already skipped, applied or marked keeps its
- * answer, and one never opened is not this tab's to finish. The same list back
- * when nothing changes, so the caller can skip the write.
+ * Only a waiting posting moves, and only to `done` — the user's own word, which
+ * closing the tab is. One already done keeps its log as it is, and one never in
+ * the database is not this tab's to finish. The same list back when nothing
+ * changes, so the caller can skip the write.
  */
 export function finishOnClose(list: JobUrlEntry[], url: string, now: number = Date.now()): JobUrlEntry[] {
   const entry = list.find((e) => e.url === url);
-  if (!entry || entry.status !== 'opened') return list;
-  return applyStatus(list, url, 'markedDone', now);
+  if (!entry || normalizeEntry(entry).status !== 'new') return list;
+  return applyStatus(list, url, 'done', now);
 }
 
 /** Append an entry for `url` unless the database already has one. */
@@ -170,8 +181,8 @@ function ensureUrl(list: JobUrlEntry[], url: string, now: number): JobUrlEntry[]
 /**
  * Set a URL's status, adding it to the database first if it is not there yet.
  *
- * This is what the *user's* actions want, as opposed to the queue's. Skipping or
- * applying happens on whatever posting is on screen, and that is routinely one
+ * This is what the *user's* actions want, as opposed to the queue's. Skipping
+ * happens on whatever posting is on screen, and that is routinely one
  * they opened by hand rather than imported — for which bare `applyStatus` maps
  * over a list containing no such entry and quietly changes nothing, so a skip
  * the user watched happen leaves no trace. Pairing the two here rather than at
@@ -193,89 +204,13 @@ export function recordStatus(
  *
  * Exported because the *page* now needs to ask this, not just the merge rules:
  * `content/main.ts` reads it to find out whether the posting in front of the user
- * was already applied on an earlier visit, which is the one thing that retires
- * Apply and Skip. Note a tombstone answers `'deleted'` rather than `undefined` —
+ * was already finished on an earlier visit, which is the one thing that retires
+ * Skip. Note a tombstone answers `'deleted'` rather than `undefined` —
  * callers compare against the status they care about, so a deleted entry falls
  * out on its own without a special case here.
  */
 export function statusForUrl(list: JobUrlEntry[], url: string): JobLogStatus | undefined {
   return list.find((e) => e.url === url)?.status;
-}
-
-/**
- * Move a posting forward through the flow, never back.
- *
- * The "never demote" rule the two-step path relies on, said once. It also
- * declines to touch a status this build does not recognise — after a sync a
- * newer peer's value can be sitting here, and overwriting what we cannot
- * interpret is how the log stops being the truth.
- */
-function promote(
-  list: JobUrlEntry[],
-  url: string,
-  status: JobUrlStatus,
-  now: number,
-): JobUrlEntry[] {
-  const current = statusForUrl(list, url);
-  if (current === undefined) return applyStatus(list, url, status, now);
-  if (!isKnownStatus(current)) return list;
-  return statusRank(current) >= statusRank(status) ? list : applyStatus(list, url, status, now);
-}
-
-/**
- * Record a two-step ("redirect") posting: the board posting `sourceUrl` handed
- * off to the external application `destUrl`. Both ends are kept — the source so
- * the board posting is visibly dealt with, the destination because that is the
- * page actually applied on — and they point at each other.
- *
- * Either end may be new (a posting browsed rather than imported) or already
- * known; existing entries are never demoted (`promote`), so re-visiting an
- * application already marked applied — or skipped — leaves it that way.
- */
-export function linkRedirect(
-  list: JobUrlEntry[],
-  sourceUrl: string,
-  destUrl: string,
-  now: number = Date.now(),
-): JobUrlEntry[] {
-  if (!sourceUrl || !destUrl || sourceUrl === destUrl) return list;
-
-  let out = ensureUrl(ensureUrl(list, sourceUrl, now), destUrl, now);
-
-  out = out.map((e) => (e.url === sourceUrl ? { ...normalizeEntry(e), redirectUrl: destUrl } : e));
-  out = promote(out, sourceUrl, 'redirected', now);
-
-  out = out.map((e) => (e.url === destUrl ? { ...normalizeEntry(e), sourceUrl } : e));
-  out = promote(out, destUrl, 'opened', now);
-
-  return out;
-}
-
-/**
- * Apply a status to `url` and to every posting it came from, following
- * `sourceUrl` upward. Submitting on the ATS is what marks the board posting
- * applied, since that is where the application actually happened. Cycle-safe.
- *
- * Uses `recordStatus`, so applying on a page nobody imported still records it.
- * For the hops above the first that is a no-op — an entry named by a live
- * `sourceUrl` is by definition already in the list.
- */
-export function applyStatusChain(
-  list: JobUrlEntry[],
-  url: string,
-  status: JobLogStatus,
-  now: number = Date.now(),
-): JobUrlEntry[] {
-  let out = list;
-  const seen = new Set<string>();
-  let current: string | undefined = url;
-  while (current && !seen.has(current)) {
-    const at: string = current;
-    seen.add(at);
-    out = recordStatus(out, at, status, now);
-    current = out.find((e) => e.url === at)?.sourceUrl;
-  }
-  return out;
 }
 
 /**
@@ -325,9 +260,7 @@ export function pruneTombstones(
 
 export function jobUrlStats(list: JobUrlEntry[]): JobUrlStats {
   const visible = visibleUrls(list);
-  const stats: JobUrlStats = {
-    total: visible.length, new: 0, opened: 0, redirected: 0, applied: 0, skipped: 0, markedDone: 0,
-  };
+  const stats: JobUrlStats = { total: visible.length, new: 0, done: 0 };
   // A status from a newer peer counts toward `total` and nothing else — there is
   // no honest bucket for it, and inventing one would misreport the queue.
   for (const e of visible) if (isKnownStatus(e.status)) stats[e.status]++;

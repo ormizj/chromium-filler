@@ -2,7 +2,7 @@
  * One sync, end to end: storage → merge → Drive → storage, against a fake
  * Google.
  *
- * `mergeJobs` is proved correct next door in `syncJobs.test.ts`, and this file
+ * `mergeSnapshots` is proved correct next door in `syncState.test.ts`, and this file
  * deliberately does not re-prove it. What is tested here is the plumbing that
  * had none: the guards, the first-merge gate, the conflict retry, and — the one
  * that costs real money over time — *what actually gets written to the file*.
@@ -11,9 +11,9 @@
 import { beforeEach, afterEach, describe, expect, it } from 'vitest';
 import { resetChromeMock } from '../../test/setup';
 import { FakeGoogle } from '../../test/fakeGoogle';
-import { SYNC_SCHEMA, type JobSnapshot } from '../shared/syncJobs';
+import { SYNC_SCHEMA, type Snapshot } from '../shared/syncState';
 import type { JobUrlEntry } from '../shared/types';
-import { getJobUrls } from '../shared/storage';
+import { getJobUrls, getProfile, saveProfile } from '../shared/storage';
 import {
   connectAccount, disconnectAccount, setSyncClient, syncNow, syncOnStartup, syncState,
 } from './sync';
@@ -53,13 +53,13 @@ function ancientTombstone(url: string): JobUrlEntry {
   };
 }
 
-function snapshot(jobUrls: JobUrlEntry[]): JobSnapshot {
-  return { schema: SYNC_SCHEMA, jobUrls, jobDetails: {}, siteConfigs: [], deletedSiteConfigs: {} };
+function snapshot(jobUrls: JobUrlEntry[], state: Snapshot['state'] = {}): Snapshot {
+  return { schema: SYNC_SCHEMA, jobUrls, state };
 }
 
 /** What the fake now holds, parsed. */
-function remote(): JobSnapshot {
-  return JSON.parse(google.stored!) as JobSnapshot;
+function remote(): Snapshot {
+  return JSON.parse(google.stored!) as Snapshot;
 }
 
 async function localUrls(): Promise<string[]> {
@@ -116,13 +116,19 @@ describe('the first merge', () => {
     await connectAccount();
   });
 
-  it('stops to report both counts instead of merging', async () => {
+  it('stops to report what each side holds instead of merging', async () => {
     await chrome.storage.local.set({ jobUrls: [entry('https://a.example/1')] });
-    google.seed(JSON.stringify(snapshot([entry('https://b.example/2'), entry('https://b.example/3')])));
+    google.seed(JSON.stringify(snapshot(
+      [entry('https://b.example/2'), entry('https://b.example/3')],
+      { 'profile.values.email': { at: 1, value: 'them@x' } },
+    )));
 
     const s = await syncNow(false);
 
-    expect(s.pending).toEqual({ local: 1, remote: 2 });
+    expect(s.pending).toEqual({
+      local: { postings: 1, fields: 0, lessons: 0 },
+      remote: { postings: 2, fields: 1, lessons: 0 },
+    });
     // Nothing was written at either end.
     expect(await localUrls()).toEqual(['https://a.example/1']);
     expect(remote().jobUrls).toHaveLength(2);
@@ -205,8 +211,7 @@ describe('what gets written to the file', () => {
   it('carries no tombstone that this device has already forgotten', async () => {
     // `applySnapshot` prunes what it stores locally, and the *unpruned* merge
     // used to be what went up — so the remote file grew for ever, carrying
-    // deletions both devices had long since dropped, plus the captured job text
-    // hanging off them.
+    // deletions both devices had long since dropped.
     await chrome.storage.local.set({
       jobUrls: [entry('https://a.example/1'), ancientTombstone('https://gone.example/9')],
     });
@@ -240,7 +245,17 @@ describe('what gets written to the file', () => {
     await syncNow(true);
 
     expect(remote().schema).toBe(SYNC_SCHEMA);
-    expect(remote()).toHaveProperty('jobDetails');
+    expect(Object.keys(remote()).sort()).toEqual(['jobUrls', 'schema', 'state']);
+  });
+
+  it('carries the profile both ways', async () => {
+    await saveProfile({ values: { email: 'me@x' }, keywords: {}, customFields: [] });
+    google.seed(JSON.stringify(snapshot([], { 'profile.values.city': { at: 1, value: 'Oslo' } })));
+
+    await syncNow(true);
+
+    expect((await getProfile()).values).toEqual({ email: 'me@x', city: 'Oslo' });
+    expect(remote().state['profile.values.email'].value).toBe('me@x');
   });
 });
 
@@ -382,41 +397,26 @@ describe('syncOnStartup', () => {
 });
 
 /**
- * This build has no site configs. A peer still running an older build does, and
- * reads them back out of the shared file — so they ride through untouched rather
- * than being dropped on upload, and none of them is ever written to this device.
+ * The remote file as a build from before full-state sync left it: a job list,
+ * captured text and other builds' site configs. Read as the job list alone, and
+ * rewritten in the current shape — at schema 3, which that older build refuses
+ * rather than overwriting.
  */
-describe('site configs from an older build', () => {
+describe('a remote file from an older build', () => {
   beforeEach(ready);
 
-  const site = (id: string, updatedAt = 1) => ({ id, name: id, urlPatterns: [`*://${id}/*`], updatedAt });
+  it('reads a schema-1 or schema-2 file and writes it back as schema 3', async () => {
+    for (const schema of [1, 2]) {
+      google.seed(JSON.stringify({
+        schema, jobUrls: [entry('https://a.example/1')], jobDetails: {}, siteConfigs: [{ id: 'x' }],
+      }));
 
-  it('carries the far side\'s configs back up untouched, and keeps none of them here', async () => {
-    google.seed(JSON.stringify({ ...snapshot([]), siteConfigs: [site('zeta'), site('acme')], deletedSiteConfigs: { old: 5 } }));
+      const s = await syncNow(true);
 
-    await syncNow(true);
-
-    expect(remote().siteConfigs.map((c: { id: string }) => c.id)).toEqual(['acme', 'zeta']);
-    expect(remote().deletedSiteConfigs).toEqual({ old: 5 });
-    expect((await chrome.storage.local.get('siteConfigs')).siteConfigs).toBeUndefined();
-  });
-
-  it('never sends a stale local copy over the far side\'s', async () => {
-    await chrome.storage.local.set({ siteConfigs: [site('acme', 999)] });
-    google.seed(JSON.stringify({ ...snapshot([]), siteConfigs: [site('acme', 2)] }));
-
-    await syncNow(true);
-
-    expect(remote().siteConfigs).toEqual([site('acme', 2)]);
-  });
-
-  it('reads a schema-1 file as one with no configs', async () => {
-    google.seed(JSON.stringify({ schema: 1, jobUrls: [], jobDetails: {} }));
-
-    const s = await syncNow(true);
-
-    expect(s.lastError).toBeUndefined();
-    expect(remote().schema).toBe(SYNC_SCHEMA);
-    expect(remote().siteConfigs).toEqual([]);
+      expect(s.lastError, String(schema)).toBeUndefined();
+      expect(remote().schema).toBe(SYNC_SCHEMA);
+      expect(Object.keys(remote()).sort()).toEqual(['jobUrls', 'schema', 'state']);
+      expect(await localUrls()).toEqual(['https://a.example/1']);
+    }
   });
 });

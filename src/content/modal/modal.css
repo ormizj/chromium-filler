@@ -9,7 +9,7 @@
 }
 
 /* Nothing about the card's box lives here any more. Both sheets share one slot
-   on the page — anchor, bottom-sheet breakpoint, peek, fullscreen and the resize
+   on the page — anchor, bottom-sheet breakpoint, peek and the resize
    handles are all in primitives.css, and `content/sheet.ts` writes the user's
    rectangle over them inline. A `.cf-card` rule in this file would be inlined
    after primitives.css at equal specificity and silently beat the media queries
@@ -25,154 +25,6 @@
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-}
-
-/* ---------------- Job / Fields switch ---------------- */
-
-/**
- * The header toggle. It is a segmented control rather than two plain buttons so
- * that "which view am I in" is answered by shape, not just by weight — on a phone
- * the header is read at a glance between taps. A rounded rectangle (not a pill),
- * on the recessed `--surface` track, matching the reference toggle.
- */
-/* Equal segments, sized to the wider of the two. Content-sized ones measured
-   Job 45px against Fields 74px, so the white active pill changed size as you
-   switched and the whole control resized whenever the Fields dot appeared or
-   cleared — a header that moves under a re-render. The control's overall width is
-   still content-driven; only the split inside it is fixed. */
-.cf-views {
-  display: grid;
-  grid-auto-flow: column;
-  grid-auto-columns: 1fr;
-  flex: none;
-  gap: 2px;
-  padding: var(--space-1);
-  border-radius: var(--radius-lg);
-  background: var(--surface);
-}
-
-button.cf-view {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  gap: var(--space-1);
-  font: 500 var(--text-sm) / 1 var(--font);
-  color: var(--muted);
-  background: transparent;
-  border: none;
-  border-radius: var(--radius-md);
-  padding: var(--space-2) var(--space-4);
-  /* `--tap` on every pointer, like every other button — switching views is the
-     most-used action in the modal and it was a 26px sliver on a mouse. */
-  min-height: var(--tap);
-  cursor: pointer;
-  white-space: nowrap;
-}
-
-button.cf-view.active {
-  background: var(--bg);
-  color: var(--fg);
-  box-shadow: var(--shadow-1);
-}
-
-/* The tab's dot is the report's worst status — the whole point of it is to be
-   legible while the report itself is hidden, so it does not shrink. */
-button.cf-view .cf-dot {
-  width: 12px;
-  height: 12px;
-  font-size: 8px;
-}
-
-/* Only the breathing room is coarse-pointer specific now; the height floor above
-   already applies everywhere. */
-@media (pointer: coarse) {
-  button.cf-view {
-    padding-inline: var(--space-5);
-  }
-}
-
-/* ---------------- Job view ---------------- */
-
-.cf-title {
-  font-size: var(--text-2xl);
-  font-weight: 600;
-  line-height: 1.2;
-  letter-spacing: -0.01em;
-  margin: 0 0 var(--space-4);
-}
-
-/* Once the application is in, the posting is the receipt's subject line, not the
-   headline — at full size it out-shouted the confirmation sitting above it. */
-.cf-title.cf-title-sub {
-  font-size: var(--text-lg);
-}
-
-/**
- * The three meta facts under the title. Shared `.chip.accent` for the tint, at the
- * reference's rounded-rectangle radius rather than the pill: `.jobmeta b` is a tag
- * on a line of facts, not a status pill, and at this size a pill among three reads
- * as a row of buttons.
- */
-.cf-jobmeta {
-  display: flex;
-  flex-wrap: wrap;
-  gap: var(--space-2);
-  margin: 0 0 var(--space-5);
-}
-
-/* The chips belong to the title, so they sit closer to it than a paragraph would —
-   the reference's 6px, against the 10px the title keeps when it stands alone. */
-.cf-title:has(+ .cf-jobmeta) {
-  margin-bottom: var(--space-2);
-}
-
-.cf-jobmeta .chip {
-  border-radius: var(--radius-md);
-  font-size: var(--text-sm);
-}
-
-/**
- * The posting, rendered as prose. This used to be one `pre-wrap` string in a
- * 160px inner scroller nested inside the already-scrolling body — a keyhole onto
- * ragged text. The body is now the only scroller, and the blocks
- * (shared/jobText.ts) carry the structure the page had.
- */
-.cf-prose {
-  font-size: var(--text-base);
-  line-height: 1.7;
-  /* Body copy is the second ink level, with only the headings at full strength —
-     the reference's reading typography, and what keeps a full-length posting from
-     reading as a wall. */
-  color: var(--muted);
-  overflow-wrap: break-word;
-}
-
-.cf-prose p {
-  margin: 0 0 var(--space-5);
-}
-
-.cf-prose h4 {
-  font-size: var(--text-md);
-  font-weight: 600;
-  color: var(--fg);
-  margin: var(--space-6) 0 var(--space-2);
-}
-
-.cf-prose > :first-child {
-  margin-top: 0;
-}
-
-.cf-prose ul {
-  margin: 0 0 var(--space-5);
-  padding-left: 1.25em;
-}
-
-.cf-prose li {
-  margin-bottom: var(--space-2);
-}
-
-.cf-prose > :last-child {
-  margin-bottom: 0;
 }
 
 /* ---------------- The flow banner: the modal's own states ---------------- */
@@ -203,18 +55,30 @@ button.cf-view .cf-dot {
   height: 20px;
 }
 
+/* Fill again is the footer's main action, so it takes three shares of the row to
+   one for each of the others: 75/25 beside Teach. Every footer button is
+   `flex: 1` (primitives.css); this is the one exception. */
+.cf-footer-actions > button.cf-btn.cf-fill-again {
+  flex: 3;
+}
+
 /* The outcome on the header strip, which never scrolls away. */
 .cf-sent-chip {
   flex: none;
 }
 
+/* The report's worst status, beside the close button. It is read while the rows
+   are scrolled away, so it does not shrink. */
+.cf-header-dot {
+  flex: none;
+}
+
 /**
- * Narrow, and sent: the site name goes rather than being sliced. The header runs
- * name · Sent · Job/Fields · fullscreen · close, and at 390px the name is what
- * gave way — "Acme Careers" came out as "Acme C…", which names nothing. It is not
- * lost: the confirmation banner leading the body says "Acme Careers confirmed it".
- * The chip then holds the left, so the toggle and the icon buttons stay where they
- * are on every other state of the card.
+ * Narrow, and done: the site name goes rather than being sliced. The header runs
+ * name · Done · status · close, and at 390px the name is what gave way — "Acme
+ * Careers" came out as "Acme C…", which names nothing. The chip then holds the
+ * left, so the status dot and close stay where they are on every other state of
+ * the card.
  */
 @media (max-width: 640px) {
   .cf-header:has(> .cf-sent-chip) > .cf-site {
@@ -250,14 +114,7 @@ button.cf-btn.cf-applied-btn[aria-disabled='true'] {
   margin-bottom: 0;
 }
 
-/* The three-stat summary sits below the posting in the Job view. The tile itself
-   is the shared `.cf-stats`/`.cf-stat` primitive; only the gap above it is the
-   modal's, so it stays here rather than baked into the shared component. */
-.cf-body > .cf-stats {
-  margin-top: var(--space-6);
-}
-
-/* ---------------- Fields view ---------------- */
+/* ---------------- The report ---------------- */
 
 /**
  * The report is a divided list, not a stack of boxes. `.cf-row` is the shared
@@ -373,57 +230,6 @@ button.cf-btn.cf-applied-btn[aria-disabled='true'] {
 .cf-qd.now {
   background: var(--accent-weak);
   box-shadow: inset 0 0 0 2px var(--accent);
-}
-
-/* The overflow menu behind the footer's two decisions. Everything that acts on
-   the extension rather than the posting lives in here, so Apply and Skip keep
-   the full thumb-sized width at 390px. */
-.cf-more {
-  position: relative;
-  flex: 0 0 auto;
-}
-
-/* A square icon button, the width of one tap — the footer's floor of 96px is for
-   the two decisions, and applying it here spent a quarter of a 390px footer on
-   three dots. */
-.cf-more > .cf-btn {
-  flex: 0 0 var(--tap);
-  width: var(--tap);
-  min-width: 0;
-  padding-inline: 0;
-}
-
-.cf-more-menu {
-  position: absolute;
-  right: 0;
-  bottom: calc(100% + var(--space-2));
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-1);
-  padding: var(--space-2);
-  min-width: 168px;
-  background: var(--bg);
-  border: 1px solid var(--border);
-  border-radius: var(--radius-md);
-  box-shadow: var(--shadow-2);
-  /* The menu opens upward, inside a card that is `overflow: hidden` and may be
-     as short as MIN_H (260px). Five items at a full tap target is taller than
-     the space above the footer there, so it scrolls rather than losing its last
-     item to the card's clip — which is silent, and always costs the item the
-     user was reaching for. */
-  max-height: 280px;
-  overflow-y: auto;
-  overscroll-behavior: contain;
-}
-
-.cf-more-menu[hidden] {
-  display: none;
-}
-
-.cf-more-menu .cf-btn {
-  justify-content: flex-start;
-  width: 100%;
-  min-height: var(--tap);
 }
 
 /* ---------------- Teaching ---------------- */
