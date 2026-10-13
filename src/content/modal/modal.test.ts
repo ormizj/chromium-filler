@@ -550,7 +550,7 @@ describe('FillerModal — the footer offers Apply and Skip', () => {
       session: {
         active: true,
         batchSize: 5,
-        progress: { total: 4, queued: 2, inFlight: 1, applied: 1, skipped: 0, done: 1, ratio: 0.25 },
+        progress: { total: 4, queued: 2, inFlight: 1, applied: 1, skipped: 0, markedDone: 0, done: 1, ratio: 0.25 },
       },
     }));
     expect(labels(shadow)).toEqual(['Apply', 'Skip → next']);

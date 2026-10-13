@@ -227,11 +227,17 @@ export async function urlForTab(tabId: number): Promise<string | undefined> {
   return (await getTabs())[String(tabId)];
 }
 
+/**
+ * `batchSize` is the running window while a session is active, and the saved
+ * setting otherwise. The record keeps the last session's size after it stops,
+ * and reporting that put the old number back in the Queue tab's field on every
+ * reload — so a size chosen there looked as though it had never been saved.
+ */
 export async function sessionState(): Promise<SessionState> {
-  const [record, tabs, list] = await Promise.all([getRecord(), getTabs(), getJobUrls()]);
+  const [record, tabs, list, settings] = await Promise.all([getRecord(), getTabs(), getJobUrls(), getSettings()]);
   return {
     active: record.active,
-    batchSize: record.batchSize,
+    batchSize: record.active ? record.batchSize : settings.sessionBatchSize,
     progress: queueProgress(list, Object.values(tabs)),
   };
 }

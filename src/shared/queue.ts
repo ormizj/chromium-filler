@@ -53,7 +53,9 @@ export interface QueueProgress {
   inFlight: number;
   applied: number;
   skipped: number;
-  /** Postings that need no further action: applied, skipped, or handed off. */
+  /** Postings the user closed by hand (see `JobUrlStatus`). */
+  markedDone: number;
+  /** Postings that need no further action: applied, skipped, marked done, or handed off. */
   done: number;
   /** `done / total`, clamped to 0 for an empty database. */
   ratio: number;
@@ -93,6 +95,7 @@ export function queueProgress(rawList: JobUrlEntry[], inFlight: string[]): Queue
   let applied = 0;
   let skipped = 0;
   let redirected = 0;
+  let markedDone = 0;
   let live = 0;
   for (const entry of list) {
     if (open.has(entry.url)) live++;
@@ -100,16 +103,18 @@ export function queueProgress(rawList: JobUrlEntry[], inFlight: string[]): Queue
     else if (entry.status === 'applied') applied++;
     else if (entry.status === 'skipped') skipped++;
     else if (entry.status === 'redirected') redirected++;
+    else if (entry.status === 'markedDone') markedDone++;
   }
   // A redirected posting is finished as far as the queue is concerned — the
   // application continues on the ATS entry, which is tracked in its own right.
-  const done = applied + skipped + redirected;
+  const done = applied + skipped + redirected + markedDone;
   return {
     total: list.length,
     queued,
     inFlight: live,
     applied,
     skipped,
+    markedDone,
     done,
     ratio: list.length === 0 ? 0 : done / list.length,
   };

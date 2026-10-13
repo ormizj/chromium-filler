@@ -1972,6 +1972,18 @@ two-step posting (both ends, cross-linked, never demoting an existing status),
 dashboard.
 `urlImport.ts` extracts/normalizes/dedupes URLs from a pasted text blob.
 
+**`markedDone` is the one status only the user sets.** A queue session that the
+user dealt with outside the extension leaves its postings at `opened`, a mid-flow
+status, for ever — the queue never counts them finished. Options → Queue's
+**Mark opened as done** (`markOpenedDone`, pure) moves every visible `opened`
+posting to it after a confirm naming the count; `redirected` is left alone, the
+queue already counting it done. It ranks between `skipped` and `applied` (the
+user's final word, but not a confirmation anyone saw), counts toward
+`queueProgress.done`, and is an ordinary history event, so sync needs no schema
+bump. **No code path may assign it automatically** — that is what keeps it
+meaning "I said so". Its confirm is `.confirm.calm`, not the red Clear-all box:
+it is undoable row by row, and danger colours would overstate it.
+
 `STATUS_RANK` names how far through the flow each status is. It exists because
 two callers needed it for different reasons: `linkRedirect` must not demote a
 posting by re-visiting it (it used to spell that as two inline

@@ -2327,6 +2327,33 @@ test('Options: the queue filters and searches, and Remove can be undone', async 
   });
 });
 
+test('Options: Mark opened as done confirms, then closes every opened posting and nothing else', async () => {
+  await seedJobUrls([
+    jobEntry('https://stuck.example/jobs/1', { status: 'opened' }),
+    jobEntry('https://stuck.example/jobs/2', { status: 'opened' }),
+    jobEntry('https://stuck.example/jobs/3', { status: 'opened' }),
+    jobEntry('https://sent.example/jobs/4', { status: 'applied' }),
+  ]);
+
+  await onExtensionPage(async (page) => {
+    await page.click('#tab-queue');
+    await page.click('#mark-opened-done');
+    await expect(page.locator('#mark-done-confirm-label')).toContainText('3 opened');
+
+    await page.click('#mark-done-cancel');
+    await expect(page.locator('#urls-list .chip', { hasText: 'Marked done' })).toHaveCount(0);
+
+    await page.click('#mark-opened-done');
+    await page.click('#mark-done-really');
+    await expect(page.locator('#queue-status')).toContainText('Marked 3');
+    await expect(page.locator('#urls-list .chip', { hasText: 'Marked done' })).toHaveCount(3);
+  });
+
+  const raw = await readJobUrls();
+  expect(raw.filter((e) => e.status === 'markedDone')).toHaveLength(3);
+  expect(raw.find((e) => e.url === 'https://sent.example/jobs/4')?.status).toBe('applied');
+});
+
 test('Options: Clear all confirms, then tombstones rather than emptying the list', async () => {
   await seedJobUrls([
     jobEntry('https://gone.example/jobs/1'),

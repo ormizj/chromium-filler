@@ -732,8 +732,19 @@ label.fld.inline input {
 .cf-stat.redirected .cf-stat-n {
   color: var(--accent);
 }
-.cf-stat.skipped .cf-stat-n {
+.cf-stat.skipped .cf-stat-n,
+.cf-stat.markedDone .cf-stat-n {
   color: var(--muted);
+}
+
+/* Seven tiles at three to a row leave the last one alone on a row of its own.
+   Narrow, Total takes the first row by itself — it is the sum of the six below,
+   so it reads as their heading — and the six statuses fill two even rows. Wide,
+   the grid fits all seven on one line and this would only break it. */
+@media (max-width: 640px) {
+  #url-stats .cf-stat.total {
+    grid-column: 1 / -1;
+  }
 }
 
 /* Session control block: start/stop plus the batch size that decides how many
@@ -1010,10 +1021,24 @@ label.fld.inline input {
   display: none;
 }
 .confirm .label {
-  flex: 1;
+  /* A basis, not a bare `flex: 1`: at 390px the sentence was squeezed into a
+     column a few words wide beside the two buttons. With a floor it takes the
+     row and the buttons wrap underneath it. */
+  flex: 1 1 220px;
   font-size: var(--text-md);
   font-weight: 600;
   color: var(--err);
+}
+
+/* The same question asked about something that is not a loss: Mark opened as
+   done is undoable row by row, so drawing it in the danger colours of Clear all
+   would say it costs more than it does. */
+.confirm.calm {
+  border-color: var(--border-strong);
+  background: var(--bg);
+}
+.confirm.calm .label {
+  color: var(--fg);
 }
 
 /* A one-tap Remove needs a way back; a toast is cheaper than a confirm dialog
@@ -1804,4 +1829,12 @@ label.check .cf-help-btn {
   display: flex;
   align-items: center;
   gap: var(--space-2);
+}
+
+/* A button with its own `?` beside it in an action row — `attachHelp` appends the
+   `?` inside the anchor, so the pair has to stay one inline item. */
+.with-help {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
 }

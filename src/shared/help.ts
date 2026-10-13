@@ -713,7 +713,7 @@ export type ConceptKey =
   | 'dots' | 'autoVsSaved' | 'todoChip' | 'picker' | 'neverSubmits'
   | 'twoStep' | 'appLink' | 'sessions' | 'urlPattern' | 'successSelector' | 'howItWorks'
   | 'apply' | 'applyUnverified' | 'alreadyApplied' | 'exportJobs' | 'syncClient' | 'coverLetter'
-  | 'recording' | 'marking' | 'selectorStrength' | 'finishSetup' | 'formFactor';
+  | 'recording' | 'marking' | 'selectorStrength' | 'finishSetup' | 'formFactor' | 'markedDone';
 
 /**
  * One numbered step of a guide the user follows with another site open beside it.
@@ -1120,6 +1120,19 @@ export const CONCEPT_HELP: Record<ConceptKey, HelpEntry> = {
    * were read (so the file is not built from what is open now), and that a
    * two-step posting arrives as one row rather than two.
    */
+  markedDone: {
+    title: 'Marked done',
+    short: 'Closes every posting still at “opened” — the ones you dealt with yourself.',
+    body: 'A posting goes to “opened” when its tab opens, and stays there until the '
+      + 'extension sees it applied, skipped or handed off. One you dealt with some '
+      + 'other way — applied without the extension watching, or just decided against '
+      + 'in the tab — never moves on, so the queue never counts it finished. “Marked '
+      + 'done” is the status for those. Only you set it; the extension never does. '
+      + '“Mark opened as done” moves every posting still at “opened” to it in one go, '
+      + 'and leaves “handed off” postings alone — the queue already counts those '
+      + 'finished. Any one of them can be changed back from its status menu.',
+    when: 'A session left a run of postings at “opened” and you are finished with them.',
+  },
   exportJobs: {
     title: 'Export jobs',
     short: 'Downloads the postings you choose, with their text, as one file.',

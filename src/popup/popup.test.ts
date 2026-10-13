@@ -60,7 +60,7 @@ const session = (over: Partial<SessionState['progress']> = {}): SessionState => 
   active: true,
   batchSize: 5,
   progress: {
-    total: 60, queued: 48, inFlight: 5, applied: 6, skipped: 1, done: 7, ratio: 7 / 60, ...over,
+    total: 60, queued: 48, inFlight: 5, applied: 6, skipped: 1, markedDone: 0, done: 7, ratio: 7 / 60, ...over,
   },
 });
 
@@ -203,7 +203,7 @@ describe('popup render', () => {
 describe('queue session', () => {
   it('hides the session strip when no session is running', async () => {
     mockSession({ active: false, batchSize: 5, progress: {
-      total: 0, queued: 0, inFlight: 0, applied: 0, skipped: 0, done: 0, ratio: 0,
+      total: 0, queued: 0, inFlight: 0, applied: 0, skipped: 0, markedDone: 0, done: 0, ratio: 0,
     } });
     await mountPopup(matched());
     expect(document.getElementById('session')!.hidden).toBe(true);

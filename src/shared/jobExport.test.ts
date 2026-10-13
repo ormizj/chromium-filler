@@ -194,6 +194,11 @@ describe('resolveExport', () => {
     expect(statuses).toEqual(['skipped', 'applied']);
   });
 
+  it('puts a ticked “marked done” in flow order, between skipped and applied', () => {
+    expect(resolveExport({ statuses: { markedDone: true, skipped: true } }).statuses)
+      .toEqual(['skipped', 'markedDone', 'applied']);
+  });
+
   it('ignores a key it has never heard of, rather than failing on it', () => {
     const stored = JSON.parse('{"fields":{"salary":true},"statuses":{"archived":true}}');
     expect(resolveExport(stored)).toEqual(resolveExport());

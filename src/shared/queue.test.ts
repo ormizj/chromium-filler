@@ -61,6 +61,7 @@ describe('queueProgress', () => {
       inFlight: 1,
       applied: 1,
       skipped: 1,
+      markedDone: 0,
       done: 2,
       ratio: 0.4,
     });
@@ -73,6 +74,14 @@ describe('queueProgress', () => {
     expect(p.queued).toBe(1);
   });
 
+  it('counts a posting the user marked done as done', () => {
+    const l = list(['a', 'markedDone'], ['b', 'opened']);
+    const p = queueProgress(l, []);
+    expect(p.markedDone).toBe(1);
+    expect(p.done).toBe(1);
+    expect(p.ratio).toBe(0.5);
+  });
+
   it('ignores in-flight URLs that are no longer in the database', () => {
     const l = list(['a', 'new']);
     expect(queueProgress(l, ['gone']).inFlight).toBe(0);
@@ -80,14 +89,14 @@ describe('queueProgress', () => {
 
   it('reports a zero ratio for an empty database rather than dividing by zero', () => {
     expect(queueProgress([], [])).toEqual({
-      total: 0, queued: 0, inFlight: 0, applied: 0, skipped: 0, done: 0, ratio: 0,
+      total: 0, queued: 0, inFlight: 0, applied: 0, skipped: 0, markedDone: 0, done: 0, ratio: 0,
     });
   });
 });
 
 describe('progressDots', () => {
   const progress = (over: Partial<QueueProgress> = {}): QueueProgress => ({
-    total: 0, queued: 0, inFlight: 0, applied: 0, skipped: 0, done: 0, ratio: 0,
+    total: 0, queued: 0, inFlight: 0, applied: 0, skipped: 0, markedDone: 0, done: 0, ratio: 0,
     ...over,
   });
 

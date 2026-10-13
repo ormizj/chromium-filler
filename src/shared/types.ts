@@ -195,7 +195,13 @@ export interface FieldMatch {
   required: boolean;
 }
 
-export type JobUrlStatus = 'new' | 'opened' | 'redirected' | 'applied' | 'skipped';
+/**
+ * `markedDone` is the one status only the user ever sets: a posting they have
+ * finished with outside the extension — typically one a queue session opened and
+ * that would otherwise sit at `opened`, a mid-flow status, for ever. Nothing in
+ * the extension may assign it on its own.
+ */
+export type JobUrlStatus = 'new' | 'opened' | 'redirected' | 'applied' | 'skipped' | 'markedDone';
 
 /**
  * A status as it appears in the log — deliberately *open*, and the openness is
@@ -257,6 +263,7 @@ export interface JobUrlStats {
   redirected: number;
   applied: number;
   skipped: number;
+  markedDone: number;
 }
 
 /** Where a followed external application opens. */

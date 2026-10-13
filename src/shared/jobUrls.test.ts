@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import {
   ALL_JOB_STATUSES, addUrls, applyStatus, applyStatusChain, deleteUrl, jobUrlStats, linkRedirect,
-  normalizeEntry, pruneTombstones, recordStatus, removeUrl, statusForUrl, TOMBSTONE_TTL_MS,
+  markOpenedDone, normalizeEntry, pruneTombstones, recordStatus, removeUrl, statusForUrl, TOMBSTONE_TTL_MS,
   visibleUrls,
 } from './jobUrls';
 import type { JobUrlEntry } from './types';
@@ -39,7 +39,7 @@ describe('ALL_JOB_STATUSES', () => {
    * — the queue filters and the archive's status checkboxes both render from it.
    */
   it('is every status a posting can be in, in flow order', () => {
-    expect(ALL_JOB_STATUSES).toEqual(['new', 'opened', 'redirected', 'skipped', 'applied']);
+    expect(ALL_JOB_STATUSES).toEqual(['new', 'opened', 'redirected', 'skipped', 'markedDone', 'applied']);
   });
 
   it('leaves out the tombstone, which is not a state a posting is shown in', () => {
@@ -158,8 +158,10 @@ describe('jobUrlStats', () => {
     list = applyStatus(list, 'a://3', 'applied', 1);
     list = applyStatus(list, 'a://4', 'skipped', 1);
     list = applyStatus(list, 'a://5', 'redirected', 1);
+    list = addUrls(list, ['a://6'], 0).list;
+    list = applyStatus(list, 'a://6', 'markedDone', 1);
     expect(jobUrlStats(list)).toEqual({
-      total: 5, new: 1, opened: 1, redirected: 1, applied: 1, skipped: 1,
+      total: 6, new: 1, opened: 1, redirected: 1, applied: 1, skipped: 1, markedDone: 1,
     });
   });
 });
@@ -206,9 +208,59 @@ describe('linkRedirect — two-step postings', () => {
     expect(dest.sourceUrl).toBe(BOARD);
   });
 
+  it('keeps a destination the user marked done that way (never demotes it)', () => {
+    let list = addUrls([], [BOARD, ATS], 1000).list;
+    list = applyStatus(list, ATS, 'markedDone', 1500);
+    list = linkRedirect(list, BOARD, ATS, 2000);
+    expect(list.find((e) => e.url === ATS)!.status).toBe('markedDone');
+  });
+
   it('is a no-op when the destination is the source (no real redirect)', () => {
     const before = addUrls([], [BOARD], 1000).list;
     expect(linkRedirect(before, BOARD, BOARD, 2000)).toEqual(before);
+  });
+});
+
+describe('markOpenedDone — close every posting stuck at opened', () => {
+  function seeded(): JobUrlEntry[] {
+    let { list } = addUrls([], ['a://1', 'a://2', 'a://3', 'a://4', 'a://5', 'a://6'], 0);
+    list = applyStatus(list, 'a://1', 'opened', 1);
+    list = applyStatus(list, 'a://2', 'opened', 1);
+    list = applyStatus(list, 'a://3', 'redirected', 1);
+    list = applyStatus(list, 'a://4', 'applied', 1);
+    list = applyStatus(list, 'a://5', 'opened', 1);
+    list = deleteUrl(list, 'a://5', 2);
+    return list;
+  }
+
+  it('moves only opened postings, and counts them', () => {
+    const { list, changed } = markOpenedDone(seeded(), 10);
+    expect(changed).toBe(2);
+    expect(list.map((e) => e.status)).toEqual(
+      ['markedDone', 'markedDone', 'redirected', 'applied', 'deleted', 'new'],
+    );
+  });
+
+  /**
+   * Redirected is a mid-flow status too, but the user asked for opened alone:
+   * the board end of a handoff is already counted done by the queue.
+   */
+  it('leaves redirected, final, new and tombstoned postings alone', () => {
+    const before = seeded();
+    const { list } = markOpenedDone(before, 10);
+    for (const i of [2, 3, 4, 5]) expect(list[i]).toBe(before[i]);
+  });
+
+  /** A normal history event, so sync merges it with no special case. */
+  it('logs the change as one history event per posting', () => {
+    const { list } = markOpenedDone(seeded(), 10);
+    expect(list[0].history.slice(-1)).toEqual([{ status: 'markedDone', at: 10 }]);
+    expect(list[0].updatedAt).toBe(10);
+  });
+
+  it('changes nothing when nothing is opened', () => {
+    const before = addUrls([], ['a://1'], 0).list;
+    expect(markOpenedDone(before, 10)).toEqual({ list: before, changed: 0 });
   });
 });
 

@@ -80,6 +80,7 @@
 
           <div class="row">
             <button id="open-new">Open all “new” now</button>
+            <span id="mark-done-label" class="with-help"><button id="mark-opened-done">Mark opened as done</button></span>
             <button id="clear-urls" class="btn-danger">Clear all</button>
             <span id="queue-status" class="status" role="status" aria-live="polite"></span>
           </div>
@@ -87,6 +88,11 @@
             <span class="label" id="clear-confirm-label"></span>
             <button id="clear-cancel">Cancel</button>
             <button id="clear-really" class="btn-danger">Delete</button>
+          </div>
+          <div id="mark-done-confirm" class="confirm calm" hidden>
+            <span class="label" id="mark-done-confirm-label"></span>
+            <button id="mark-done-cancel">Cancel</button>
+            <button id="mark-done-really">Mark done</button>
           </div>
 
           <h3 id="archive-heading">Archive</h3>

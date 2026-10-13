@@ -616,5 +616,6 @@ export const JOB_STATUS_LABELS: Record<JobUrlStatus, string> = {
   opened: 'Opened',
   redirected: 'Handed off',
   skipped: 'Skipped',
+  markedDone: 'Marked done',
   applied: 'Applied',
 };

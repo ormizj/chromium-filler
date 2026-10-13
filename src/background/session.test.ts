@@ -10,7 +10,7 @@ import {
   onSubmitted, onTabClosed, openUrls, sessionState, skipUrl, startSession, stopSession, urlForTab,
 } from './session';
 import { addUrls } from '../shared/jobUrls';
-import { getJobUrls, saveJobUrls } from '../shared/storage';
+import { getJobUrls, getSettings, saveJobUrls, saveSettings } from '../shared/storage';
 import type { JobLogStatus } from '../shared/types';
 import { closeTab, openTabs, resetChromeMock } from '../../test/setup';
 
@@ -229,6 +229,28 @@ describe('stopSession', () => {
     const state = await settled(startSession(2));
     expect(state.active).toBe(true);
     expect(openTabs.size).toBe(2); // already full, nothing extra opened
+  });
+});
+
+describe('sessionState — the batch size it reports', () => {
+  it('reports the saved setting while no session is running, not the last session\'s size', async () => {
+    await seed(4);
+    await settled(startSession(3));
+    await stopSession();
+    await saveSettings({ ...(await getSettings()), sessionBatchSize: 5 });
+
+    expect((await sessionState()).batchSize).toBe(5);
+  });
+
+  it('reports the saved setting before any session has ever run', async () => {
+    await saveSettings({ ...(await getSettings()), sessionBatchSize: 7 });
+    expect((await sessionState()).batchSize).toBe(7);
+  });
+
+  it('reports the running window while a session is active', async () => {
+    await seed(4);
+    await settled(startSession(3));
+    expect((await sessionState()).batchSize).toBe(3);
   });
 });
 

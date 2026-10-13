@@ -17,9 +17,13 @@ import type { JobLogStatus, JobUrlEntry, JobUrlStats, JobUrlStatus } from './typ
  * word on a posting. An unrecognised status (a newer peer's) ranks -1: it is
  * never chosen as a tie-break winner by a build that cannot interpret it, while
  * the event itself is still carried in the log.
+ *
+ * `markedDone` sits between the two final statuses: above `skipped`, being the
+ * user's own last word, and below `applied`, which is a confirmation the
+ * extension actually saw.
  */
 export const STATUS_RANK: Record<JobUrlStatus | 'deleted', number> = {
-  new: 0, opened: 1, redirected: 2, skipped: 3, applied: 4, deleted: 5,
+  new: 0, opened: 1, redirected: 2, skipped: 3, markedDone: 4, applied: 5, deleted: 6,
 };
 
 /**
@@ -119,6 +123,29 @@ export function applyStatus(
     if (status === 'applied' && next.appliedAt == null) next.appliedAt = now;
     return next;
   });
+}
+
+/**
+ * Mark every posting stuck at `opened` as done — the Queue tab's bulk action.
+ *
+ * `opened` is a mid-flow status, so a session whose postings were dealt with
+ * outside the extension leaves them unfinished for ever, and the queue's progress
+ * with them. Only `opened` moves: `redirected` is already counted done by the
+ * queue, and every other status is either waiting or final. Tombstones are not
+ * `opened`, so they fall out on their own. Each change is an ordinary history
+ * event, which is all the sync merge needs.
+ */
+export function markOpenedDone(
+  list: JobUrlEntry[],
+  now: number = Date.now(),
+): { list: JobUrlEntry[]; changed: number } {
+  let changed = 0;
+  const out = list.map((entry) => {
+    if (entry.status !== 'opened') return entry;
+    changed++;
+    return applyStatus([entry], entry.url, 'markedDone', now)[0];
+  });
+  return changed === 0 ? { list, changed } : { list: out, changed };
 }
 
 /** Append an entry for `url` unless the database already has one. */
@@ -285,7 +312,7 @@ export function pruneTombstones(
 export function jobUrlStats(list: JobUrlEntry[]): JobUrlStats {
   const visible = visibleUrls(list);
   const stats: JobUrlStats = {
-    total: visible.length, new: 0, opened: 0, redirected: 0, applied: 0, skipped: 0,
+    total: visible.length, new: 0, opened: 0, redirected: 0, applied: 0, skipped: 0, markedDone: 0,
   };
   // A status from a newer peer counts toward `total` and nothing else — there is
   // no honest bucket for it, and inventing one would misreport the queue.

@@ -184,7 +184,7 @@ const match = (
 const SESSION: SessionState = {
   active: true,
   batchSize: 5,
-  progress: { total: 60, queued: 46, inFlight: 5, applied: 8, skipped: 1, done: 9, ratio: 9 / 60 },
+  progress: { total: 60, queued: 46, inFlight: 5, applied: 8, skipped: 1, markedDone: 0, done: 9, ratio: 9 / 60 },
 };
 
 /**

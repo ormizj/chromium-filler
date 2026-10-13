@@ -82,6 +82,8 @@ function seedJobUrls(): JobUrlEntry[] {
     const entry = makeEntry(`https://${hosts[i % hosts.length]}/postings/${1000 + i}`, now - i * 3600_000);
     if (i < 2) entry.status = 'applied';
     else if (i === 2) entry.status = 'skipped';
+    else if (i === 3) entry.status = 'markedDone';
+    else if (i < 6) entry.status = 'opened';
     return entry;
   });
 }

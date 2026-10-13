@@ -35,7 +35,7 @@ import { FORM_FACTORS, currentFormFactor } from '../shared/formFactor';
 import { isEmptySetup, migrateLegacy, resolveSiteConfig, stampChanges } from '../shared/siteConfigs';
 import { extractUrls } from '../shared/urlImport';
 import {
-  ALL_JOB_STATUSES, addUrls, applyStatus, deleteUrl, jobUrlStats, visibleUrls,
+  ALL_JOB_STATUSES, addUrls, applyStatus, deleteUrl, jobUrlStats, markOpenedDone, visibleUrls,
 } from '../shared/jobUrls';
 import { hostOf } from '../shared/url';
 import { MSG } from '../shared/messages';
@@ -1175,17 +1175,19 @@ const STATUS_KIND: Record<JobUrlStatus, string> = {
   redirected: 'accent',
   applied: 'ok',
   skipped: '',
+  markedDone: 'ok',
 };
 
 function renderStats(list: JobUrlEntry[]): void {
   const s = jobUrlStats(list);
   const cards: Array<[string, number, string]> = [
-    ['Total', s.total, ''],
+    ['Total', s.total, 'total'],
     ['New', s.new, 'new'],
     ['Opened', s.opened, 'opened'],
     ['Redirected', s.redirected, 'redirected'],
     ['Applied', s.applied, 'applied'],
     ['Skipped', s.skipped, 'skipped'],
+    [JOB_STATUS_LABELS.markedDone, s.markedDone, 'markedDone'],
   ];
   $('url-stats').replaceChildren(...cards.map(([k, n, cls]) => {
     const card = document.createElement('div');
@@ -1210,7 +1212,7 @@ function renderFilters(list: JobUrlEntry[]): void {
     b.className = 'filter';
     b.type = 'button';
     b.setAttribute('aria-pressed', String(urlFilter === key));
-    b.textContent = `${key === 'all' ? 'All' : key} ${counts[key] ?? 0}`;
+    b.textContent = `${key === 'all' ? 'All' : JOB_STATUS_LABELS[key]} ${counts[key] ?? 0}`;
     b.addEventListener('click', () => {
       urlFilter = key as JobUrlStatus | 'all';
       shownCount = PAGE_SIZE;
@@ -1280,7 +1282,7 @@ function urlRow(entry: JobUrlEntry): HTMLElement {
   // A status this build does not know (a newer peer's, arriving by sync) gets no
   // tone rather than a broken class, and is shown under its own name.
   chip.className = `chip ${STATUS_KIND[entry.status as JobUrlStatus] ?? ''}`.trim();
-  chip.textContent = entry.status;
+  chip.textContent = JOB_STATUS_LABELS[entry.status as JobUrlStatus] ?? entry.status;
 
   const info = document.createElement('small');
   const bits = [`added ${fmtDate(entry.addedAt)}`];
@@ -1321,7 +1323,7 @@ function inlineActions(entry: JobUrlEntry): HTMLElement {
   for (const s of ALL_JOB_STATUSES) {
     const opt = document.createElement('option');
     opt.value = s;
-    opt.textContent = s;
+    opt.textContent = JOB_STATUS_LABELS[s];
     if (s === entry.status) opt.selected = true;
     status.appendChild(opt);
   }
@@ -1351,7 +1353,7 @@ function rowMenu(entry: JobUrlEntry): HTMLElement {
 
   for (const s of ALL_JOB_STATUSES) {
     const b = document.createElement('button');
-    b.textContent = s === entry.status ? `✓ ${s}` : `Mark ${s}`;
+    b.textContent = s === entry.status ? `✓ ${JOB_STATUS_LABELS[s]}` : `Mark ${JOB_STATUS_LABELS[s].toLowerCase()}`;
     b.addEventListener('click', () => setEntryStatus(entry.url, s));
     menu.append(b);
   }
@@ -1556,6 +1558,35 @@ async function initUrls(): Promise<void> {
     confirmBox.hidden = false;
   });
   $('clear-cancel').addEventListener('click', () => { confirmBox.hidden = true; });
+
+  // Closing every `opened` posting at once — a session that was dealt with outside
+  // the extension leaves them mid-flow for ever. Undoable row by row from each
+  // status menu, but it touches many rows at once, so it names the count first.
+  const doneBox = $('mark-done-confirm');
+  attachHelp($('mark-done-label'), CONCEPT_HELP.markedDone, (panel) => doneBox.after(panel));
+  $('mark-opened-done').addEventListener('click', async () => {
+    const opened = visibleUrls(await getJobUrls()).filter((e) => e.status === 'opened').length;
+    if (opened === 0) { setStatus($('queue-status'), 'No “opened” postings', 'err'); return; }
+    const shared = (await getSettings()).syncEnabled
+      ? ' Sync is on, so the other browser gets the change at the next sync.'
+      : '';
+    $('mark-done-confirm-label').textContent =
+      `Mark all ${opened} opened posting(s) as done? `
+      + `You can change any of them back from its status menu.${shared}`;
+    doneBox.hidden = false;
+  });
+  $('mark-done-cancel').addEventListener('click', () => { doneBox.hidden = true; });
+  $('mark-done-really').addEventListener('click', async () => {
+    let changed = 0;
+    await mutateJobUrls((all) => {
+      const out = markOpenedDone(all);
+      changed = out.changed;
+      return out.list;
+    });
+    doneBox.hidden = true;
+    await renderQueue();
+    setStatus($('queue-status'), `Marked ${changed} posting(s) done`, 'ok');
+  });
   $('clear-really').addEventListener('click', async () => {
     // Tombstone rather than truncate. A bare `saveJobUrls([])` is undone by the
     // next sync — the other device still holds every entry, and a union can only
