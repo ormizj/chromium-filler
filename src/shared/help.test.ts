@@ -29,7 +29,7 @@ describe('help catalog', () => {
   });
 
   it('gives the card\'s key concepts a one-line form', () => {
-    for (const key of ['dots', 'teaching', 'picker', 'customFields'] as const) {
+    for (const key of ['dots', 'learning', 'typedAnswers', 'customFields'] as const) {
       const short = CONCEPT_HELP[key].short;
       expect(short, key).toBeTruthy();
       expect(short!.length, `${key} is too long for a key line`).toBeLessThan(90);

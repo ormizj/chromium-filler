@@ -18,7 +18,7 @@
 import type {
   FieldId, FieldKey, InputKind, Lesson, MatchConfidence, MatchSource, Profile,
 } from '../shared/types';
-import { FIELD_KEYWORDS, AUTOCOMPLETE_MAP, TEXT_FIELDS, normalizeAttr } from '../shared/fieldKeys';
+import { FIELD_EXCLUDES, FIELD_KEYWORDS, FIELD_KINDS, AUTOCOMPLETE_MAP, TEXT_FIELDS, normalizeAttr } from '../shared/fieldKeys';
 import { fingerprint, inputKind, questionText, radioGroup } from '../shared/questionText';
 import { lessonFor, signatureParts, type SignatureParts } from '../shared/inputSignature';
 import { keywordMatch } from '../shared/profileFields';
@@ -140,7 +140,7 @@ const WEIGHT = {
    * The question as `questionText` reads it — which, past the label sources already
    * scored above, means the words written *above* the box. Loose evidence: "Tell us
    * about your first project" says "first". So it is `low` on its own — reported,
-   * never filled — and one Teach makes it a lesson everywhere.
+   * never filled — and the user answering it with a profile value makes it a lesson everywhere.
    */
   question: 4,
   placeholder: 4,
@@ -201,6 +201,10 @@ function scoreField(ctx: Context, field: FieldKey): number {
     [ctx.questionN, WEIGHT.question],
     [ctx.placeholderN, WEIGHT.placeholder],
   ];
+  // Words that say this box is some other field's take it out of the running —
+  // but never past an autocomplete token, which is the page's own word.
+  const excludes = FIELD_EXCLUDES[field];
+  if (excludes && sources.some(([text]) => text && excludes.some((re) => re.test(text)))) return best;
   for (const [text, weight] of sources) {
     if (!text || weight <= best) continue;
     if (keywords.some((re) => re.test(text))) best = weight;
@@ -218,7 +222,7 @@ function confidenceFor(weight: number): MatchConfidence {
 
 export interface Classified {
   cand: Candidate;
-  /** What it is. Absent: not recognised — a row the user can teach. */
+  /** What it is. Absent: not recognised — the user answers it, and it may be learned. */
   field?: FieldId;
   source: MatchSource;
   confidence: MatchConfidence;
@@ -296,6 +300,8 @@ export function classify(all: Candidate[], fresh: Candidate[], ctx: ClassifyCont
     if (!HEURISTIC_KINDS.has(cand.kind)) continue;
     const c = contextFor(cand);
     for (const field of TEXT_FIELDS) {
+      const kinds = FIELD_KINDS[field];
+      if (kinds && !kinds.includes(cand.kind)) continue;
       const weight = scoreField(c, field);
       if (weight > 0) pairs.push({ field, cand, weight, source: 'heuristic' });
     }

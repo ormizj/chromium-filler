@@ -33,11 +33,20 @@
       <label for="ats-phone">Phone</label>
       <input id="ats-phone" name="phone" />
 
+      <label for="ats-phone-local">Local phone number</label>
+      <input id="ats-phone-local" name="phone_local" />
+
       <label for="ats-cover">Cover letter</label>
       <textarea id="ats-cover" name="cover_letter" rows="3"></textarea>
 
       <label for="ats-resume">Résumé (PDF)</label>
       <input id="ats-resume" name="resume" type="file" />
+
+      <!-- Lever's closing box, as Lever draws it: `name="comments"`, labelled
+           "Additional information", with a placeholder that says cover letter. -->
+      <label for="ats-comments">Additional information</label>
+      <textarea id="ats-comments" name="comments" rows="3"
+        placeholder="Add a cover letter or anything else you want to share."></textarea>
 
       <button id="ats-submit" type="submit">Submit application</button>
     </form>

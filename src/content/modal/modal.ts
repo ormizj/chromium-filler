@@ -1,21 +1,24 @@
 /**
  * Shadow-DOM review card: the report — one row per question on the page, what it
- * asked, what went in, and, for anything not recognised, a way to teach it.
+ * asked, and what became of it. Read-only: there is nothing to teach any more, the
+ * extension learns from what the user types (`learning.ts`), and a row's tag says
+ * when it did.
  *
  * The card never sends anything. The one thing left after the fill is the user's
- * own press of the site's Submit button, so the footer is "Fill again" and
- * "Teach" (point at a field the report did not list) — and, on a queue tab, Skip.
+ * own press of the site's Submit button, so the footer is "Fill again" — and, on a
+ * queue tab, Skip. Its header carries the extension's on/off switch, the same one
+ * the popup has.
  *
  * Closing collapses to a pill instead of destroying the card: the report is the
- * only record of what was filled, and on mobile the card is the primary control.
+ * only record of what was filled, and while the extension is on the pill is how
+ * the user can tell (`showActivePill`).
  */
 
-import type { FieldId, FieldMatch, MatchConfidence } from '../../shared/types';
+import type { FieldMatch, MatchConfidence } from '../../shared/types';
 import type { SessionState } from '../../shared/messages';
 import { progressDots } from '../../shared/queue';
-import type { FieldChoice } from '../../shared/profileFields';
 import { STATUS_LABELS, matchStatus } from '../../shared/fieldStatus';
-import { ACTION_LABELS, STATUS_TEXT } from '../../shared/labels';
+import { ACTION_LABELS, PILL_ARIA, STATUS_TEXT, SWITCH_ARIA, pillText, savedText } from '../../shared/labels';
 import { flowBanner } from '../../shared/flowState';
 import { fingerprint } from '../../shared/questionText';
 import { CONCEPT_HELP } from '../../shared/help';
@@ -24,69 +27,49 @@ import { summaryLine } from '../../ui/summaryLine';
 import { Sheet, type SheetCallbacks, type SheetData } from '../sheet';
 import modalCss from './modal.css?inline';
 
-/** What a Teach can say a row is. */
-export type TeachChoice =
-  | { field: FieldId }
-  | { ignore: true }
-  | { newField: { label: string; value: string } };
-
 export interface ModalCallbacks extends SheetCallbacks {
   /** Fill again — every empty, untouched input; never over an answer already there. */
   onRerun(): void;
-  /** Fill one row the extension only guessed at, on the user's say-so. */
-  onConfirm(rowId: string): void;
-  /** Teach one row: a field, a new field, or "ignore this question". */
-  onTeach(rowId: string, choice: TeachChoice): void;
-  /** Teach: point at a field on the page the report did not list. */
-  onPoint(): void;
   /** Mark this posting done, and move a session on to the next one. */
   onSkip(): void;
+  /** The header switch — the same act as the popup's: on or off on this browser. */
+  onToggle(on: boolean): void;
   onClose(): void;
+  /** Put back the detail a correction just saved, and stop filling that box. */
+  onUndo?(): void;
 }
 
 export interface ModalData extends SheetData {
   siteName: string;
   /** The report, in its settled order. Rows never move; see `fillEngine.ts`. */
   matches: FieldMatch[];
-  /** Rows Confirm has been pressed on — an acknowledgement, never a status. */
-  confirmed?: string[];
   /** The job database already has this URL down as done. */
   alreadyDone?: boolean;
   doneAt?: number;
   /** The profile has nothing to fill with at all. */
   profileEmpty?: boolean;
-  /** What a row can be taught as. */
-  choices: FieldChoice[];
+  /** Filling and learning are on for this browser — the header switch's state. */
+  on: boolean;
+  /**
+   * Said for a moment on the pill instead of the counts. `saved` names a field a
+   * correction just updated in the profile; with `undo`, an Undo is offered beside it.
+   */
+  flash?: { learned?: string; paused?: boolean; saved?: string; undo?: boolean };
   /** Queue progress — present only on a tab the queue opened. */
   queue?: SessionState;
 }
 
 /**
- * The `.chip` tint each outcome wears in the report. A question to teach is plain,
- * not red: it is the ordinary state of most questions the first time they are seen,
- * and a page of red tags would read as a page of failures.
+ * The `.chip` tint each outcome wears in the report. A question it does not know is
+ * plain, not red: it is the ordinary state of most questions the first time they
+ * are seen, and a page of red tags would read as a page of failures.
  */
 const TAG_TONE: Record<MatchConfidence, string> = { high: 'ok', low: 'warn', none: '' };
-
-/** The chooser's two values that are not a field. */
-const NEW_FIELD = '__new';
-const IGNORE = '__ignore';
-
-interface TeachState {
-  rowId: string;
-  /** The `<select>`'s value: a field id, `NEW_FIELD` or `IGNORE`. */
-  choice: string;
-  label: string;
-  value: string;
-}
 
 export class FillerModal extends Sheet<ModalData> {
   private cb: ModalCallbacks;
   /** The open `?` on the banner. */
   private helpOpen = false;
-  /** The open Teach chooser, and what has been typed into it. On the instance
-   *  because the engine re-renders the card while the user works in it. */
-  private teaching?: TeachState;
 
   constructor(cb: ModalCallbacks) {
     super('review', 'chromium-filler-modal-host', modalCss, cb);
@@ -95,8 +78,6 @@ export class FillerModal extends Sheet<ModalData> {
 
   render(data: ModalData): void {
     this.data = data;
-    // A chooser whose row is gone (a Reset) has nothing left to teach.
-    if (this.teaching && !data.matches.some((m) => m.id === this.teaching!.rowId)) this.teaching = undefined;
     this.paint();
   }
 
@@ -118,29 +99,6 @@ export class FillerModal extends Sheet<ModalData> {
 
   protected buildPill(): HTMLElement {
     return this.pill(this.data!);
-  }
-
-  /**
-   * Open the Teach chooser on one row — from the row's own button, and from the
-   * picker once the user has pointed at a field. Public for the second, and for
-   * the dev harness, which cannot press anything.
-   */
-  openTeach(rowId: string, opts: { newField?: boolean } = {}): void {
-    const row = this.data?.matches.find((m) => m.id === rowId);
-    if (!row) return;
-    this.teaching = {
-      rowId,
-      choice: opts.newField ? NEW_FIELD : row.field ?? '',
-      label: row.question,
-      value: '',
-    };
-    this.restore();
-    if (this.data) this.render(this.data);
-  }
-
-  private closeTeach(): void {
-    this.teaching = undefined;
-    if (this.data) this.render(this.data);
   }
 
   /* ---------------- Chrome ---------------- */
@@ -172,14 +130,34 @@ export class FillerModal extends Sheet<ModalData> {
       dot.setAttribute('aria-label', STATUS_LABELS[worst]);
       header.append(dot);
     }
-    header.append(close);
+    header.append(this.onSwitch(data), close);
     this.makeDraggable(card, header);
     return header;
   }
 
   /**
-   * Fill again, Teach, and — on a queue tab — Skip. Teach is the popup's Teach:
-   * point at a field the report did not list. Skip is visible only on a queue tab,
+   * The extension's on/off switch — what the user reaches for when the pill says it
+   * is on and they are not applying for anything. The same act as the popup's:
+   * every tab on this browser stands down, this one included.
+   */
+  private onSwitch(data: ModalData): HTMLElement {
+    const wrap = el('label', 'switch cf-switch');
+    const input = document.createElement('input');
+    input.type = 'checkbox';
+    input.className = 'switch-input';
+    input.checked = data.on;
+    input.setAttribute('aria-label', SWITCH_ARIA);
+    input.dataset.k = 'switch:on';
+    input.onchange = () => this.cb.onToggle(input.checked);
+    const track = el('span', 'switch-track');
+    track.setAttribute('aria-hidden', 'true');
+    track.append(el('i'));
+    wrap.append(input, track);
+    return wrap;
+  }
+
+  /**
+   * Fill again and — on a queue tab — Skip. Skip is visible only on a queue tab,
    * where it is the decision the strip above it is read for ("posting 8 of 13 —
    * skip it?");
    * anywhere else there is no queue to skip through, and the job database has no
@@ -187,16 +165,14 @@ export class FillerModal extends Sheet<ModalData> {
    */
   private footer(data: ModalData): HTMLElement {
     const footer = el('div', 'cf-footer');
+    if (data.flash?.saved && data.flash.undo) footer.append(this.savedNote(data.flash.saved));
     const banner = this.flowBanner(data);
     if (banner.classList.contains('quiet')) footer.append(banner);
 
     const actions = el('div', 'cf-footer-actions');
     const fill = btn(ACTION_LABELS.fillAgain, () => this.cb.onRerun());
     fill.classList.add('cf-fill-again');
-    actions.append(
-      fill,
-      btn(ACTION_LABELS.teach, () => this.cb.onPoint()),
-    );
+    actions.append(fill);
 
     if (data.queue) {
       const skip = btn(ACTION_LABELS.skipNext, () => this.cb.onSkip());
@@ -214,6 +190,22 @@ export class FillerModal extends Sheet<ModalData> {
     return footer;
   }
 
+  /** "Saved · First name — Undo", in the open card: the pill's flash, for a card that hides it. */
+  private savedNote(field: string): HTMLElement {
+    const note = el('div', 'cf-saved-note');
+    note.setAttribute('aria-live', 'polite');
+    const text = el('span');
+    text.textContent = savedText(field);
+    note.append(text, this.undoButton());
+    return note;
+  }
+
+  private undoButton(): HTMLButtonElement {
+    const undo = btn(ACTION_LABELS.undo, () => this.cb.onUndo?.());
+    undo.classList.add('btn-ghost', 'cf-undo');
+    return undo;
+  }
+
   /* ---------------- The flow banner ---------------- */
 
   private flowBanner(data: ModalData): HTMLElement {
@@ -224,7 +216,7 @@ export class FillerModal extends Sheet<ModalData> {
       profileEmpty: data.profileEmpty,
       total: data.matches.filter((m) => !m.ignored).length,
       filled: counts.high,
-      toTeach: counts.none,
+      fresh: counts.none,
       siteName: data.siteName,
     });
 
@@ -267,14 +259,8 @@ export class FillerModal extends Sheet<ModalData> {
       aria: STATUS_LABELS[status],
     }))));
 
-    if (!data.matches.length) {
-      const empty = el('p', 'cf-empty');
-      empty.textContent = 'No fields on this page yet. Anything that appears is checked as it does.';
-      body.append(empty);
-      return body;
-    }
+    if (!data.matches.length) return body;
 
-    const confirmed = new Set(data.confirmed);
     const report = el('div', 'cf-report');
     let laterShown = false;
     for (const m of data.matches) {
@@ -284,27 +270,47 @@ export class FillerModal extends Sheet<ModalData> {
         divider.textContent = 'Appeared later';
         report.append(divider);
       }
-      report.append(this.row(m, confirmed.has(m.id)));
-      if (this.teaching?.rowId === m.id) report.append(this.teachPanel(m, data));
+      report.append(this.row(m));
     }
     body.append(report);
     return body;
   }
 
+  /**
+   * The folded card — and, while the extension is on, the mark on every page that
+   * says so. With nothing in the report it carries a live mark instead of a status
+   * dot ("On · learning"); a lesson just learned is named on it for a moment.
+   */
   private pill(data: ModalData): HTMLElement {
     const pill = el('button', 'cf-pill');
     const counts = statCounts(data.matches);
-    const dot = el('span', `cf-dot ${data.alreadyDone ? 'ok' : worstStatus(data.matches)}`);
-    pill.setAttribute('aria-label', 'Reopen the fill report');
-    const label = el('span');
-    label.textContent = data.alreadyDone
-      ? 'Already done'
-      : counts.none
-        ? `${counts.high} filled · ${counts.none} to teach`
-        : `${counts.high} filled`;
-    pill.append(dot, label);
+    const rows = data.matches.filter((m) => !m.ignored).length;
+    const live = !rows && !data.alreadyDone;
+    const mark = live || data.flash
+      ? el('span', `cf-live${data.flash?.paused ? ' off' : ''}`)
+      : el('span', `cf-dot ${data.alreadyDone ? 'ok' : worstStatus(data.matches)}`);
+    mark.setAttribute('aria-hidden', 'true');
+    pill.setAttribute('aria-label', PILL_ARIA);
+    const label = el('span', 'cf-pill-text');
+    label.setAttribute('aria-live', 'polite');
+    label.textContent = pillText({
+      filled: counts.high,
+      fresh: counts.none,
+      rows,
+      alreadyDone: data.alreadyDone,
+      learned: data.flash?.learned,
+      paused: data.flash?.paused,
+      saved: data.flash?.saved,
+    });
+    pill.append(mark, label);
     pill.onclick = () => this.restore();
-    return pill;
+    if (!data.flash?.undo) return pill;
+    // Undo sits beside the pill, never inside it: a button in a button is not a
+    // control anyone can reach. The pair wears the pill's look as one object.
+    pill.className = 'cf-pill-main';
+    const pair = el('div', 'cf-pill cf-pill-pair');
+    pair.append(pill, this.undoButton());
+    return pair;
   }
 
   /** Where this posting sits in the queue. Shown on a queue tab only. */
@@ -326,7 +332,7 @@ export class FillerModal extends Sheet<ModalData> {
 
   /* ---------------- Rows ---------------- */
 
-  private row(m: FieldMatch, confirmed: boolean): HTMLElement {
+  private row(m: FieldMatch): HTMLElement {
     const status = matchStatus(m);
     const row = el('div', `cf-row${m.ignored ? ' cf-ignored' : ''}`);
     row.dataset.row = m.id;
@@ -345,125 +351,19 @@ export class FillerModal extends Sheet<ModalData> {
     row.append(field);
 
     const tag = el('span', `chip cf-tag ${m.ignored ? '' : TAG_TONE[status]}`.trimEnd());
-    tag.textContent = m.ignored ? ACTION_LABELS.ignored : STATUS_TEXT[status].word;
+    tag.textContent = rowTag(m, status);
     row.append(tag);
-
-    const actions = el('div', 'cf-actions');
-    const teachBtn = (label: string) => {
-      const b = btn(label, () => (this.teaching?.rowId === m.id ? this.closeTeach() : this.openTeach(m.id)));
-      b.setAttribute('aria-expanded', String(this.teaching?.rowId === m.id));
-      return b;
-    };
-    if (m.taught) {
-      const done = btn(ACTION_LABELS.taught, () => {});
-      done.setAttribute('aria-disabled', 'true');
-      actions.append(done);
-    } else if (!m.field && !m.ignored) {
-      actions.append(teachBtn(ACTION_LABELS.teach));
-    } else {
-      // A guess with something to fill it with can be confirmed in place. Once it
-      // has been, the row turns green where it stands and its button retires —
-      // the press is acknowledged on the row it was made on.
-      if (confirmed) {
-        const done = btn(ACTION_LABELS.confirmed, () => {});
-        done.setAttribute('aria-disabled', 'true');
-        actions.append(done);
-      } else if (m.field && !m.filled && !m.kept && m.confidence === 'low' && m.valueToFill) {
-        actions.append(btn(ACTION_LABELS.confirm, () => this.cb.onConfirm(m.id)));
-      }
-      actions.append(teachBtn(ACTION_LABELS.notThis));
-    }
-    row.append(actions);
     return row;
   }
+}
 
-  /**
-   * The Teach chooser, inline under its row rather than a popover: on a phone a
-   * popover over a list is a second thing to scroll, and the row it is about would
-   * be underneath it. One select, grouped the way Options groups the fields, and
-   * two answers that are not a field — a new one, made here, or "ignore".
-   */
-  private teachPanel(m: FieldMatch, data: ModalData): HTMLElement {
-    const t = this.teaching!;
-    const panel = el('div', 'cf-teach');
-    panel.setAttribute('role', 'group');
-    panel.setAttribute('aria-label', `Teach: ${m.question || 'this field'}`);
-
-    const label = el('label', 'cf-fld-label');
-    label.textContent = 'This is';
-    const select = document.createElement('select');
-    select.className = 'cf-input';
-    select.dataset.k = 'teach:choice';
-    const placeholder = new Option('Choose…', '');
-    placeholder.disabled = true;
-    select.append(placeholder);
-    for (const [group, heading] of [['builtIn', 'Your details'], ['custom', 'Your own fields']] as const) {
-      const items = data.choices.filter((c) => c.group === group);
-      if (!items.length) continue;
-      const og = document.createElement('optgroup');
-      og.label = heading;
-      for (const c of items) og.append(new Option(c.label, c.id));
-      select.append(og);
-    }
-    const other = document.createElement('optgroup');
-    other.label = 'Something else';
-    other.append(new Option(ACTION_LABELS.newField, NEW_FIELD), new Option(ACTION_LABELS.ignore, IGNORE));
-    select.append(other);
-    select.value = t.choice;
-    select.onchange = () => { t.choice = select.value; this.repaint(); };
-    const selectId = `cf-teach-${m.id}`;
-    select.id = selectId;
-    label.setAttribute('for', selectId);
-    panel.append(label, select);
-
-    if (t.choice === NEW_FIELD) {
-      panel.append(
-        this.textBox('Field name', 'teach:label', t.label, (v) => { t.label = v; }),
-        this.textBox('Your answer', 'teach:value', t.value, (v) => { t.value = v; }),
-      );
-    }
-
-    const actions = el('div', 'cf-teach-actions');
-    const ready = t.choice === NEW_FIELD ? !!t.label.trim() : !!t.choice;
-    const save = btn(ACTION_LABELS.save, () => {
-      if (!ready) return;
-      const choice: TeachChoice = t.choice === IGNORE
-        ? { ignore: true }
-        : t.choice === NEW_FIELD
-          ? { newField: { label: t.label.trim(), value: t.value } }
-          : { field: t.choice };
-      // Closed before the callback, not after: the teach is async (a new field, a
-      // lesson to store) and the row should not sit there open while it runs.
-      this.closeTeach();
-      this.cb.onTeach(m.id, choice);
-    });
-    if (!ready) save.setAttribute('aria-disabled', 'true');
-    actions.append(btn(ACTION_LABELS.cancel, () => this.closeTeach()), save);
-    panel.append(actions);
-    return panel;
-  }
-
-  private textBox(caption: string, key: string, value: string, set: (v: string) => void): HTMLElement {
-    const wrap = el('label', 'cf-fld');
-    const cap = el('span', 'cf-fld-label');
-    cap.textContent = caption;
-    const input = document.createElement('input');
-    input.className = 'cf-input';
-    input.dataset.k = key;
-    input.value = value;
-    input.oninput = () => {
-      set(input.value);
-      // Save's availability follows the name box; repaint only on the edge.
-      const save = this.shadow.querySelector<HTMLButtonElement>('.cf-teach-actions .cf-btn:last-child');
-      const ready = !!this.teaching?.label.trim();
-      if (save) {
-        if (ready) save.removeAttribute('aria-disabled');
-        else save.setAttribute('aria-disabled', 'true');
-      }
-    };
-    wrap.append(cap, input);
-    return wrap;
-  }
+/** The row's tag: what the user's typing made of it, else its status word. */
+function rowTag(m: FieldMatch, status: MatchConfidence): string {
+  if (m.ignored) return ACTION_LABELS.ignored;
+  if (m.saved) return ACTION_LABELS.saved;
+  if (m.learned) return ACTION_LABELS.learned;
+  if (m.answered && !m.filled) return ACTION_LABELS.answered;
+  return STATUS_TEXT[status].word;
 }
 
 const KIND_NAMES: Partial<Record<FieldMatch['kind'], string>> = {
@@ -479,8 +379,13 @@ const KIND_NAMES: Partial<Record<FieldMatch['kind'], string>> = {
  * the news: "Where are you based? / City · London".
  */
 function rowDetail(m: FieldMatch): string {
-  if (m.ignored) return 'Never filled';
-  if (!m.field) return m.required ? 'Not recognised · required' : 'Not recognised';
+  if (m.ignored) return 'Not filled from now on';
+  if (m.saved && m.field) return `${m.fieldLabel ?? m.field} · saved to your profile`;
+  if (m.answered && !m.filled) {
+    if (!m.field) return 'Your answer';
+    return m.learned ? `${m.fieldLabel ?? m.field} · learned from your answer` : `${m.fieldLabel ?? m.field} · your answer`;
+  }
+  if (!m.field) return m.required ? 'Not recognised yet · required' : 'Not recognised yet';
   const label = m.fieldLabel ?? m.field;
   if (fingerprint(m.question) === fingerprint(label)) {
     if (m.kind === 'file') return m.filled ? (m.valueToFill ?? 'Attached') : m.valueToFill ? 'Not attached yet' : 'Nothing stored to attach';
@@ -526,9 +431,9 @@ function el(tag: string, className = ''): HTMLElement {
   return node;
 }
 
-function btn(text: string, onClick: () => void, primary = false): HTMLButtonElement {
+function btn(text: string, onClick: () => void): HTMLButtonElement {
   const b = document.createElement('button');
-  b.className = `cf-btn${primary ? ' primary' : ''}`;
+  b.className = 'cf-btn';
   b.textContent = text;
   b.onclick = onClick;
   return b;

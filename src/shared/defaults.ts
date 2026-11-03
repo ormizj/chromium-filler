@@ -9,6 +9,11 @@ export const DEFAULT_PROFILE: Profile = {
 
 export const DEFAULT_SETTINGS: Settings = {
   fillAutomatically: true,
+  learnFromTyping: true,
+  rememberTypedAnswers: true,
+  updateProfileFromEdits: true,
+  // On: the extension reads every page while it is on, so it should say so.
+  showActivePill: true,
   // Off: a pill in the corner says the page was filled without covering it.
   openCardWhenFilled: false,
   // On: filling is impossible inside a phone app, so this is the only setting under

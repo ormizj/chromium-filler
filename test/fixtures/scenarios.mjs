@@ -29,7 +29,7 @@ export const HOSTS = {
 /** Flow groups, in the order the index page and the printed summary show them. */
 export const FLOWS = [
   { id: 'fill', title: 'Filling — every input that is recognised, as it appears' },
-  { id: 'teach', title: 'Teaching — questions the extension does not know yet' },
+  { id: 'teach', title: 'Learning — questions the extension does not know yet, answered by you' },
   { id: 'safety', title: 'Left alone — forms that are none of its business' },
   { id: 'session', title: 'Queue session' },
 ];
@@ -66,7 +66,7 @@ export const SCENARIOS = [
     flow: 'fill',
     title: 'ChaosForm — hashed ids, multi-step, one disguised field, one guessed',
     url: site(HOSTS.board, 'chaos-form'),
-    expect: '"Where are you located?" is listed to teach; the placeholder-only phone is to check',
+    expect: '"Where are you located?" is new — type your city and it is learned; the placeholder-only phone is to check',
   },
   {
     id: 'quick-plain',
@@ -87,7 +87,14 @@ export const SCENARIOS = [
     flow: 'fill',
     title: 'AcmeATS — an employer form on another origin',
     url: ATS_URL,
-    expect: 'filled by the same engine, and by any lesson taught on the board',
+    expect: 'filled by the same engine, and by any lesson learned on the board; "Additional information" takes yours',
+  },
+  {
+    id: 'embedded',
+    flow: 'fill',
+    title: 'Acme Careers — the ATS form embedded in an iframe from another origin',
+    url: site(HOSTS.board, 'embedded'),
+    expect: 'the form inside the frame is filled, and its rows are on the card the page draws',
   },
 
   /* ---------------- Teaching ---------------- */
@@ -96,7 +103,7 @@ export const SCENARIOS = [
     flow: 'teach',
     title: 'QuestionBoard — questions outside the built-in fields',
     url: site(HOSTS.board, 'questions'),
-    expect: 'your own fields answer the years and the visa radio; "Name" taught under Reference 1 never fills Reference 2',
+    expect: 'your own fields answer the years and the visa radio; typing your first name into "Preferred name" learns it for every site; replacing "Name" under Reference 1 stops filling it there only',
   },
 
   /* ---------------- Left alone ---------------- */
@@ -105,7 +112,7 @@ export const SCENARIOS = [
     flow: 'safety',
     title: 'SomeShop — a login form, a search box, a card number',
     url: site(HOSTS.board, 'login'),
-    expect: 'nothing is filled, and no card or pill appears',
+    expect: 'nothing is filled; the pill says the extension is on, and nothing else appears',
   },
 
   /* ---------------- Session ---------------- */

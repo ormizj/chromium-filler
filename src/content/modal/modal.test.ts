@@ -1,22 +1,20 @@
 /**
  * Render-logic tests for the review card. The card is the extension's entire
  * promise — "filling is automatic but never silent" — so what a row *claims*
- * about an input has to match what actually happened to it, and every question
- * the extension did not recognise has to be there with a way to teach it.
+ * about an input has to match what actually happened to it. It is read-only: the
+ * extension learns from what the user types, and a row only reports that it did.
  */
 import { describe, it, expect, afterEach, vi } from 'vitest';
 import { FillerModal, type ModalCallbacks, type ModalData } from './modal';
 import type { FieldMatch } from '../../shared/types';
 import type { ModalLayout } from '../../shared/modalLayout';
-import { ACTION_LABELS } from '../../shared/labels';
-import type { FieldChoice } from '../../shared/profileFields';
+import { ACTION_LABELS, PILL_ARIA } from '../../shared/labels';
 
 const noop = () => {};
 
 function callbacks(over: Partial<ModalCallbacks> = {}): ModalCallbacks {
   return {
-    onRerun: noop, onConfirm: noop, onTeach: noop, onPoint: noop,
-    onSkip: noop, onClose: noop,
+    onRerun: noop, onSkip: noop, onToggle: noop, onClose: noop,
     ...over,
   };
 }
@@ -41,16 +39,10 @@ const unknown = (question: string, over: Partial<FieldMatch> = {}): FieldMatch =
   source: 'none', confidence: 'none', filled: false, ...over,
 });
 
-const CHOICES: FieldChoice[] = [
-  { id: 'email', label: 'Email', group: 'builtIn' },
-  { id: 'firstName', label: 'First name', group: 'builtIn' },
-  { id: 'c_exp', label: 'Years of experience', group: 'custom' },
-];
-
 const data = (matches: FieldMatch[], over: Partial<ModalData> = {}): ModalData => ({
   siteName: 'jobs.example',
   matches,
-  choices: CHOICES,
+  on: true,
   ...over,
 });
 
@@ -99,11 +91,6 @@ function rows(shadow: ShadowRoot) {
   });
 }
 
-function rowButton(root: ShadowRoot, index: number, label: string): HTMLButtonElement {
-  return [...root.querySelectorAll('.cf-row')[index].querySelectorAll('button')]
-    .find((b) => b.textContent === label) as HTMLButtonElement;
-}
-
 afterEach(() => {
   modal?.destroy();
   modal = undefined;
@@ -143,12 +130,12 @@ describe('FillerModal — each row tells the truth about its input', () => {
     expect(r.detail).toBe('Phone · nothing in your profile for this');
   });
 
-  it('an unrecognised question is a row to teach — plain, not a failure', () => {
+  it('an unrecognised question is new — plain, not a failure, and nothing to press', () => {
     const r = rows(render(data([unknown('How did you hear about us?', { required: true })])))[0];
     expect(r.dot).toContain('none');
-    expect(r.tag).toBe('to teach');
-    expect(r.detail).toBe('Not recognised · required');
-    expect(r.buttons).toEqual([ACTION_LABELS.teach]);
+    expect(r.tag).toBe('new');
+    expect(r.detail).toBe('Not recognised yet · required');
+    expect(r.buttons).toEqual([]);
     const tag = shadow().querySelector('.cf-tag')!;
     expect(tag.className).not.toMatch(/\berr\b/);
   });
@@ -157,29 +144,41 @@ describe('FillerModal — each row tells the truth about its input', () => {
     expect(rows(render(data([unknown('', { kind: 'select' })])))[0].question).toBe('Unlabelled drop-down');
   });
 
-  it('offers Confirm on a guess with something to fill, and Not this on every match', () => {
-    const shadow = render(data([match({ confidence: 'low', filled: false }), match()]));
-    expect(rows(shadow).map((r) => r.buttons)).toEqual([
-      [ACTION_LABELS.confirm, ACTION_LABELS.notThis],
-      [ACTION_LABELS.notThis],
-    ]);
+  it('no row has a button — the report only reports', () => {
+    const shadow = render(data([match({ confidence: 'low', filled: false }), match(), unknown('Q')]));
+    expect(rows(shadow).flatMap((r) => r.buttons)).toEqual([]);
   });
 
-  it('a confirmed row retires its button without touching its dot', () => {
-    const m = match({ confidence: 'low', filled: false });
-    const r = rows(render(data([m], { confirmed: [m.id] })))[0];
-    expect(r.buttons).toContain(ACTION_LABELS.confirmed);
-    expect(r.dot).toContain('low');
+  it('a question the user answered is theirs, and done', () => {
+    const r = rows(render(data([unknown('Referral code', { answered: true })])))[0];
+    expect(r.tag).toBe(ACTION_LABELS.answered);
+    expect(r.dot).toContain('high');
+    expect(r.detail).toBe('Your answer');
   });
 
-  it('a taught row retires to "Taught ✓"', () => {
-    expect(rows(render(data([match({ taught: true, source: 'lesson' })])))[0].buttons).toEqual([ACTION_LABELS.taught]);
+  it('a question learned from the user’s answer says so', () => {
+    const r = rows(render(data([match({
+      question: 'Preferred contact', learned: true, answered: true, filled: false, source: 'lesson',
+    })])))[0];
+    expect(r.tag).toBe(ACTION_LABELS.learned);
+    expect(r.detail).toBe('Email · learned from your answer');
+    expect(r.dot).toContain('high');
   });
 
-  it('an ignored row stays in place, needs nothing, and can be undone', () => {
+  it('a corrected fill says the profile took the answer', () => {
+    const r = rows(render(data([match({
+      question: 'First name', field: 'firstName', fieldLabel: 'First name', valueToFill: 'John',
+      answered: true, saved: true, filled: false,
+    })])))[0];
+    expect(r.tag).toBe(ACTION_LABELS.saved);
+    expect(r.detail).toBe('First name · saved to your profile');
+    expect(r.dot).toContain('high');
+  });
+
+  it('a set-aside question stays in place and needs nothing', () => {
     const r = rows(render(data([unknown('Middle name', { ignored: true })])))[0];
     expect(r.tag).toBe(ACTION_LABELS.ignored);
-    expect(r.buttons).toEqual([ACTION_LABELS.notThis]);
+    expect(r.buttons).toEqual([]);
   });
 
   it('never spends a primary fill — the one thing left is the site\'s own button', () => {
@@ -201,104 +200,18 @@ describe('FillerModal — the report holds still', () => {
   });
 });
 
-describe('FillerModal — teaching a row', () => {
-  it('opens a chooser inside the list, under the row', () => {
-    const shadow = render(data([unknown('Given name'), match()]));
-    rowButton(shadow, 0, ACTION_LABELS.teach).click();
-    const report = shadow.querySelector('.cf-report')!;
-    expect(report.children[1].className).toBe('cf-teach');
-    const select = shadow.querySelector('.cf-teach select') as HTMLSelectElement;
-    expect([...select.querySelectorAll('optgroup')].map((g) => g.label)).toEqual(['Your details', 'Your own fields', 'Something else']);
-  });
-
-  it('teaches a row as a field', () => {
-    const onTeach = vi.fn();
-    const m = unknown('Given name');
-    const shadow = render(data([m]), callbacks({ onTeach }));
-    modal!.openTeach(m.id);
-    const select = shadow.querySelector('.cf-teach select') as HTMLSelectElement;
-    select.value = 'firstName';
-    select.dispatchEvent(new Event('change'));
-    const save = [...shadow.querySelectorAll('.cf-teach button')].find((b) => b.textContent === ACTION_LABELS.save) as HTMLButtonElement;
-    save.click();
-    expect(onTeach).toHaveBeenCalledWith(m.id, { field: 'firstName' });
-    expect(shadow.querySelector('.cf-teach')).toBeNull();
-  });
-
-  it('makes a new field on the spot, named after the question', () => {
-    const onTeach = vi.fn();
-    const m = unknown('Notice period');
-    const shadow = render(data([m]), callbacks({ onTeach }));
-    modal!.openTeach(m.id, { newField: true });
-    const [name, value] = [...shadow.querySelectorAll('.cf-teach input')] as HTMLInputElement[];
-    expect(name.value).toBe('Notice period');
-    value.value = '1 month';
-    value.dispatchEvent(new Event('input'));
-    ([...shadow.querySelectorAll('.cf-teach button')].find((b) => b.textContent === ACTION_LABELS.save) as HTMLButtonElement).click();
-    expect(onTeach).toHaveBeenCalledWith(m.id, { newField: { label: 'Notice period', value: '1 month' } });
-  });
-
-  it('can set a question aside', () => {
-    const onTeach = vi.fn();
-    const m = unknown('Middle name');
-    const shadow = render(data([m]), callbacks({ onTeach }));
-    modal!.openTeach(m.id);
-    const select = shadow.querySelector('.cf-teach select') as HTMLSelectElement;
-    select.value = '__ignore';
-    select.dispatchEvent(new Event('change'));
-    ([...shadow.querySelectorAll('.cf-teach button')].find((b) => b.textContent === ACTION_LABELS.save) as HTMLButtonElement).click();
-    expect(onTeach).toHaveBeenCalledWith(m.id, { ignore: true });
-  });
-
-  it('will not save without an answer, and says so by being unavailable', () => {
-    const onTeach = vi.fn();
-    const m = unknown('Given name');
-    const shadow = render(data([m]), callbacks({ onTeach }));
-    modal!.openTeach(m.id);
-    const save = [...shadow.querySelectorAll('.cf-teach button')].find((b) => b.textContent === ACTION_LABELS.save) as HTMLButtonElement;
-    expect(save.getAttribute('aria-disabled')).toBe('true');
-    save.click();
-    expect(onTeach).not.toHaveBeenCalled();
-  });
-
-  it('survives a re-render — the engine repaints as fields appear', () => {
-    const m = unknown('Given name');
-    const shadow = render(data([m]));
-    modal!.openTeach(m.id);
-    modal!.render(data([m, unknown('Later', { later: true })]));
-    expect(shadow.querySelector('.cf-teach')).not.toBeNull();
-  });
-
-  it('"Not this" on a match opens the same chooser, on the field it was taken for', () => {
-    const m = match();
-    const shadow = render(data([m]));
-    rowButton(shadow, 0, ACTION_LABELS.notThis).click();
-    expect((shadow.querySelector('.cf-teach select') as HTMLSelectElement).value).toBe('email');
-  });
-
-  it('opening a chooser from the picker unfolds the card', () => {
-    const m = unknown('Given name');
-    modal = new FillerModal(callbacks());
-    modal.render(data([m]));
-    modal.minimize();
-    modal.openTeach(m.id);
-    expect(modal.isMinimized).toBe(false);
-    expect(shadow().querySelector('.cf-teach')).not.toBeNull();
-  });
-});
-
 describe('FillerModal — the count line and the banner', () => {
-  it('keys filled, to check and to teach above the rows', () => {
+  it('keys filled, to check and new above the rows', () => {
     const shadow = render(data([match(), match({ confidence: 'low', filled: false }), unknown('Q')]));
     const summary = shadow.querySelector('.cf-summary')!.textContent!;
     expect(summary).toMatch(/1\s*filled/);
     expect(summary).toMatch(/1\s*to check/);
-    expect(summary).toMatch(/1\s*to teach/);
+    expect(summary).toMatch(/1\s*new/);
   });
 
   it('ignored rows count nowhere', () => {
     const shadow = render(data([match(), unknown('Q', { ignored: true })]));
-    expect(shadow.querySelector('.cf-summary')!.textContent).toMatch(/0\s*to teach/);
+    expect(shadow.querySelector('.cf-summary')!.textContent).toMatch(/0\s*new/);
   });
 
   it('rests on "submit on the site", beside the footer', () => {
@@ -306,9 +219,14 @@ describe('FillerModal — the count line and the banner', () => {
     expect(shadow.querySelector('.cf-footer .cf-flow')!.textContent).toMatch(/submit on the site/i);
   });
 
-  it('a page of new questions is an invitation to teach', () => {
+  it('a page of new questions is an invitation to answer them', () => {
     const shadow = render(data([unknown('A'), unknown('B')]));
     expect(shadow.querySelector('.cf-flow-title')!.textContent).toBe('Nothing recognised yet');
+  });
+
+  it('a page with nothing on it says the extension is watching', () => {
+    const shadow = render(data([]));
+    expect(shadow.querySelector('.cf-flow-title')!.textContent).toBe('Watching this page');
   });
 
   it('blames an empty profile, not the page', () => {
@@ -321,9 +239,9 @@ describe('FillerModal — the footer', () => {
   const footerLabels = (shadow: ShadowRoot) =>
     [...shadow.querySelectorAll('.cf-footer-actions > button.cf-btn')].map((b) => b.textContent);
 
-  it('is Fill again and Teach, off the queue — no overflow menu', () => {
+  it('is Fill again alone, off the queue — no Teach, no overflow menu', () => {
     const shadow = render(data([match()]));
-    expect(footerLabels(shadow)).toEqual([ACTION_LABELS.fillAgain, ACTION_LABELS.teach]);
+    expect(footerLabels(shadow)).toEqual([ACTION_LABELS.fillAgain]);
     expect(footerBtn(shadow, ACTION_LABELS.skipNext)).toBeUndefined();
     expect(shadow.querySelector('.cf-more')).toBeNull();
   });
@@ -331,7 +249,7 @@ describe('FillerModal — the footer', () => {
   it('adds Skip → next on a queue tab', () => {
     const onSkip = vi.fn();
     const shadow = render(data([match()], { queue: QUEUE }), callbacks({ onSkip }));
-    expect(footerLabels(shadow)).toEqual([ACTION_LABELS.fillAgain, ACTION_LABELS.teach, ACTION_LABELS.skipNext]);
+    expect(footerLabels(shadow)).toEqual([ACTION_LABELS.fillAgain, ACTION_LABELS.skipNext]);
     footerBtn(shadow, ACTION_LABELS.skipNext).click();
     expect(onSkip).toHaveBeenCalled();
   });
@@ -345,14 +263,11 @@ describe('FillerModal — the footer', () => {
     expect(onSkip).not.toHaveBeenCalled();
   });
 
-  it('Fill again sweeps again, and Teach points at a field — the popup\'s Teach', () => {
+  it('Fill again sweeps again', () => {
     const onRerun = vi.fn();
-    const onPoint = vi.fn();
-    const shadow = render(data([match()]), callbacks({ onRerun, onPoint }));
+    const shadow = render(data([match()]), callbacks({ onRerun }));
     footerBtn(shadow, ACTION_LABELS.fillAgain).click();
     expect(onRerun).toHaveBeenCalled();
-    footerBtn(shadow, ACTION_LABELS.teach).click();
-    expect(onPoint).toHaveBeenCalled();
   });
 
   it('does not offer Reset', () => {
@@ -389,13 +304,62 @@ describe('FillerModal — a posting already done', () => {
 });
 
 describe('FillerModal — the pill', () => {
-  it('counts what was filled and what is left to teach', () => {
+  it('counts what was filled and what is new', () => {
     modal = new FillerModal(callbacks());
     modal.render(data([match(), unknown('Q')]));
     modal.minimize();
     const pill = shadow().querySelector('.cf-pill')!;
-    expect(pill.textContent).toBe('1 filled · 1 to teach');
+    expect(pill.textContent).toBe('1 filled · 1 new');
     expect(pill.querySelector('.cf-dot')!.className).toContain('none');
+  });
+
+  it('on a page with nothing to report, says the extension is on — with a live mark', () => {
+    modal = new FillerModal(callbacks());
+    modal.render(data([]));
+    modal.minimize();
+    const pill = shadow().querySelector('.cf-pill')!;
+    expect(pill.textContent).toBe('On · learning');
+    expect(pill.querySelector('.cf-live')).not.toBeNull();
+    expect(pill.getAttribute('aria-label')).toBe(PILL_ARIA);
+  });
+
+  it('names a field just learned, for a moment', () => {
+    modal = new FillerModal(callbacks());
+    modal.render(data([match()], { flash: { learned: 'Email' } }));
+    modal.minimize();
+    const text = shadow().querySelector('.cf-pill-text')!;
+    expect(text.textContent).toBe('Learned · Email');
+    expect(text.getAttribute('aria-live')).toBe('polite');
+  });
+
+  it('names a detail just saved, with an Undo beside the pill, not inside it', () => {
+    const onUndo = vi.fn();
+    modal = new FillerModal(callbacks({ onUndo }));
+    modal.render(data([match()], { flash: { saved: 'First name', undo: true } }));
+    modal.minimize();
+    expect(shadow().querySelector('.cf-pill-text')!.textContent).toBe('Saved · First name');
+    const undo = shadow().querySelector<HTMLButtonElement>('.cf-undo')!;
+    expect(undo.textContent).toBe(ACTION_LABELS.undo);
+    expect(undo.closest('button.cf-pill-main, button.cf-pill')).toBeNull();
+    undo.click();
+    expect(onUndo).toHaveBeenCalledOnce();
+  });
+
+  it('offers the same Undo in the open card', () => {
+    const onUndo = vi.fn();
+    const root = render(data([match()], { flash: { saved: 'First name', undo: true } }), callbacks({ onUndo }));
+    const note = root.querySelector('.cf-saved-note')!;
+    expect(note.textContent).toContain('Saved · First name');
+    note.querySelector<HTMLButtonElement>('.cf-undo')!.click();
+    expect(onUndo).toHaveBeenCalledOnce();
+  });
+
+  it('says it was paused before it goes', () => {
+    modal = new FillerModal(callbacks());
+    modal.render(data([match()], { on: false, flash: { paused: true } }));
+    modal.minimize();
+    expect(shadow().querySelector('.cf-pill')!.textContent).toMatch(/^Paused/);
+    expect(shadow().querySelector('.cf-live.off')).not.toBeNull();
   });
 
   it('is green once everything is answered', () => {
@@ -420,9 +384,25 @@ describe('FillerModal — the header', () => {
     modal.render(data(matches));
     return shadow().querySelector('.cf-header .cf-dot')!.className;
   };
-  it('grey while a question is left to teach', () => expect(dotOn([match(), unknown('Q')])).toContain('none'));
+  it('grey while a question is new', () => expect(dotOn([match(), unknown('Q')])).toContain('none'));
   it('amber while a row needs a look', () => expect(dotOn([match({ filled: false })])).toContain('low'));
   it('green when every row is answered', () => expect(dotOn([match(), unknown('Q', { ignored: true })])).toContain('high'));
+
+  it('carries the on/off switch, which says what it does and reports a press', () => {
+    const onToggle = vi.fn();
+    const root = render(data([match()]), callbacks({ onToggle }));
+    const sw = root.querySelector('.cf-header .cf-switch input') as HTMLInputElement;
+    expect(sw.checked).toBe(true);
+    expect(sw.getAttribute('aria-label')).toMatch(/on this browser/);
+    sw.checked = false;
+    sw.dispatchEvent(new Event('change'));
+    expect(onToggle).toHaveBeenCalledWith(false);
+  });
+
+  it('the switch reads off when the extension is off', () => {
+    const root = render(data([match()], { on: false }));
+    expect((root.querySelector('.cf-switch input') as HTMLInputElement).checked).toBe(false);
+  });
 
   it('is the report alone: no view toggle and no fullscreen', () => {
     const root = render(data([match()]));

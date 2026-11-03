@@ -7,12 +7,6 @@
  *                      posting, with representative data.
  *   chip             — the REAL queue chip over a fake posting, beside the card's
  *                      folded pill — the two things in the page's corners.
- *   picker           — runs the REAL click-to-pick toolbar over a deliberately
- *                      nested posting. It draws on the host page's own light DOM
- *                      rather than in a shadow root, so it was the one surface
- *                      with no harness state at all: every `onPick*` here is a
- *                      console stub, which renders the *button* and never the
- *                      toolbar it opens.
  *
  * The shadow surfaces are here because they are otherwise only reachable by
  * loading the built extension into a browser and driving a real site — which
@@ -32,11 +26,8 @@ import {
   FillerModal, type ModalCallbacks, type ModalData,
 } from '../src/content/modal/modal';
 import { QueueChip } from '../src/content/queueChip';
-import { startPicker } from '../src/content/picker';
-import { describeElement } from '../src/shared/elementChain';
-import type { FieldChoice } from '../src/shared/profileFields';
 
-type Page = 'popup' | 'options' | 'modal' | 'chip' | 'picker';
+type Page = 'popup' | 'options' | 'modal' | 'chip';
 /** Which flow the surface is rendering — see `MODAL_STATES`. */
 type State = string;
 
@@ -71,6 +62,7 @@ async function bootPage(name: 'popup' | 'options'): Promise<void> {
     profile: 'profile',
     'custom-fields': 'profile&at=custom-section',
     learned: 'profile&at=learned-section',
+    typed: 'profile&at=typed-section',
     wordings: 'profile&at=wordings',
     // The Sync tab, at its "What syncs" lists.
     sync: 'sync&at=sync-scope-heading',
@@ -152,18 +144,6 @@ const LABELS: Record<string, string> = {
   coverLetter: 'Cover letter', resume: 'Résumé / CV', firstName: 'First name', c_exp: 'Years of experience',
 };
 
-const CHOICES: FieldChoice[] = [
-  { id: 'resume', label: 'Résumé / CV', group: 'builtIn' },
-  { id: 'coverLetter', label: 'Cover letter', group: 'builtIn' },
-  { id: 'email', label: 'Email', group: 'builtIn' },
-  { id: 'phone', label: 'Phone', group: 'builtIn' },
-  { id: 'fullName', label: 'Full name', group: 'builtIn' },
-  { id: 'firstName', label: 'First name', group: 'builtIn' },
-  { id: 'city', label: 'City', group: 'builtIn' },
-  { id: 'c_exp', label: 'Years of experience', group: 'custom' },
-  { id: 'c_visa', label: 'Need sponsorship', group: 'custom' },
-];
-
 const SESSION: SessionState = {
   active: true,
   batchSize: 5,
@@ -172,13 +152,13 @@ const SESSION: SessionState = {
 
 /**
  * The report a filled posting produces — one row of every shape, in the order
- * the engine settles them at the first sweep: to teach, then to check, then
- * filled. The card renders this verbatim.
+ * the engine settles them at the first sweep: new, then to check, then filled.
+ * The card renders this verbatim.
  */
 const REPORT: FieldMatch[] = [
   match('How did you hear about us?', undefined, 'none', false, { required: true }),
   match('Where are you based?', undefined, 'none', false),
-  // A guess with something to fill it with: the only shape with two actions.
+  // A guess with something to fill it with — left for the user to type.
   match('Mobile', 'phone', 'low', false, { kind: 'tel', valueToFill: '+1 555 123 4567' }),
   match('Résumé / CV', 'resume', 'high', true, { kind: 'file', valueToFill: 'ada-lovelace-cv.pdf' }),
   match('Cover letter', 'coverLetter', 'high', true, { kind: 'textarea', valueToFill: 'I love building widgets.' }),
@@ -190,7 +170,7 @@ const REPORT: FieldMatch[] = [
 const BASE_MODAL: ModalData = {
   siteName: 'jobs.acme.test',
   matches: REPORT,
-  choices: CHOICES,
+  on: true,
   // What a fresh install gets. Without it the card falls back to the CSS
   // defaults, which is a size no real user would ever see.
   layout: DEFAULT_MODAL_LAYOUT,
@@ -214,8 +194,8 @@ const LONG_REPORT: FieldMatch[] = [
 ];
 
 /**
- * One entry per rendering the card can be in. `&teach=<n>` opens the Teach chooser
- * on the n-th row (1-based) — it is only reachable by pressing Teach.
+ * One entry per rendering the card can be in — most of them reachable on a real
+ * page only by typing into it, which a screenshot cannot do.
  */
 const MODAL_STATES: Record<string, Partial<ModalData>> = {
   default: {},
@@ -237,16 +217,28 @@ const MODAL_STATES: Record<string, Partial<ModalData>> = {
       match('City', 'city', 'high', false, { kind: 'text', kept: true, valueToFill: 'London' }),
     ],
   },
-  // Confirm pressed on the guess. Only the retired button says so.
-  confirmed: { confirmed: [REPORT[2].id] },
-  // Rows already taught, ignored — the retired states of the Teach flow.
-  taught: {
+  // What typing does to the report: a question learned from the user's answer, one
+  // they answered that is not one of their details, and one set aside because they
+  // typed over our fill with something unrelated.
+  learned: {
     matches: [
-      match('How did you hear about us?', undefined, 'none', false, { ignored: true }),
-      match('Where are you based?', 'city', 'high', true, { source: 'lesson', taught: true, valueToFill: 'London' }),
+      match('How did you hear about us?', undefined, 'none', false, { answered: true }),
+      match('Where are you based?', 'city', 'high', false, { source: 'lesson', learned: true, answered: true, valueToFill: 'London' }),
+      match('Last employer', undefined, 'none', false, { learned: true, ignored: true, answered: true }),
+      match('First name', 'firstName', 'high', false, { answered: true, saved: true, valueToFill: 'John' }),
       ...REPORT.slice(2),
     ],
   },
+  // The always-on pill on a page with nothing to fill: "On · learning". Folded,
+  // because that is how every page shows it.
+  watching: { matches: [] },
+  // The pill naming a field it just learned, for the moment it does.
+  'just-learned': { flash: { learned: 'City' } },
+  // A correction just saved to the profile: the pill names it, with Undo beside it.
+  // `&open=1` shows the same note in the open card's footer.
+  saved: { flash: { saved: 'First name', undo: true } },
+  // The card's switch just turned the extension off: the pill says so, then goes.
+  paused: { on: false, flash: { paused: true } },
   // Fields that arrived after the first sweep — the form behind "Apply now".
   'appeared-later': {
     matches: [
@@ -280,11 +272,10 @@ const MODAL_STATES: Record<string, Partial<ModalData>> = {
 function modalCallbacks(self: () => FillerModal | undefined): ModalCallbacks {
   return {
     onRerun: () => console.log('[harness] fill again'),
-    onConfirm: (id) => console.log('[harness] confirm', id),
-    onTeach: (id, choice) => console.log('[harness] teach', id, choice),
-    onPoint: () => console.log('[harness] point at a field'),
     onSkip: () => console.log('[harness] skip'),
+    onToggle: (on) => console.log('[harness] switch', on),
     onClose: () => self()?.minimize(),
+    onUndo: () => console.log('[harness] undo'),
     onFold: (c) => console.log('[harness] modal folded', c),
     onLayoutChange: (l) => console.log('[harness] layout', l),
   };
@@ -294,7 +285,10 @@ function bootModal(): void {
   fakePosting();
   let modal: FillerModal;
   modal = new FillerModal(modalCallbacks(() => modal));
-  if (state === 'pill-only') modal.minimize();
+  // The pill states are the folded card; the rest open on the report.
+  // `saved` is a pill state too, unless `&open=1` asks for the open card's note.
+  const pillStates = ['pill-only', 'watching', 'just-learned', 'paused'];
+  if (pillStates.includes(state) || (state === 'saved' && params.get('open') !== '1')) modal.minimize();
 
   modal.render({
     ...BASE_MODAL,
@@ -302,11 +296,6 @@ function bootModal(): void {
     // `?session=1` (or `&queue=1`) is a queue tab: the strip and Skip → next.
     queue: params.get('session') === '1' || params.get('queue') === '1' ? SESSION : undefined,
   });
-
-  // `&teach=<n>` opens the chooser on row n; `&new=1` with it opens "New field…".
-  const teach = Number(params.get('teach'));
-  const rows = (MODAL_STATES[state]?.matches ?? BASE_MODAL.matches);
-  if (teach && rows[teach - 1]) modal.openTeach(rows[teach - 1].id, { newField: params.get('new') === '1' });
 }
 
 /**
@@ -329,70 +318,11 @@ function bootChip(): void {
   chip.setCardOpen(open);
 }
 
-/**
- * A posting whose text is buried on purpose. The picker's whole subject is depth —
- * a click lands on the `<span>` and the thing worth saving is the `<section>` three
- * levels out — so a flat page would show the toolbar and none of what it is for.
- */
-function bootPicker(): void {
-  document.body.style.cssText =
-    'margin:0;padding:20px 20px 140px;font:15px/1.6 system-ui,sans-serif;background:#fff;color:#111827';
-  /*
-   * `?state=long` is a real description rather than two sentences, and it is the one
-   * that proves anything about the preview: the bar is `width: max-content`, so a
-   * posting that is not clamped stretches it to the whole viewport — which is exactly
-   * what the toolbar must not do on the phone it is being pointed at with.
-   */
-  const body = state === 'long'
-    ? `<p>Own the deployment pipeline end to end, across infrastructure, developer
-       tooling and release engineering. You will set the direction for how forty
-       engineers ship, and be accountable for the reliability of everything between a
-       merged pull request and a running service.</p>
-       <ul><li><span>Five years of production Kubernetes</span></li>
-       <li><span>Experience owning an on-call rotation</span></li></ul>`
-    : `<p>Own the deployment pipeline end to end, across infrastructure,
-       developer tooling and release engineering.</p>
-       <ul><li><span>Five years of production Kubernetes</span></li></ul>`;
-  document.body.innerHTML = `
-    <article id="posting">
-      <section class="job-header">
-        <div class="stack">
-          <h1 class="job-title" style="font-size:24px;margin:0"><span>Staff Platform Engineer</span></h1>
-          <p class="job-company" style="color:#4b5563;margin:4px 0 0"><span>Acme</span> · <span>Remote</span></p>
-        </div>
-      </section>
-      <section class="job-description" style="margin:16px 0">
-        <div class="prose">${body}</div>
-      </section>
-      <div class="actions" style="margin-top:16px">
-        <button id="send" style="padding:10px 16px;border-radius:8px;border:1px solid #d1d5db;background:#f9fafb">
-          <span class="btn-label">Send application</span>
-        </button>
-      </div>
-      <p id="picked" role="status" style="margin-top:16px;color:#4b5563"></p>
-    </article>`;
-
-  const said = document.getElementById('picked')!;
-  // Restart it, or the surface being iterated on vanishes the first time anything
-  // is confirmed and the page has to be reloaded to see it again.
-  const again = (note: string) => {
-    said.textContent = note;
-    setTimeout(() => run(), 150);
-  };
-  const run = () => startPicker(
-    (el) => again(`picked ${describeElement(el)}`),
-    params.get('label') || 'Description',
-    () => again('cancelled'),
-  );
-  run();
-}
-
 const BOOT: Record<Page, () => void | Promise<void>> = {
   popup: () => bootPage('popup'),
   options: () => bootPage('options'),
   modal: bootModal,
   chip: bootChip,
-  picker: bootPicker,
 };
 
 // Resolve the booter BEFORE calling it: `BOOT[page]?.() ?? bootPage('popup')`

@@ -15,18 +15,23 @@
  *              long quiet, so a carousel cannot keep it busy for the life of a tab.
  *   respect    an input that already holds a value is never written, and one the
  *              user has typed in (a trusted `input`/`change`) is never written again.
+ *   listen     when the user commits an answer — a trusted `change`, which the
+ *              browser fires on blur after an edit — the engine reads it back and
+ *              hands it to `onAnswer`, which decides what to learn (`learning.ts`).
  *
  * The report holds still. Rows are ordered once, at the first sweep (unrecognised,
  * then to check, then filled — what needs the user first), and every later input
- * joins the end marked `later`. A row's status may change in place — a Teach fills
- * it — but no row ever moves under the finger that is working the list.
+ * joins the end marked `later`. A row's status may change in place — an answer
+ * typed, a lesson learned — but no row ever moves under the eye reading the list.
  */
 
-import type { FieldId, FieldMatch, Lesson, MatchConfidence, Profile } from '../shared/types';
+import type { FieldId, FieldMatch, Lesson, LessonTarget, MatchConfidence, MatchSource, Profile } from '../shared/types';
 import { fieldLabel, fieldValue } from '../shared/profileFields';
 import { matchStatus } from '../shared/fieldStatus';
 import { hostOf } from '../shared/url';
 import { classify, collectCandidates, type Candidate, type Classified } from './fieldDetect';
+import { readAnswer } from './answer';
+import { normalizeAnswer } from '../shared/learning';
 import {
   clearHighlights, fillCheckbox, fillFileInput, fillRadioGroup, fillTextField, hasValue, highlight,
   unhighlight,
@@ -37,6 +42,32 @@ import { watchPageChange } from './pageChange';
 export const SETTLE_MS = 400;
 /** With no new input for this long, the page is done arriving and the watch stands down. */
 export const IDLE_STOP_MS = 10 * 60_000;
+/**
+ * The user working the page keeps the watch up — re-armed at most this often. A
+ * long step one of a wizard is not a quiet page: the step two behind "Next" is
+ * still to come, and a watch that stood down meanwhile would never see it.
+ */
+export const WAKE_THROTTLE_MS = 30_000;
+
+/** An answer the user committed — what `onAnswer` learns from. */
+export interface UserAnswer {
+  rowId: string;
+  cand: Candidate;
+  /** What the input holds now, as text — empty when the user cleared it. */
+  answer: string;
+  /** The row as it was before the user's edit. */
+  before: {
+    field?: FieldId;
+    confidence: MatchConfidence;
+    source: MatchSource;
+    /** We wrote into it. */
+    filled: boolean;
+    /** What we wrote, when we did. */
+    filledValue?: string;
+  };
+  /** The lesson that decided the row, if one did — a new one keeps its signature. */
+  lessonId?: string;
+}
 
 export interface EngineDeps {
   profile(): Profile;
@@ -47,19 +78,14 @@ export interface EngineDeps {
   onReport(): void;
   /** These lessons filled something — count them (debounced by the caller). */
   onLessonHits?(ids: string[]): void;
+  /** The user committed an answer to one input. */
+  onAnswer?(answer: UserAnswer): void;
   /** Injectable for jsdom, which has no layout. */
   visible?: (el: HTMLElement) => boolean;
   /** Injectable for tests; the real one is `watchPageChange`. */
   watch?: (cb: () => void) => () => void;
   /** The page's host, for site-pinned lessons. */
   host?: string;
-  /**
-   * Whether to put a name chip beside each mark. On a page the user is working on —
-   * a queue tab, or one they pressed Fill or Teach on — the names are what make the
-   * marks readable. On every other site an outline is plenty: a dozen "Email",
-   * "City" chips over a shop's checkout is the extension talking over the page.
-   */
-  showLabels?: () => boolean;
   /**
    * Whether an event came from the user. `isTrusted` — our own fills dispatch
    * untrusted events — and injectable only because no test can forge it.
@@ -71,9 +97,18 @@ interface Entry {
   row: FieldMatch;
   cand: Candidate;
   lessonId?: string;
+  /** What we wrote into it, when we did — the "before" of a correction. */
+  wrote?: string;
 }
 
 const RANK: Record<MatchConfidence, number> = { none: 0, low: 1, high: 2 };
+
+/** A contenteditable root — by its attribute too, which is all jsdom implements. */
+function isEditable(el: HTMLElement): boolean {
+  if (el.isContentEditable) return true;
+  const ce = el.getAttribute?.('contenteditable');
+  return ce === '' || ce === 'true' || ce === 'plaintext-only';
+}
 
 export class FillEngine {
   private entries: Entry[] = [];
@@ -87,6 +122,9 @@ export class FillEngine {
   private stopWatch?: () => void;
   private idleTimer?: ReturnType<typeof setTimeout>;
   private pending = false;
+  private lastArm = 0;
+  /** A contenteditable's text when focus arrived — it has no `change` to say it was edited. */
+  private editStart = new WeakMap<Element, string>();
 
   constructor(private deps: EngineDeps) {}
 
@@ -107,13 +145,24 @@ export class FillEngine {
   start(): void {
     document.addEventListener('input', this.onUserInput, true);
     document.addEventListener('change', this.onUserInput, true);
+    document.addEventListener('change', this.onChange, true);
+    document.addEventListener('focusin', this.onFocusIn, true);
+    document.addEventListener('focusout', this.onFocusOut, true);
+    document.addEventListener('pointerdown', this.onActivity, true);
+    document.addEventListener('keydown', this.onActivity, true);
     document.addEventListener('visibilitychange', this.onVisibility);
     this.watchAgain();
   }
 
+  /** Stand down entirely: no watching, no filling, no listening to the user. */
   stop(): void {
     document.removeEventListener('input', this.onUserInput, true);
     document.removeEventListener('change', this.onUserInput, true);
+    document.removeEventListener('change', this.onChange, true);
+    document.removeEventListener('focusin', this.onFocusIn, true);
+    document.removeEventListener('focusout', this.onFocusOut, true);
+    document.removeEventListener('pointerdown', this.onActivity, true);
+    document.removeEventListener('keydown', this.onActivity, true);
     document.removeEventListener('visibilitychange', this.onVisibility);
     this.stopWatch?.();
     this.stopWatch = undefined;
@@ -128,6 +177,7 @@ export class FillEngine {
   }
 
   private armIdle(): void {
+    this.lastArm = Date.now();
     if (this.idleTimer) clearTimeout(this.idleTimer);
     this.idleTimer = setTimeout(() => {
       this.stopWatch?.();
@@ -147,9 +197,53 @@ export class FillEngine {
     }
   };
 
+  private isUser(e: Event): boolean {
+    return (this.deps.isUserEvent ?? ((ev: Event) => ev.isTrusted))(e);
+  }
+
+  /**
+   * The user is working the page. If the watch stood down, it comes back — and
+   * looks at once, because whatever this press opened is exactly what it missed.
+   */
+  private onActivity = (e: Event): void => {
+    if (!this.isUser(e)) return;
+    if (!this.stopWatch) {
+      this.watchAgain();
+      this.onPageChanged();
+    } else if (Date.now() - this.lastArm > WAKE_THROTTLE_MS) {
+      this.armIdle();
+    }
+  };
+
+  /**
+   * An answer committed. `change` rather than `blur`: the browser fires it on blur
+   * only when the value changed, which is exactly "the user edited this" — and our
+   * own fills, which focus and blur each box, dispatch an *untrusted* one.
+   */
+  private onChange = (e: Event): void => {
+    if (!this.isUser(e)) return;
+    const el = e.target as HTMLElement | null;
+    if (el && !isEditable(el)) this.commit(el);
+  };
+
+  /** A contenteditable has no `change`: remember its text as focus arrives… */
+  private onFocusIn = (e: Event): void => {
+    const el = e.target as HTMLElement | null;
+    if (el && isEditable(el)) this.editStart.set(el, el.textContent ?? '');
+  };
+
+  /** …and commit as it leaves, if the user changed it in between. */
+  private onFocusOut = (e: Event): void => {
+    const el = e.target as HTMLElement | null;
+    if (!el || !isEditable(el) || !this.touched.has(el)) return;
+    const start = this.editStart.get(el);
+    this.editStart.delete(el);
+    if (start !== undefined && start !== (el.textContent ?? '')) this.commit(el);
+  };
+
   /** Only a *trusted* event is the user — our own fills dispatch untrusted ones. */
   private onUserInput = (e: Event): void => {
-    if (!(this.deps.isUserEvent ?? ((ev: Event) => ev.isTrusted))(e)) return;
+    if (!this.isUser(e)) return;
     const el = e.target as HTMLElement | null;
     if (!el) return;
     this.touched.add(el);
@@ -164,12 +258,8 @@ export class FillEngine {
     return !!cand.group?.some((r) => this.touched.has(r));
   }
 
-  /**
-   * One pass over the page. Returns how many inputs it had not seen before.
-   * `fill: false` classifies and reports without writing anything — the popup's
-   * Fill presses run with it on regardless of `fillAutomatically`.
-   */
-  sweep({ fill = true }: { fill?: boolean } = {}): number {
+  /** One pass over the page. Returns how many inputs it had not seen before. */
+  sweep(): number {
     const all = collectCandidates(document, { visible: this.deps.visible, known: this.candidates });
     for (const c of all) this.candidates.set(c.el, c);
     const fresh = all.filter((c) => !this.seen.has(c.el));
@@ -199,8 +289,7 @@ export class FillEngine {
       const entry = this.makeEntry(res, !first);
       this.seen.set(res.cand.el, entry);
       for (const r of res.cand.group ?? []) this.seen.set(r, entry);
-      if (fill) this.tryFill(entry);
-      else this.paint(entry);
+      this.tryFill(entry);
       if (entry.row.filled && entry.lessonId) hits.push(entry.lessonId);
       added.push(entry);
     }
@@ -260,15 +349,19 @@ export class FillEngine {
     const { row, cand } = entry;
     if (row.field && row.confidence === 'high' && !this.isTouched(cand)) {
       if (hasValue(cand.el, cand.group)) row.kept = true;
-      else row.filled = this.write(row.field, cand);
+      else {
+        row.filled = this.write(row.field, cand);
+        if (row.filled) entry.wrote = row.valueToFill ?? fieldValue(this.deps.profile(), row.field);
+      }
     }
     this.paint(entry);
   }
 
   /**
-   * Mark the input on the page by its outcome. A question nothing recognised is
-   * left unmarked: on every site in the world that would be a ring round every
-   * search box and comment field — the card's list is where those are taught.
+   * Mark the input on the page by its outcome, with the field's name beside it — the
+   * name is what makes an outline readable without opening the card. A question
+   * nothing recognised is left unmarked: on every site in the world that would be a
+   * ring round every search box and comment field.
    */
   private paint(entry: Entry): void {
     const { row, cand } = entry;
@@ -277,8 +370,7 @@ export class FillEngine {
       unhighlight(target);
       return;
     }
-    const label = this.deps.showLabels?.() ? row.fieldLabel : undefined;
-    highlight(target, matchStatus(row), label);
+    highlight(target, matchStatus(row), row.fieldLabel);
   }
 
   /** Put a field's value into a candidate. Returns whether it went in. */
@@ -304,24 +396,45 @@ export class FillEngine {
     return this.entries.find((e) => e.cand.el === el || e.cand.group?.includes(el as HTMLInputElement));
   }
 
-  /** The candidate behind a row — what a Teach builds its signature from. */
-  candidateFor(id: string): Candidate | undefined {
-    return this.entry(id)?.cand;
-  }
-
-  /** The row for an element the picker landed on, adding one if no sweep listed it. */
-  rowForElement(el: HTMLElement): FieldMatch | undefined {
+  /**
+   * The row for an element the user answered, adding one if no sweep listed it —
+   * an input that was prefilled and unrecognised, or one a lesson set aside. It
+   * joins the end, like every later arrival: the report holds still.
+   */
+  private ensureEntry(el: HTMLElement): Entry | undefined {
     const existing = this.entryForElement(el);
-    if (existing) return existing.row;
+    if (existing) return existing;
     const all = collectCandidates(document, { visible: () => true, known: this.candidates });
     const cand = all.find((c) => c.el === el || c.group?.includes(el as HTMLInputElement));
     if (!cand) return undefined;
+    this.candidates.set(cand.el, cand);
     const entry = this.makeEntry({ cand, source: 'none', confidence: 'none' }, true);
     this.seen.set(cand.el, entry);
+    for (const r of cand.group ?? []) this.seen.set(r, entry);
     this.entries.push(entry);
+    return entry;
+  }
+
+  /** The user committed an answer: mark the row theirs, and hand it on to learn from. */
+  private commit(el: HTMLElement): void {
+    const entry = this.ensureEntry(el);
+    if (!entry) return;
+    const { row, cand } = entry;
+    const answer = readAnswer(cand);
+    const before: UserAnswer['before'] = {
+      field: row.field,
+      confidence: row.confidence,
+      source: row.source,
+      filled: entry.wrote !== undefined,
+      ...(entry.wrote !== undefined ? { filledValue: entry.wrote } : {}),
+    };
+    // Whatever is in the box now is the user's — ours only while it still says
+    // what we wrote.
+    row.answered = !!answer;
+    if (row.filled && normalizeAnswer(answer) !== normalizeAnswer(entry.wrote ?? '')) row.filled = false;
     this.paint(entry);
     this.deps.onReport();
-    return entry.row;
+    this.deps.onAnswer?.({ rowId: row.id, cand, answer, before, lessonId: entry.lessonId });
   }
 
   /** Every candidate on the page — the set a new lesson's signature must be unique in. */
@@ -330,60 +443,51 @@ export class FillEngine {
   }
 
   /**
-   * Fill one row on the user's say-so — a low-confidence match they confirmed. The
-   * user asked for this one, so neither confidence nor an existing value stops it.
+   * A lesson was learned from what the user typed into this row: show it, without
+   * writing anything — the box already holds the user's answer. The row stays
+   * where it is; only its status changes.
    */
-  confirm(id: string): boolean {
+  learned(id: string, target: LessonTarget, lessonId?: string): void {
     const entry = this.entry(id);
-    if (!entry?.row.field) return false;
-    const ok = this.write(entry.row.field, entry.cand);
-    if (ok) { entry.row.filled = true; entry.row.kept = false; }
-    this.paint(entry);
-    this.deps.onReport();
-    return ok;
-  }
-
-  /**
-   * A row has been taught: point it at a field (and fill it), or set it aside.
-   * The row stays where it is; only its status changes.
-   */
-  applyTeaching(id: string, target: { field: FieldId } | { ignore: true }, lessonId?: string): boolean {
-    const entry = this.entry(id);
-    if (!entry) return false;
+    if (!entry) return;
     const row = entry.row;
-    if ('ignore' in target) {
-      row.ignored = true;
-      row.field = undefined;
-      row.fieldLabel = undefined;
-      row.valueToFill = undefined;
-      row.confidence = 'none';
-      row.filled = false;
-      this.paint(entry);
-      this.deps.onReport();
-      return true;
-    }
-    row.ignored = false;
-    row.field = target.field;
-    row.fieldLabel = fieldLabel(this.deps.profile(), target.field);
-    row.valueToFill = this.displayValue(target.field);
-    row.source = 'lesson';
-    row.confidence = 'high';
-    row.taught = true;
+    row.learned = true;
     entry.lessonId = lessonId;
-    row.filled = this.write(target.field, entry.cand);
-    row.kept = false;
+    if ('ignore' in target) {
+      Object.assign(row, { ignored: true, field: undefined, fieldLabel: undefined, valueToFill: undefined, confidence: 'none' });
+    } else {
+      Object.assign(row, {
+        ignored: false,
+        field: target.field,
+        fieldLabel: fieldLabel(this.deps.profile(), target.field),
+        valueToFill: this.displayValue(target.field),
+        source: 'lesson',
+        confidence: 'high',
+      });
+    }
     this.paint(entry);
     this.deps.onReport();
-    return row.filled;
   }
 
   /**
-   * The profile or the lessons changed (in Options, or a Teach on another tab):
+   * The user corrected what we filled, and the profile took their answer: say so,
+   * without writing anything — the box already holds it. The row stays where it is.
+   */
+  saved(id: string, field: FieldId, value: string): void {
+    const entry = this.entry(id);
+    if (!entry) return;
+    Object.assign(entry.row, { saved: true, field, fieldLabel: fieldLabel(this.deps.profile(), field), valueToFill: value });
+    this.paint(entry);
+    this.deps.onReport();
+  }
+
+  /**
+   * The profile or the lessons changed (in Options, or a lesson learned on another tab):
    * look again at every row that is still open — unrecognised, or recognised but not
    * filled — without moving any of them, and without touching what the user typed.
    */
   reconsider(): void {
-    const open = this.entries.filter((e) => !e.row.filled && !e.row.kept && !e.row.ignored && !this.isTouched(e.cand));
+    const open = this.entries.filter((e) => !e.row.filled && !e.row.kept && !e.row.ignored && !e.row.answered && !this.isTouched(e.cand));
     if (!open.length) { this.refreshLabels(); return; }
     const all = this.allCandidates();
     const live = open.filter((e) => all.some((c) => c.el === e.cand.el));
@@ -410,6 +514,11 @@ export class FillEngine {
     }
     this.refreshLabels();
     this.deps.onReport();
+  }
+
+  /** Draw every row's mark again — after a pause cleared them all. */
+  repaint(): void {
+    for (const e of this.entries) if (e.cand.el.isConnected) this.paint(e);
   }
 
   /** A custom field renamed in Options shows its new name on the rows that use it. */

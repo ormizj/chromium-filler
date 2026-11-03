@@ -1,8 +1,10 @@
 /**
  * End-to-end: load the real built extension into Chromium and run it against the
  * fixture scenarios. If these pass, the fill engine works on genuinely nasty
- * markup — late forms, modal forms, hashed ids — teaching carries across sites,
- * nothing is ever filled where it must not be, and the queue knows its tabs.
+ * markup — late forms, modal forms, hashed ids, a form in another origin's
+ * iframe — what it learns from your typing carries across sites, nothing is ever
+ * filled where it must not be, the on/off switch reaches every tab, and the queue
+ * knows its tabs.
  *
  * There are no site configs: every page is filled by the same engine. URLs come
  * from `test/fixtures/scenarios.mjs` (via `urlFor`), the same catalog the fixture
@@ -14,6 +16,7 @@ import { test, expect, chromium, type BrowserContext, type Page } from '@playwri
 import type { JobUrlEntry } from '../src/shared/types';
 import { MSG } from '../src/shared/messages';
 import { ACTION_LABELS } from '../src/shared/labels';
+import type { Locator } from '@playwright/test';
 import { HOSTS, queueSeedUrls, urlFor } from '../test/fixtures/scenarios.mjs';
 import path from 'node:path';
 import fs from 'node:fs';
@@ -26,8 +29,9 @@ const HEADED = process.env.PW_HEADED === '1';
 const PROFILE = {
   values: {
     firstName: 'Ada', lastName: 'Lovelace', fullName: 'Ada Lovelace',
-    email: 'ada@example.com', phone: '+1 555 123 4567', city: 'London',
+    email: 'ada@example.com', phone: '+1 555 123 4567', phoneLocal: '020 7946 0958', city: 'London',
     coverLetter: 'I love building widgets.',
+    additionalInfo: 'Available from March.',
   },
   keywords: {},
   customFields: [
@@ -146,7 +150,9 @@ async function waitForJobUrl(
 async function openCard(page: Page): Promise<void> {
   const card = page.locator('.cf-card');
   if (await card.count()) return;
-  await page.locator('.cf-pill').click({ timeout: 20_000 });
+  // The pill's own button: while a correction's Undo sits beside it, `.cf-pill` is
+  // the pair, and a press on its middle could land on Undo.
+  await page.locator('button.cf-pill, .cf-pill-main').click({ timeout: 20_000 });
   await expect(card).toBeVisible();
 }
 
@@ -155,13 +161,13 @@ function row(page: Page, question: string | RegExp) {
   return page.locator('.cf-report .cf-row', { has: page.locator('.cf-field b', { hasText: question }) });
 }
 
-/** Teach a row from the card: open its chooser, pick `choice`, Save. */
-async function teach(page: Page, question: string | RegExp, choice: string): Promise<void> {
-  await openCard(page);
-  const r = row(page, question);
-  await r.getByRole('button', { name: /^(Teach|Not this)$/ }).click();
-  await page.locator('.cf-teach select').selectOption(choice);
-  await page.locator('.cf-teach').getByRole('button', { name: ACTION_LABELS.save }).click();
+/**
+ * The user answering a question: type into the box, then leave it. CDP's typing is
+ * a trusted event, and Tab's blur fires the trusted `change` the extension learns on.
+ */
+async function answer(box: Locator, value: string): Promise<void> {
+  await box.fill(value);
+  await box.press('Tab');
 }
 
 async function setLessons(lessons: unknown[]): Promise<void> {
@@ -170,6 +176,33 @@ async function setLessons(lessons: unknown[]): Promise<void> {
 
 async function readLessons(): Promise<Array<{ label: string; target: unknown; signature: Record<string, unknown> }>> {
   return onExtensionPage((p) => p.evaluate(async () => (await chrome.storage.local.get('lessons')).lessons ?? []));
+}
+
+/** The lesson for one question, as soon as it is stored. */
+async function lessonFor(label: string) {
+  let found: Awaited<ReturnType<typeof readLessons>>[number] | undefined;
+  await expect.poll(async () => {
+    found = (await readLessons()).find((l) => l.label === label);
+    return !!found;
+  }, { timeout: 10_000 }).toBe(true);
+  return found!;
+}
+
+async function readTypedAnswers(): Promise<Array<{ key: string; count: number; field?: string }>> {
+  return onExtensionPage((p) => p.evaluate(async () => (await chrome.storage.local.get('typedAnswers')).typedAnswers ?? []));
+}
+
+async function readProfile(): Promise<{ values: Record<string, string> }> {
+  return onExtensionPage((p) => p.evaluate(async () => (await chrome.storage.local.get('profile')).profile));
+}
+
+/** Put the seeded profile back — a test that corrects a value changes it. */
+async function resetProfile(): Promise<void> {
+  await onExtensionPage((p) => p.evaluate(async (profile) => { await chrome.storage.local.set({ profile }); }, PROFILE));
+}
+
+async function clearLearning(): Promise<void> {
+  await onExtensionPage((p) => p.evaluate(async () => { await chrome.storage.local.set({ lessons: [], typedAnswers: [] }); }));
 }
 
 const filesIn = (page: Page, sel: string) => page.locator(sel).evaluate(
@@ -233,7 +266,8 @@ test('QuickBoard: a cover-letter upload takes the cover letter, not the CV', asy
   }
 });
 
-test('ChaosForm: hashed ids are no obstacle; the disguised city is listed to teach', async () => {
+test('ChaosForm: the disguised city is new; typing your city learns it, without moving a row', async () => {
+  await clearLearning();
   const page = await context.newPage();
   await page.goto(urlFor('chaos-form'));
 
@@ -250,22 +284,31 @@ test('ChaosForm: hashed ids are no obstacle; the disguised city is listed to tea
   await openCard(page);
   const city = row(page, 'Where are you located?');
   await expect(city.locator('.cf-dot.none')).toBeVisible();
-  await expect(city.getByRole('button', { name: ACTION_LABELS.teach })).toBeVisible();
+  // Nothing to press: the report only reports.
+  await expect(city.locator('button')).toHaveCount(0);
 
-  // Taught once, it fills in place — and the row does not move.
+  // Answered with the profile's city, it is learned in place — the row does not move,
+  // and the box keeps exactly what was typed.
   const before = await page.locator('.cf-report .cf-row .cf-field b').allTextContents();
-  await teach(page, 'Where are you located?', 'city');
-  await expect(page.getByLabel('Where are you located?')).toHaveValue('London');
-  await expect(city.getByRole('button', { name: ACTION_LABELS.taught })).toBeVisible();
+  await answer(page.getByLabel('Where are you located?'), 'london');
+  await expect(city.locator('.cf-tag')).toHaveText(ACTION_LABELS.learned);
+  await expect(page.getByLabel('Where are you located?')).toHaveValue('london');
   expect(await page.locator('.cf-report .cf-row .cf-field b').allTextContents()).toEqual(before);
-
-  const lessons = await readLessons();
-  expect(lessons.map((l) => l.label)).toContain('Where are you located?');
-  await setLessons([]);
+  expect((await lessonFor('Where are you located?')).target).toEqual({ field: 'city' });
   await page.close();
+
+  // The next visit fills it.
+  const again = await context.newPage();
+  await again.goto(urlFor('chaos-form'));
+  await expect(again.getByLabel('Given name')).toHaveValue('Ada', { timeout: 20_000 });
+  await again.click('#next-btn');
+  await expect(again.getByLabel('Where are you located?')).toHaveValue('London', { timeout: 10_000 });
+  await again.close();
+  await clearLearning();
 });
 
-test('ChaosForm: Confirm fills a guess in place, without moving any row', async () => {
+test('ChaosForm: typing the value a guess would have filled makes the guess a lesson', async () => {
+  await clearLearning();
   const page = await context.newPage();
   await page.goto(urlFor('chaos-form'));
   await expect(page.getByLabel('Email address')).toHaveValue('ada@example.com', { timeout: 20_000 });
@@ -273,17 +316,16 @@ test('ChaosForm: Confirm fills a guess in place, without moving any row', async 
   await expect(phone).toHaveValue('');
 
   await openCard(page);
-  const order = () => page.locator('.cf-report .cf-row .cf-field b').allTextContents();
-  const before = await order();
   const r = row(page, 'Phone');
-  await r.getByRole('button', { name: ACTION_LABELS.confirm, exact: true }).click();
-  await expect(phone).toHaveValue('+1 555 123 4567');
-  await expect(r.getByRole('button', { name: ACTION_LABELS.confirmed })).toBeVisible();
-  expect(await order()).toEqual(before);
+  await expect(r.locator('.cf-dot.low')).toBeVisible();
+  await answer(phone, '+1 555 123 4567');
+  await expect(r.locator('.cf-tag')).toHaveText(ACTION_LABELS.learned);
+  expect((await lessonFor('Phone')).target).toEqual({ field: 'phone' });
   await page.close();
+  await clearLearning();
 });
 
-/* ---------------- Teaching ---------------- */
+/* ---------------- Learning ---------------- */
 
 test('Questions: your own fields answer a box, and a yes/no radio group', async () => {
   const page = await context.newPage();
@@ -294,14 +336,18 @@ test('Questions: your own fields answer a box, and a yes/no radio group', async 
   await page.close();
 });
 
-test('Questions: a lesson taught on one site fills the same question on another', async () => {
-  await setLessons([]);
+test('Questions: a question learned on one site fills the same question on another', async () => {
+  await clearLearning();
   const board = await context.newPage();
   await board.goto(urlFor('questions'));
   await expect(board.locator('#q-email')).toHaveValue('ada@example.com', { timeout: 20_000 });
   await expect(board.locator('#q-preferred')).toHaveValue('');
-  await teach(board, 'Preferred name', 'firstName');
-  await expect(board.locator('#q-preferred')).toHaveValue('Ada');
+  // Typing without leaving the box learns nothing yet.
+  await board.locator('#q-preferred').fill('Ada');
+  await board.waitForTimeout(500);
+  expect((await readLessons()).some((l) => l.label === 'Preferred name')).toBe(false);
+  await board.locator('#q-preferred').press('Tab');
+  expect((await lessonFor('Preferred name')).target).toEqual({ field: 'firstName' });
   await board.close();
 
   // The same page from a different origin: a different site to the extension.
@@ -309,48 +355,95 @@ test('Questions: a lesson taught on one site fills the same question on another'
   await ats.goto(`${HOSTS.employer}/sites/questions.html`);
   await expect(ats.locator('#q-preferred')).toHaveValue('Ada', { timeout: 20_000 });
   await ats.close();
-  await setLessons([]);
+  await clearLearning();
 });
 
-test('Questions: "Name" taught under Reference 1 never fills Reference 2', async () => {
-  await setLessons([]);
+test('Questions: correcting a filled value updates your profile, and the next form gets it', async () => {
+  await clearLearning();
+  const page = await context.newPage();
+  try {
+    await page.goto(urlFor('questions'));
+    await expect(page.locator('#q-given')).toHaveValue('Ada', { timeout: 20_000 });
+    // Every recognised box is named on the page, not only on a queue tab.
+    await expect(page.locator('[data-cf-tag]', { hasText: 'First name' })).toBeVisible();
+
+    await answer(page.locator('#q-given'), 'Ava');
+    await expect.poll(async () => (await readProfile()).values.firstName).toBe('Ava');
+    await expect(page.locator('.cf-pill-text')).toHaveText('Saved · First name');
+    await expect(page.locator('#q-given')).toHaveValue('Ava');
+    await openCard(page);
+    await expect(row(page, 'Given name').locator('.cf-tag')).toHaveText(ACTION_LABELS.saved);
+    await page.close();
+
+    const again = await context.newPage();
+    await again.goto(urlFor('questions'));
+    await expect(again.locator('#q-given')).toHaveValue('Ava', { timeout: 20_000 });
+    await again.close();
+  } finally {
+    if (!page.isClosed()) await page.close();
+    await resetProfile();
+    await clearLearning();
+  }
+});
+
+test('Questions: a correction typed into a referee\'s "Name" is undone — the profile is put back and that box left alone', async () => {
+  await clearLearning();
+  const page = await context.newPage();
+  try {
+    await page.goto(urlFor('questions'));
+    // A bare "Name" reads as your full name, so the first one is filled with it —
+    // and here that is wrong: it is a referee's name.
+    await expect(page.locator('#ref1-name')).toHaveValue('Ada Lovelace', { timeout: 20_000 });
+    await answer(page.locator('#ref1-name'), 'Grace Hopper');
+    await expect.poll(async () => (await readProfile()).values.fullName).toBe('Grace Hopper');
+
+    // Undo, beside the pill: the name comes back, and that box is not filled again.
+    await page.locator('.cf-undo').click();
+    await expect.poll(async () => (await readProfile()).values.fullName).toBe('Ada Lovelace');
+    const lesson = await lessonFor('Name');
+    expect(lesson.target).toEqual({ ignore: true });
+    // Only that box: the lesson remembers its section.
+    expect(lesson.signature.section).toBe('reference 1');
+    await expect(page.locator('#ref1-name')).toHaveValue('Grace Hopper');
+    await page.close();
+
+    const again = await context.newPage();
+    await again.goto(urlFor('questions'));
+    await expect(again.locator('#q-email')).toHaveValue('ada@example.com', { timeout: 20_000 });
+    await again.waitForTimeout(500);
+    await expect(again.locator('#ref1-name')).toHaveValue('');
+    await again.close();
+  } finally {
+    if (!page.isClosed()) await page.close();
+    await resetProfile();
+    await clearLearning();
+  }
+});
+
+test('Questions: an answer no field holds is kept as a typed answer, listed in Options', async () => {
+  await clearLearning();
   const page = await context.newPage();
   await page.goto(urlFor('questions'));
-  // A bare "Name" reads as your full name, so the first one is filled with it —
-  // and here that is wrong: it is a referee's name.
-  await expect(page.locator('#ref1-name')).toHaveValue('Ada Lovelace', { timeout: 20_000 });
-
-  await openCard(page);
-  const filledName = page.locator('.cf-report .cf-row', { has: page.locator('.cf-field b', { hasText: /^Name$/ }) })
-    .filter({ has: page.getByRole('button', { name: ACTION_LABELS.notThis }) });
-  await filledName.getByRole('button', { name: ACTION_LABELS.notThis }).click();
-  await page.locator('.cf-teach select').selectOption('__new');
-  const [label, value] = [page.locator('.cf-teach input').nth(0), page.locator('.cf-teach input').nth(1)];
-  await label.fill('Referee name');
-  await value.fill('Grace Hopper');
-  await page.locator('.cf-teach').getByRole('button', { name: ACTION_LABELS.save }).click();
-
-  await expect(page.locator('#ref1-name')).toHaveValue('Grace Hopper');
-  await expect(page.locator('#ref2-name')).not.toHaveValue('Grace Hopper');
-  const lessons = await readLessons();
-  expect(lessons.at(-1)!.signature.section).toBe('reference 1');
+  await expect(page.locator('#q-email')).toHaveValue('ada@example.com', { timeout: 20_000 });
+  await answer(page.locator('#q-preferred'), 'Countess');
+  await expect.poll(async () => (await readTypedAnswers()).find((a) => a.key === 'countess'))
+    .toMatchObject({ count: 1 });
+  // Not one of the user's details: nothing is learned, and the profile is untouched.
+  expect((await readLessons()).some((l) => l.label === 'Preferred name')).toBe(false);
+  expect((await readProfile()).values.firstName).toBe('Ada');
   await page.close();
 
-  // On the next visit the lesson still names only its own box.
-  const again = await context.newPage();
-  await again.goto(urlFor('questions'));
-  await expect(again.locator('#ref1-name')).toHaveValue('Grace Hopper', { timeout: 20_000 });
-  await again.waitForTimeout(500);
-  await expect(again.locator('#ref2-name')).not.toHaveValue('Grace Hopper');
-  await again.close();
-
-  // Put the profile and the lessons back.
-  await setLessons([]);
-  await onExtensionPage((p) => p.evaluate(async () => {
-    const { profile } = await chrome.storage.local.get('profile');
-    profile.customFields = profile.customFields.filter((f: { label: string }) => f.label !== 'Referee name');
-    await chrome.storage.local.set({ profile });
-  }));
+  // Options lists it, most used first, ready to save.
+  const opts = await context.newPage();
+  try {
+    await opts.goto(`chrome-extension://${extId}/src/options/options.html#profile&at=typed-section`);
+    await opts.waitForFunction(() => document.body.dataset.ready === '1');
+    const typed = opts.locator('#typed-list .typed-row', { hasText: 'Countess' });
+    await expect(typed).toContainText('typed 1×');
+  } finally {
+    await opts.close();
+  }
+  await clearLearning();
 });
 
 test('Questions: a box you typed in is never written over, even by a new lesson', async () => {
@@ -368,7 +461,7 @@ test('Questions: a box you typed in is never written over, even by a new lesson'
   await page.waitForTimeout(800);
   await expect(page.locator('#q-preferred')).toHaveValue('Countess');
   await page.close();
-  await setLessons([]);
+  await clearLearning();
 });
 
 /* ---------------- Left alone ---------------- */
@@ -378,10 +471,97 @@ test('Login: a login form, a search box and a card number are never touched', as
   await page.goto(urlFor('login'));
   await page.waitForTimeout(1500);
   for (const sel of ['#s-q', '#l-email', '#l-pass', '#cc']) await expect(page.locator(sel)).toHaveValue('');
-  // Nothing filled, so nothing is put on the page either.
-  await expect(page.locator('.cf-pill')).toHaveCount(0);
+  // Nothing filled: the one mark is the pill saying the extension is on.
+  await expect(page.locator('.cf-pill')).toHaveText('On · learning');
   await expect(page.locator('.cf-card')).toHaveCount(0);
+  // And typing in a login form teaches nothing.
+  await answer(page.locator('#l-email'), 'ada@example.com');
+  await page.waitForTimeout(500);
+  expect(await readLessons()).toEqual([]);
   await page.close();
+});
+
+/* ---------------- On / off ---------------- */
+
+test('Switch: off in the popup pauses every tab; on brings them back', async () => {
+  const page = await context.newPage();
+  const popup = await context.newPage();
+  try {
+    await page.goto(urlFor('quick-plain'));
+    await expect(page.locator('#email')).toHaveValue('ada@example.com', { timeout: 20_000 });
+    await expect(page.locator('.cf-pill')).toBeVisible();
+
+    await popup.goto(`chrome-extension://${extId}/src/popup/popup.html`);
+    await expect(popup.locator('#on')).toBeChecked();
+    // The popup is a tab of its own here, with no page behind it to report on —
+    // so the switch is all there is to read on it.
+    // Pressed where a user presses it — the track — as the Sync switch is below.
+    await popup.locator('#on + .switch-track').click();
+    await expect(popup.locator('#on')).not.toBeChecked();
+
+    // The open tab stands down: no pill, no marks; what was filled stays filled.
+    await expect(page.locator('.cf-pill')).toHaveCount(0);
+    await expect(page.locator('#email')).toHaveValue('ada@example.com');
+
+    // A page opened while paused is not filled.
+    const paused = await context.newPage();
+    await paused.goto(urlFor('quick-uploads'));
+    await paused.waitForTimeout(1200);
+    await expect(paused.locator('#email')).toHaveValue('');
+    await expect(paused.locator('.cf-pill')).toHaveCount(0);
+
+    // On again: it fills, live.
+    await popup.locator('#on + .switch-track').click();
+    await expect(popup.locator('#on')).toBeChecked();
+    await expect(paused.locator('#email')).toHaveValue('ada@example.com', { timeout: 10_000 });
+    await expect(paused.locator('.cf-pill')).toBeVisible();
+    await paused.close();
+  } finally {
+    await patchSettings({ fillAutomatically: true });
+    await popup.close();
+    await page.close();
+  }
+});
+
+test('Switch: the card\'s switch is the popup\'s — it says "Paused", then goes', async () => {
+  const page = await context.newPage();
+  try {
+    await page.goto(urlFor('quick-plain'));
+    await openCard(page);
+    await page.locator('.cf-header .cf-switch .switch-track').click();
+    await expect(page.locator('.cf-pill')).toContainText('Paused');
+    await expect(page.locator('.cf-pill')).toHaveCount(0, { timeout: 10_000 });
+    const on = await onExtensionPage((p) => p.evaluate(
+      async () => (await chrome.storage.local.get('settings')).settings?.fillAutomatically,
+    ));
+    expect(on).toBe(false);
+  } finally {
+    await patchSettings({ fillAutomatically: true });
+    await page.close();
+  }
+});
+
+/* ---------------- Embedded forms ---------------- */
+
+test('Embedded: a form in another origin\'s iframe is filled, and its rows are on the page\'s card', async () => {
+  const page = await context.newPage();
+  try {
+    await page.goto(urlFor('embedded'));
+    const frame = page.frameLocator('#ats-frame');
+    await expect(frame.locator('#ats-email')).toHaveValue('ada@example.com', { timeout: 20_000 });
+    await expect(frame.locator('#ats-first')).toHaveValue('Ada');
+    await expect(frame.locator('#ats-comments')).toHaveValue('Available from March.');
+    // Two numbers: a box that says only "Phone" takes the international one.
+    await expect(frame.locator('#ats-phone')).toHaveValue('+1 555 123 4567');
+    await expect(frame.locator('#ats-phone-local')).toHaveValue('020 7946 0958');
+    // Drawn once, by the top frame, never inside the iframe.
+    await expect(frame.locator('.cf-pill')).toHaveCount(0);
+    await expect(page.locator('.cf-pill')).toContainText('filled');
+    await openCard(page);
+    await expect(page.locator('.cf-report')).toContainText('Email address');
+  } finally {
+    await page.close();
+  }
 });
 
 /* ---------------- Popup ---------------- */
@@ -405,14 +585,16 @@ test('Popup: opens at a usable width (no vw sliver) and renders cleanly', async 
   await page.close();
 });
 
-test('Popup: Teach, Queue and Options share one row, and Queue opens the importer', async () => {
+test('Popup: Queue and Options share one row beside the switch, and Queue opens the importer', async () => {
   const page = await context.newPage();
   await page.setViewportSize({ width: 360, height: 600 });
   await page.goto(`chrome-extension://${extId}/src/popup/popup.html`);
   await expect(page.locator('.links')).toBeVisible();
+  await expect(page.locator('#teach')).toHaveCount(0);
+  await expect(page.locator('header #on-switch')).toBeVisible();
 
   const tops: number[] = [];
-  for (const id of ['#teach', '#open-queue', '#open-options']) {
+  for (const id of ['#open-queue', '#open-options']) {
     const box = await page.locator(id).boundingBox();
     expect(box, id).not.toBeNull();
     tops.push(Math.round(box!.y));
@@ -722,23 +904,20 @@ test('Modal: dragging the card on a posting moves it for that page only', async 
   }
 });
 
-test('Modal: the footer is Fill again and Teach, and no overflow menu', async () => {
+test('Modal: the footer is Fill again alone, and no overflow menu', async () => {
   const page = await context.newPage();
   try {
     await page.goto(urlFor('quick-plain'));
     await openCard(page);
-    await expect(page.locator('.cf-footer-actions > button')).toHaveText(['Fill again', 'Teach']);
+    await expect(page.locator('.cf-footer-actions > button')).toHaveText(['Fill again']);
     await expect(page.locator('.cf-more')).toHaveCount(0);
     await expect(page.locator('.cf-fullscreen')).toHaveCount(0);
     await expect(page.locator('.cf-view')).toHaveCount(0);
 
-    // Fill again is the footer's main action: three quarters of the row, Teach the
-    // last quarter. Layout, so only a browser can measure it.
-    const [fill, teach] = await Promise.all(
-      ['Fill again', 'Teach'].map(async (name) =>
-        (await page.locator('.cf-footer-actions > button', { hasText: name }).boundingBox())!.width),
-    );
-    expect(fill / teach, 'Fill again is three times Teach').toBeCloseTo(3, 0);
+    // Alone, it takes the whole row. Layout, so only a browser can measure it.
+    const actions = (await page.locator('.cf-footer-actions').boundingBox())!;
+    const fill = (await page.locator('.cf-footer-actions > button').boundingBox())!;
+    expect(fill.width / actions.width).toBeGreaterThan(0.95);
   } finally {
     await page.close();
   }
@@ -771,36 +950,6 @@ test('Modal: the card opens by itself on a filled page only when asked to', asyn
   } finally {
     await patchSettings({ openCardWhenFilled: false });
     await opened.close();
-  }
-});
-
-/**
- * Pointing at a field: a click selects, clicking the same spot again goes one
- * level in, and Confirm opens the card on that input's Teach chooser.
- */
-test('Modal: pointing at a field selects, steps in, and opens its chooser', async () => {
-  const page = await context.newPage();
-  try {
-    await page.goto(urlFor('quick-plain'));
-    await openCard(page);
-    await page.locator('.cf-footer-actions').getByRole('button', { name: 'Teach', exact: true }).click();
-
-    const bar = page.locator('[data-cf-picker="bar"]');
-    const readout = page.locator('[data-cf-picker="readout"]');
-    await expect(bar).toBeVisible();
-    await expect(bar).toContainText('field to teach');
-
-    await page.click('#email');
-    await expect(bar).toBeVisible();
-    await expect(readout).toHaveText('form#application-form');
-    await page.click('#email');
-    await expect(readout).toHaveText('input#email');
-
-    await bar.getByRole('button', { name: 'Confirm', exact: true }).click();
-    await expect(bar).toHaveCount(0);
-    await expect(page.locator('.cf-teach select')).toHaveValue('email');
-  } finally {
-    await page.close();
   }
 });
 
@@ -1050,10 +1199,14 @@ test('Sync: the tab lists what syncs and what stays on this browser', async () =
     for (const text of ['Your job list', 'Your details', 'Your own fields', 'What it has learned', 'Your CV']) {
       await expect(synced).toContainText(text);
     }
-    await expect(synced).toContainText('Fill automatically');
+    await expect(synced).toContainText('Learn from what you type');
     await expect(local).toContainText('Where the card sits');
     await expect(local).toContainText('OAuth client');
+    // The on/off switch pauses this browser only, and what you typed stays here.
+    await expect(local).toContainText('The on/off switch');
+    await expect(local).toContainText('Answers you’ve typed');
     await expect(synced).not.toContainText('Where the card sits');
+    await expect(synced).not.toContainText('Fill and learn on this browser');
     await page.click('#sync-scope-heading');
     await expect(synced).toBeHidden();
   });

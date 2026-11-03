@@ -21,8 +21,7 @@ function setViewport(w: number, h: number): void {
 
 function modalCallbacks(over: Partial<ModalCallbacks> = {}): ModalCallbacks {
   return {
-    onRerun: noop, onConfirm: noop, onTeach: noop, onPoint: noop,
-    onSkip: noop, onClose: noop,
+    onRerun: noop, onSkip: noop, onToggle: noop, onClose: noop,
     ...over,
   };
 }
@@ -31,7 +30,7 @@ function modalData(over: Partial<ModalData> = {}): ModalData {
   return {
     siteName: 'Acme',
     matches: [],
-    choices: [],
+    on: true,
     layout: DEFAULT_MODAL_LAYOUT,
     ...over,
   };

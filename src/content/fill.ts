@@ -30,6 +30,7 @@ const MIN_PARTIAL = 3;
  * unfilled field, but it cannot know the filled one is wrong.
  */
 function findOption(options: HTMLOptionElement[], wanted: string): HTMLOptionElement | undefined {
+  if (!wanted) return undefined;
   const text = (o: HTMLOptionElement) => o.text.trim().toLowerCase();
 
   const byValue = options.find((o) => o.value.toLowerCase() === wanted);
@@ -47,10 +48,17 @@ function findOption(options: HTMLOptionElement[], wanted: string): HTMLOptionEle
   return contained.length === 1 ? contained[0] : undefined;
 }
 
+/**
+ * The option filling `value` would select. Exported for the other direction too:
+ * learning asks which profile value would have produced the option the user chose,
+ * and must answer with exactly the rule the fill uses.
+ */
+export function optionFor(el: HTMLSelectElement, value: string): HTMLOptionElement | undefined {
+  return findOption(Array.from(el.options), value.trim().toLowerCase());
+}
+
 function fillSelect(el: HTMLSelectElement, value: string): boolean {
-  const wanted = value.trim().toLowerCase();
-  if (!wanted) return false;
-  const match = findOption(Array.from(el.options), wanted);
+  const match = optionFor(el, value);
   if (!match) return false;
   el.value = match.value;
   dispatch(el, 'input', 'change');
@@ -79,29 +87,31 @@ export function fillTextField(el: HTMLElement, value: string): boolean {
 }
 
 /** A radio's own words — its labels, else its value. */
-function radioText(r: HTMLInputElement): string {
+export function radioText(r: HTMLInputElement): string {
   const own = r.labels?.length ? Array.from(r.labels).map((l) => l.textContent ?? '').join(' ') : '';
   return (own || r.value).replace(/\s+/g, ' ').trim().toLowerCase();
 }
 
 /**
- * Pick the radio in a group whose label (or value) is the wanted answer — with the
+ * The radio in a group whose label (or value) is the wanted answer — with the
  * same strictness `findOption` holds a `<select>` to: exact first, then a single
  * unambiguous prefix or phrase, and nothing at all when two options could be meant.
+ * Exported, like `optionFor`, so learning reads a choice back by the same rule.
  */
-export function fillRadioGroup(group: HTMLInputElement[], value: string): boolean {
+export function radioFor(group: HTMLInputElement[], value: string): HTMLInputElement | undefined {
   const wanted = value.trim().toLowerCase();
-  if (!wanted) return false;
+  if (!wanted) return undefined;
   const exact = group.filter((r) => radioText(r) === wanted || r.value.toLowerCase() === wanted);
-  let pick = exact.length === 1 ? exact[0] : undefined;
-  if (!pick && !exact.length) {
-    const prefixed = group.filter((r) => radioText(r).startsWith(wanted));
-    if (prefixed.length === 1) pick = prefixed[0];
-    else if (!prefixed.length && wanted.length >= MIN_PARTIAL) {
-      const contained = group.filter((r) => radioText(r).includes(wanted));
-      if (contained.length === 1) pick = contained[0];
-    }
-  }
+  if (exact.length) return exact.length === 1 ? exact[0] : undefined;
+  const prefixed = group.filter((r) => radioText(r).startsWith(wanted));
+  if (prefixed.length) return prefixed.length === 1 ? prefixed[0] : undefined;
+  if (wanted.length < MIN_PARTIAL) return undefined;
+  const contained = group.filter((r) => radioText(r).includes(wanted));
+  return contained.length === 1 ? contained[0] : undefined;
+}
+
+export function fillRadioGroup(group: HTMLInputElement[], value: string): boolean {
+  const pick = radioFor(group, value);
   if (!pick) return false;
   pick.click();
   // `click()` on a radio checks it and fires `input`/`change` the way a user's press

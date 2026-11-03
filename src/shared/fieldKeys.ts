@@ -6,13 +6,36 @@
  * `normalizeAttr`). Keep patterns space-based accordingly.
  */
 
-import type { FieldKey } from './types';
+import type { FieldKey, InputKind } from './types';
 
 export const TEXT_FIELDS: FieldKey[] = [
   'firstName', 'lastName', 'fullName', 'email', 'phone', 'linkedin',
   'github', 'website', 'portfolio', 'address', 'city', 'state', 'zip',
-  'country', 'coverLetter',
+  'country', 'coverLetter', 'additionalInfo',
+  // Last on purpose: this order is the tie-break between two fields scoring alike on
+  // one box, and a box that only says "Phone" must stay the international number's.
+  'phoneLocal',
 ];
+
+/** The built-ins that are prose, not a value: edited as a text area in Options. */
+export const LONG_TEXT_FIELDS: ReadonlySet<FieldKey> = new Set(['additionalInfo']);
+
+/**
+ * The only kinds of control a built-in may be matched to by the heuristics, where
+ * that is narrower than "any text-like box". Nothing is restricted today: forms ask
+ * for "Comments" in a one-line box as often as in a text area. The user's own
+ * wordings and lessons are never restricted: they are the user's word.
+ */
+export const FIELD_KINDS: Partial<Record<FieldKey, readonly InputKind[]>> = {};
+
+/**
+ * Words that take a box away from a field even when its own keywords match. "Local
+ * phone number" says "phone", and is the local number's box, not the international
+ * one's. (`\bnational\b` does not match inside "international".)
+ */
+export const FIELD_EXCLUDES: Partial<Record<FieldKey, RegExp[]>> = {
+  phone: [/\blocal\b/, /\bnational\b/],
+};
 
 /**
  * Positive keyword patterns per field (normalized strings).
@@ -31,8 +54,13 @@ export const FIELD_KEYWORDS: Record<FieldKey, RegExp[]> = {
     /\bcandidate ?name\b/, /\bapplicant ?name\b/,
   ],
   email: [/\be ?mail\b/, /\be ?mail ?address\b/],
+  // The international number: a box that only says "Phone" takes this one.
   phone: [
     /\bphone\b/, /\bphone ?number\b/, /\btelephone\b/, /\bmobile\b/, /\btel\b/, /\bcell\b/,
+  ],
+  phoneLocal: [
+    /\blocal ?(phone|mobile|tel|telephone|number)\b/, /\bnational ?(phone|mobile|number)\b/,
+    /\b(phone|mobile|tel|telephone|cell)\b.*\b(local|national)\b/,
   ],
   linkedin: [/\blinked ?in\b/],
   github: [/\bgit ?hub\b/],
@@ -44,6 +72,13 @@ export const FIELD_KEYWORDS: Record<FieldKey, RegExp[]> = {
   zip: [/\bzip\b/, /\bzip ?code\b/, /\bpostal\b/, /\bpostal ?code\b/, /\bpost ?code\b/],
   country: [/\bcountry\b/],
   coverLetter: [/\bcover ?letter\b/, /\bwhy do you\b/, /\bmotivation\b/],
+  // The box most forms end on. Lever's is `name="comments"`, labelled "Additional
+  // information". Deliberately not the singular "comment" — a WordPress comment box
+  // is `name="comment"` — and not "message", which every contact form uses.
+  additionalInfo: [
+    /\badditional ?info(rmation)?\b/, /\badditional ?(comments?|notes?|details)\b/,
+    /\bcomments\b/, /\banything else\b/, /\bother ?information\b/,
+  ],
   resume: [/\bresume\b/, /\bcv\b/, /\bcurriculum vitae\b/, /\bre ?sume\b/],
 };
 
@@ -62,10 +97,11 @@ export const FIELD_KEYWORDS: Record<FieldKey, RegExp[]> = {
  */
 export const FIELD_ORDER: FieldKey[] = [
   'resume', 'coverLetter',
-  'email', 'phone',
+  'email', 'phone', 'phoneLocal',
   'fullName', 'firstName', 'lastName',
   'linkedin', 'github', 'website', 'portfolio',
   'address', 'city', 'state', 'zip', 'country',
+  'additionalInfo',
 ];
 
 const ORDER_INDEX = new Map(FIELD_ORDER.map((f, i) => [f, i]));
@@ -113,7 +149,8 @@ export const AUTOCOMPLETE_MAP: Partial<Record<FieldKey, string[]>> = {
   lastName: ['family-name'],
   fullName: ['name'],
   email: ['email'],
-  phone: ['tel', 'tel-national'],
+  phone: ['tel'],
+  phoneLocal: ['tel-national', 'tel-local'],
   address: ['street-address', 'address-line1'],
   city: ['address-level2'],
   state: ['address-level1'],
@@ -127,7 +164,8 @@ export const FIELD_LABELS: Record<FieldKey, string> = {
   lastName: 'Last name',
   fullName: 'Full name',
   email: 'Email',
-  phone: 'Phone',
+  phone: 'Phone (international)',
+  phoneLocal: 'Phone (local)',
   linkedin: 'LinkedIn',
   github: 'GitHub',
   website: 'Website',
@@ -138,6 +176,7 @@ export const FIELD_LABELS: Record<FieldKey, string> = {
   zip: 'ZIP / Postal',
   country: 'Country',
   coverLetter: 'Cover letter',
+  additionalInfo: 'Additional information',
   resume: 'Résumé / CV',
 };
 

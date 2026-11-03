@@ -220,3 +220,65 @@ describe('classify — lessons', () => {
     expect(rows[1].field).not.toBe('c_ref');
   });
 });
+
+describe('classify — additional information', () => {
+  it('fills Lever\'s box: a textarea named "comments", labelled "Additional information"', () => {
+    const root = mount(`
+      <label for="cover">Additional information</label>
+      <textarea id="cover" name="comments" placeholder="Add a cover letter or anything else you want to share."></textarea>`);
+    const r = byField(run(root)).get('additionalInfo');
+    expect(idOf(r)).toBe('cover');
+    expect(r?.confidence).toBe('high');
+  });
+
+  it('knows the other wordings forms end on', () => {
+    for (const label of ['Additional comments', 'Is there anything else you would like us to know?', 'Other information']) {
+      const root = mount(`<label for="t">${label}</label><textarea id="t"></textarea>`);
+      expect(byField(run(root)).get('additionalInfo')?.confidence, label).toBe('high');
+      document.body.innerHTML = '';
+    }
+  });
+
+  it('fills a one-line box too — some forms ask for comments in one', () => {
+    const root = mount('<label for="c">Comments</label><input id="c" name="comments">');
+    expect(byField(run(root)).get('additionalInfo')?.confidence).toBe('high');
+  });
+
+  it('leaves a blog\'s comment box and a contact form\'s message alone', () => {
+    const root = mount(`
+      <label for="comment">Comment</label><textarea id="comment" name="comment"></textarea>
+      <label for="msg">Message</label><textarea id="msg" name="message"></textarea>`);
+    expect(byField(run(root)).get('additionalInfo')).toBeUndefined();
+  });
+});
+
+describe('classify — the two phone numbers', () => {
+  const phoneOf = (html: string) => {
+    const rows = byField(run(mount(html)));
+    return { intl: idOf(rows.get('phone')), local: idOf(rows.get('phoneLocal')) };
+  };
+
+  it('a box that only says phone takes the international number', () => {
+    expect(phoneOf('<label for="p">Phone</label><input id="p" type="tel">')).toEqual({ intl: 'p', local: undefined });
+    expect(phoneOf('<label for="p">Mobile number</label><input id="p">')).toEqual({ intl: 'p', local: undefined });
+    expect(phoneOf('<label for="p">International phone number</label><input id="p">')).toEqual({ intl: 'p', local: undefined });
+  });
+
+  it('a box that says local or national takes the local number', () => {
+    for (const label of ['Local phone number', 'Phone (local)', 'Mobile number, national format']) {
+      expect(phoneOf(`<label for="p">${label}</label><input id="p" name="phone">`), label).toEqual({ intl: undefined, local: 'p' });
+      document.body.innerHTML = '';
+    }
+  });
+
+  it('autocomplete says which: tel is international, tel-national is local', () => {
+    expect(phoneOf(`
+      <input id="a" autocomplete="tel"><input id="b" autocomplete="tel-national">`)).toEqual({ intl: 'a', local: 'b' });
+  });
+
+  it('a form asking for both gets both', () => {
+    expect(phoneOf(`
+      <label for="a">Phone</label><input id="a">
+      <label for="b">Local phone</label><input id="b">`)).toEqual({ intl: 'a', local: 'b' });
+  });
+});

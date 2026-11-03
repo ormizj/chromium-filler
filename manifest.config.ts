@@ -3,12 +3,14 @@ import { defineManifest } from '@crxjs/vite-plugin';
 export default defineManifest({
   manifest_version: 3,
   name: 'Chromium Filler',
-  version: '0.1.4',
-  description: 'Fills job application forms on any site as they appear, learns the questions you teach it, and never submits for you.',
-  // `identity` is for syncing the job database through a Google Drive app folder
-  // (see src/shared/syncConfig.ts). Deliberately no `alarms`: sync runs when the
-  // user presses Sync now and once at browser startup, never on a timer.
-  permissions: ['storage', 'unlimitedStorage', 'tabs', 'scripting', 'activeTab', 'identity'],
+  version: '0.1.5',
+  description: 'Fills job application forms on any site as they appear, learns from the answers you type, and never submits for you.',
+  // `identity` is for syncing through a Google Drive app folder (see
+  // src/shared/syncConfig.ts). Deliberately no `alarms`: sync runs when the user
+  // presses Sync now and once at browser startup, never on a timer. No `scripting`
+  // or `activeTab` either: the content script is declared below, and the popup
+  // reaches the page with `tabs.sendMessage`, which the host permission covers.
+  permissions: ['storage', 'unlimitedStorage', 'tabs', 'identity'],
   // Already broad enough for googleapis.com; nothing was added for sync.
   host_permissions: ['<all_urls>'],
   // A `key` pins the extension ID. Unpacked, the ID is derived from the install
@@ -64,12 +66,17 @@ export default defineManifest({
     service_worker: 'src/background/service_worker.ts',
     type: 'module',
   },
+  // Every frame, not only the top one: Greenhouse, Lever, iCIMS and others embed the
+  // application form in an iframe on the company's careers page, and a script in
+  // the top frame cannot see into it. A subframe fills and learns where it is and
+  // reports its rows to the top frame's card (`MSG.FRAME_REPORT`); it never draws.
   content_scripts: [
     {
       matches: ['<all_urls>'],
       js: ['src/content/main.ts'],
       run_at: 'document_idle',
-      all_frames: false,
+      all_frames: true,
+      match_about_blank: true,
     },
   ],
 });

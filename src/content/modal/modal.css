@@ -55,13 +55,6 @@
   height: 20px;
 }
 
-/* Fill again is the footer's main action, so it takes three shares of the row to
-   one for each of the others: 75/25 beside Teach. Every footer button is
-   `flex: 1` (primitives.css); this is the one exception. */
-.cf-footer-actions > button.cf-btn.cf-fill-again {
-  flex: 3;
-}
-
 /* The outcome on the header strip, which never scrolls away. */
 .cf-sent-chip {
   flex: none;
@@ -100,18 +93,6 @@ button.cf-btn.cf-applied-btn[aria-disabled='true'] {
   box-shadow: none;
   opacity: 1;
   cursor: default;
-}
-
-.cf-empty {
-  font-size: var(--text-md);
-  color: var(--muted);
-  margin: 0 0 var(--space-5);
-}
-
-/* When it is the last thing in the body there is nothing for that margin to
-   separate it from, and it just leaves the card looking unfinished. */
-.cf-body > .cf-empty:last-child {
-  margin-bottom: 0;
 }
 
 /* ---------------- The report ---------------- */
@@ -232,7 +213,7 @@ button.cf-btn.cf-applied-btn[aria-disabled='true'] {
   box-shadow: inset 0 0 0 2px var(--accent);
 }
 
-/* ---------------- Teaching ---------------- */
+/* ---------------- Later rows, set-aside rows ---------------- */
 
 /* "Appeared later": the report holds still, so inputs that arrived after the first
    sweep join the end under their own small head rather than slotting in above rows
@@ -250,60 +231,88 @@ button.cf-btn.cf-applied-btn[aria-disabled='true'] {
   font-weight: 500;
 }
 
-/* The Teach chooser opens inside the list, under its row, as part of it: the row's
-   own hairline moves below the chooser, so the two read as one object. */
-.cf-report .cf-row:has(+ .cf-teach) {
-  border-bottom: 0;
+/* ---------------- On / off ---------------- */
+
+/* The extension's on/off switch, in the header beside close. It does not shrink:
+   the site name gives way first, as it does for the Done chip. */
+.cf-switch {
+  flex: none;
 }
-.cf-teach {
+
+/**
+ * The pill's live mark, in place of a status dot while there is nothing to report
+ * or something just happened: the extension is on and reading the page. A filled
+ * accent disc with a soft ring that breathes — the one moving thing it draws, and
+ * still, with no ring, under reduced motion. `.off` is the moment after the user
+ * switched it off from the card: the same disc, quiet.
+ */
+.cf-live {
+  position: relative;
+  flex: none;
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-weak);
+  animation: cf-live-breathe 2.4s ease-in-out infinite;
+}
+.cf-live.off {
+  background: var(--muted-2);
+  box-shadow: none;
+  animation: none;
+}
+@keyframes cf-live-breathe {
+  0%, 100% { box-shadow: 0 0 0 2px var(--accent-weak); }
+  50% { box-shadow: 0 0 0 5px var(--accent-weak); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .cf-live {
+    animation: none;
+  }
+}
+
+/**
+ * A correction just saved: the pill and an Undo beside it, as one object. The
+ * pair wears the pill's look (`.cf-pill`); the pill's own button inside it goes
+ * plain, so the two controls read as halves of one capsule rather than a button
+ * inside a button.
+ */
+.cf-pill.cf-pill-pair {
+  padding: 0 var(--space-1) 0 0;
+  gap: 0;
+  cursor: default;
+  /* Centred on a phone (`left: 50%`), the pill shrink-fits into half the screen —
+     and two controls side by side then wrap "Saved · First name" onto two lines. */
+  white-space: nowrap;
+}
+.cf-pill-main {
   display: flex;
-  flex-direction: column;
+  align-items: center;
   gap: var(--space-2);
-  padding: 0 var(--space-6) var(--space-4);
-  border-bottom: 1px solid var(--border);
+  min-height: var(--tap);
+  padding: 0 var(--space-3) 0 var(--space-5);
+  border: 0;
+  border-radius: var(--radius-pill);
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
 }
-.cf-report > .cf-teach:last-child {
-  border-bottom: 0;
+.cf-pill-pair .cf-undo {
+  border-radius: var(--radius-pill);
+  color: var(--accent);
 }
 
-.cf-fld {
+/* The same flash in the open card, above the footer's controls. */
+.cf-saved-note {
   display: flex;
-  flex-direction: column;
-  gap: 3px;
-}
-
-.cf-fld-label {
-  font-size: var(--text-xs);
-  color: var(--muted);
-}
-
-.cf-input {
-  width: 100%;
-  border: 1px solid var(--border);
-  border-radius: var(--radius-md);
-  padding: 7px 9px;
-  background: var(--surface);
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  flex: 1 0 100%;
   color: var(--fg);
-  font: var(--text-md) var(--font);
-  min-height: 36px;
+  font-weight: 500;
 }
-
-@media (pointer: coarse) {
-  .cf-input {
-    min-height: var(--tap);
-  }
-}
-
-/* Cancel · Save, held against the right like every other pair of answers here;
-   equal halves on a phone, where the two are a thumb's width apart either way. */
-.cf-teach-actions {
-  display: flex;
-  justify-content: flex-end;
-  gap: var(--space-2);
-  margin-top: var(--space-1);
-}
-@media (max-width: 640px) {
-  .cf-teach-actions > .cf-btn {
-    flex: 1 1 0;
-  }
+.cf-saved-note .cf-undo {
+  color: var(--accent);
 }

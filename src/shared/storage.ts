@@ -8,7 +8,7 @@
  * device at the next sync.
  */
 
-import type { JobUrlEntry, Lesson, Profile, Settings, StoredState } from './types';
+import type { JobUrlEntry, Lesson, Profile, Settings, StoredState, TypedAnswer } from './types';
 import { DEFAULT_PROFILE, DEFAULT_SETTINGS } from './defaults';
 import { normalizeEntry } from './jobUrls';
 import {
@@ -22,6 +22,9 @@ const KEYS = {
   lessons: 'lessons',
   jobUrls: 'jobUrls',
   settings: 'settings',
+  // What the user typed that no field holds — this browser only, never stamped,
+  // never in the sync snapshot. See `TypedAnswer` and `shared/typedAnswers.ts`.
+  typedAnswers: 'typedAnswers',
 } as const;
 
 /**
@@ -160,6 +163,28 @@ export async function saveSettings(settings: Settings): Promise<void> {
  */
 export async function patchSettings(patch: Partial<Settings>): Promise<void> {
   await saveSettings({ ...(await getSettings()), ...patch });
+}
+
+/**
+ * The extension's one on/off switch — the popup's and the card's. Both call this,
+ * so pausing from either is the same act: every tab on this browser hears the
+ * settings change and stands down (`Controller.onStorageChanged`).
+ */
+export async function setFillingOn(on: boolean): Promise<void> {
+  await patchSettings({ fillAutomatically: on });
+}
+
+export async function getTypedAnswers(): Promise<TypedAnswer[]> {
+  const raw = await chrome.storage.local.get(KEYS.typedAnswers);
+  return (raw[KEYS.typedAnswers] as TypedAnswer[] | undefined) ?? [];
+}
+
+/** Read-modify-write the typed answers; an unchanged list skips the write. */
+export async function mutateTypedAnswers(fn: (list: TypedAnswer[]) => TypedAnswer[]): Promise<TypedAnswer[]> {
+  const before = await getTypedAnswers();
+  const next = fn(before);
+  if (next !== before) await chrome.storage.local.set({ [KEYS.typedAnswers]: next });
+  return next;
 }
 
 export async function getJobUrls(): Promise<JobUrlEntry[]> {

@@ -1,7 +1,7 @@
 /**
  * Options page: the job queue (session control + URL database), the profile —
- * your details, your own fields, the CV and cover letter, and what the extension
- * has been taught — behavior settings, Sync, and Help.
+ * your details, your own fields, the CV and cover letter, what the extension has
+ * learned and the answers you've typed — behavior settings, Sync, and Help.
  *
  * The five areas are tabs rather than one long scroll — the queue is the only
  * part used daily, and on a phone it used to sit behind everything else.
@@ -12,8 +12,8 @@
  */
 
 import type {
-  CustomField, CustomFieldKind, DocKind, JobUrlEntry, JobUrlStatus, Lesson, ModalLayout,
-  Profile, TextFieldKey,
+  CustomField, CustomFieldKind, DocKind, FieldId, JobUrlEntry, JobUrlStatus, Lesson, ModalLayout,
+  Profile, Settings, TextFieldKey, TypedAnswer,
 } from '../shared/types';
 import type { SessionState, SyncState } from '../shared/messages';
 import {
@@ -25,8 +25,9 @@ import {
 // the same trick the dev harness uses. A mock of it would only ever be a lie
 // about the thing being configured.
 import { FillerModal, type ModalCallbacks, type ModalData } from '../content/modal/modal';
-import { FIELD_ORDER, FIELD_LABELS } from '../shared/fieldKeys';
-import { fieldLabel, newCustomField } from '../shared/profileFields';
+import { FIELD_ORDER, FIELD_LABELS, LONG_TEXT_FIELDS } from '../shared/fieldKeys';
+import { fieldChoices, fieldLabel, fieldValue, isCustomId, newCustomField } from '../shared/profileFields';
+import { dismissAnswer, sortedAnswers } from '../shared/typedAnswers';
 import { dropField, forget, lessonsFor, targetField } from '../shared/lessons';
 import { isFragile } from '../shared/inputSignature';
 import { extractUrls } from '../shared/urlImport';
@@ -36,7 +37,7 @@ import {
 import { MSG } from '../shared/messages';
 import {
   getProfile, saveProfile, mutateProfile, getSettings, saveSettings,
-  getLessons, mutateLessons,
+  getLessons, mutateLessons, getTypedAnswers, mutateTypedAnswers,
   getJobUrls, mutateJobUrls,
 } from '../shared/storage';
 import { JOB_STATUS_LABELS } from '../shared/labels';
@@ -244,9 +245,12 @@ async function initProfile(): Promise<void> {
     if (field === 'resume' || field === 'coverLetter') continue;
     const key = field as TextFieldKey;
     const label = document.createElement('label');
-    label.className = 'fld';
+    label.className = LONG_TEXT_FIELDS.has(field) ? 'fld wide' : 'fld';
     label.textContent = FIELD_LABELS[field];
-    const input = document.createElement('input');
+    // Prose gets a text area across the whole grid — "Additional information" is a
+    // paragraph, and a one-line box would hide all of it but the first words.
+    const input = LONG_TEXT_FIELDS.has(field) ? document.createElement('textarea') : document.createElement('input');
+    if (input instanceof HTMLTextAreaElement) input.rows = 4;
     input.dataset.field = key;
     input.value = profile.values[key] ?? '';
     label.appendChild(input);
@@ -254,7 +258,7 @@ async function initProfile(): Promise<void> {
   }
 
   bindSavebar(container, savebar, async () => {
-    await saveValues(container.querySelectorAll<HTMLInputElement>('[data-field]'));
+    await saveValues(container.querySelectorAll<HTMLInputElement | HTMLTextAreaElement>('[data-field]'));
     setStatus($('profile-status'), 'Saved', 'ok');
   });
 }
@@ -324,7 +328,7 @@ function chipEditor(values: string[], placeholder: string, label: string, onChan
 
 /**
  * Extra wordings for the built-in fields, behind a disclosure: the built-ins
- * already know the common phrasings, and sixteen chip editors in the open would
+ * already know the common phrasings, and eighteen chip editors in the open would
  * bury the form. This is for the board that asks for "Christian name".
  */
 async function initWordings(): Promise<void> {
@@ -454,7 +458,7 @@ function customCard(field: CustomField, lessons: Lesson[]): HTMLElement {
   if (used) {
     const meta = document.createElement('small');
     meta.className = 'custom-meta';
-    meta.textContent = `Also answers ${used} question${used === 1 ? '' : 's'} you taught it — listed under What it has learned.`;
+    meta.textContent = `Also answers ${used} question${used === 1 ? '' : 's'} it learned — listed under What it has learned.`;
     card.append(meta);
   }
   return card;
@@ -522,7 +526,7 @@ async function renderLearned(): Promise<void> {
       q.textContent = `“${lesson.label}”`;
       const meta = document.createElement('small');
       const bits = [
-        lesson.taughtOn ? `taught on ${lesson.taughtOn}` : undefined,
+        lesson.taughtOn ? `learned on ${lesson.taughtOn}` : undefined,
         lesson.hits ? `used ${lesson.hits} time${lesson.hits === 1 ? '' : 's'}` : 'not used yet',
         lesson.signature.section ? `in “${lesson.signature.section}”` : undefined,
       ].filter(Boolean);
@@ -533,7 +537,7 @@ async function renderLearned(): Promise<void> {
         chip.className = 'chip warn';
         chip.textContent = lesson.signature.host ? 'this site only' : 'by position';
         chip.title = lesson.signature.host
-          ? 'The page gave this box no words of its own, so the lesson only applies on the site it was taught on.'
+          ? 'The page gave this box no words of its own, so the lesson only applies on the site it was learned on.'
           : 'Several identical boxes on that page: the lesson remembers which one by its position.';
         text.append(chip);
       }
@@ -554,8 +558,139 @@ async function renderLearned(): Promise<void> {
 }
 
 function initLearned(): Promise<void> {
-  attachHelp($('learned-heading'), CONCEPT_HELP.teaching);
+  attachHelp($('learned-heading'), CONCEPT_HELP.learning);
   return renderLearned();
+}
+
+/* ---------------- Answers you've typed ---------------- */
+
+/** The Save as choice that is not a field yet. */
+const NEW_FIELD = '__new';
+
+/**
+ * The tally of answers no field holds, most used first. Each row offers one way
+ * to use it — save it as one of your details, into one of your own fields, or as a
+ * new field named after the question it answered — and one way to drop it. A
+ * built-in that already has a value says what it would replace before it does.
+ */
+async function renderTypedAnswers(): Promise<void> {
+  const [profile, list] = await Promise.all([getProfile(), getTypedAnswers()]);
+  const answers = sortedAnswers(list);
+  $('typed-empty').hidden = answers.length > 0;
+  const box = $('typed-list');
+  if (!answers.length) { box.replaceChildren(); return; }
+  const group = document.createElement('div');
+  group.className = 'learned-group';
+  group.append(...answers.map((a) => typedRow(profile, a)));
+  box.replaceChildren(group);
+}
+
+function typedRow(profile: Profile, a: TypedAnswer): HTMLElement {
+  const row = document.createElement('div');
+  row.className = 'learned-row typed-row';
+  row.dataset.key = a.key;
+
+  const text = document.createElement('div');
+  text.className = 'learned-text';
+  const value = document.createElement('span');
+  value.className = 'learned-q';
+  value.textContent = `“${a.value}”`;
+  const meta = document.createElement('small');
+  const [first, ...rest] = a.questions;
+  const asked = first ? ` · for “${first}”${rest.length ? ` +${rest.length}` : ''}` : '';
+  meta.textContent = `typed ${a.count}×${asked}`;
+  if (a.questions.length > 1) meta.title = a.questions.join(' · ');
+  const note = document.createElement('small');
+  note.className = 'typed-replaces';
+  text.append(value, meta, note);
+
+  const actions = document.createElement('div');
+  actions.className = 'typed-actions';
+  const select = document.createElement('select');
+  select.setAttribute('aria-label', `Save “${a.value}” as`);
+  const placeholder = new Option('Save as…', '');
+  placeholder.disabled = true;
+  select.append(placeholder);
+  for (const [groupKey, heading] of [['builtIn', 'Your details'], ['custom', 'Your own fields']] as const) {
+    const items = fieldChoices(profile).filter((c) => c.group === groupKey && c.id !== 'resume');
+    if (!items.length) continue;
+    const og = document.createElement('optgroup');
+    og.label = heading;
+    for (const c of items) og.append(new Option(c.label, c.id));
+    select.append(og);
+  }
+  const other = document.createElement('optgroup');
+  other.label = 'Something else';
+  other.append(new Option('New field…', NEW_FIELD));
+  select.append(other);
+  // Typed over one of our fills: that field is the likely home.
+  select.value = a.field && fieldChoices(profile).some((c) => c.id === a.field) ? a.field : '';
+
+  const save = document.createElement('button');
+  save.className = 'btn typed-save';
+  save.textContent = 'Save';
+  const dismiss = document.createElement('button');
+  dismiss.className = 'btn-ghost typed-dismiss';
+  dismiss.textContent = 'Dismiss';
+  dismiss.setAttribute('aria-label', `Dismiss “${a.value}”`);
+
+  const sync = () => {
+    const id = select.value;
+    save.disabled = !id;
+    const current = id && id !== NEW_FIELD ? fieldValue(profile, id) : undefined;
+    note.textContent = current && current !== a.value ? `Replaces “${current}”` : '';
+    note.hidden = !note.textContent;
+  };
+  select.addEventListener('change', sync);
+  sync();
+
+  save.addEventListener('click', async () => {
+    const id = select.value;
+    if (!id) return;
+    await saveTypedAnswer(a, id);
+    await mutateTypedAnswers((l) => dismissAnswer(l, a.key));
+    setStatus($('typed-status'), id === NEW_FIELD ? 'Saved as a new field' : `Saved as ${fieldLabel(await getProfile(), id)}`, 'ok');
+    await Promise.all([renderTypedAnswers(), renderCustomFields()]);
+  });
+  dismiss.addEventListener('click', async () => {
+    await mutateTypedAnswers((l) => dismissAnswer(l, a.key));
+    await renderTypedAnswers();
+  });
+
+  actions.append(select, save, dismiss);
+  row.append(text, actions);
+  return row;
+}
+
+/**
+ * Put a typed answer into the profile. A new field is named after the question it
+ * answered most recently, and keeps the other questions as wordings, so each of
+ * them is matched from then on.
+ */
+async function saveTypedAnswer(a: TypedAnswer, id: FieldId | typeof NEW_FIELD): Promise<void> {
+  if (id === NEW_FIELD) {
+    const [label, ...wordings] = a.questions.length ? a.questions : [a.value];
+    const field = { ...newCustomField(label, 'text', a.value), keywords: wordings };
+    await mutateProfile((p) => ({ ...p, customFields: [...(p.customFields ?? []), field] }));
+    return;
+  }
+  if (isCustomId(id)) {
+    await patchCustomField(id, { value: a.value });
+    return;
+  }
+  await mutateProfile((p) => ({ ...p, values: { ...p.values, [id]: a.value } }));
+  // The Your details form above was read once at load; keep its box in step.
+  const box = document.querySelector<HTMLInputElement | HTMLTextAreaElement>(`#profile-fields [data-field="${id}"]`);
+  if (box) box.value = a.value;
+}
+
+function initTypedAnswers(): Promise<void> {
+  attachHelp($('typed-heading'), CONCEPT_HELP.typedAnswers);
+  // Answers arrive from pages while this tab is open; the list follows them.
+  chrome.storage.onChanged.addListener((changes, area) => {
+    if (area === 'local' && changes.typedAnswers) void renderTypedAnswers();
+  });
+  return renderTypedAnswers();
 }
 
 /* ---------------- The two documents ---------------- */
@@ -681,10 +816,11 @@ function initHelp(): void {
       + 'get asked a lot as fields of your own.',
     'You open a job posting — by hand, or from the queue.',
     'Every input on the page goes past the extension. What it recognises is filled and '
-      + 'outlined green; what it only suspects is outlined yellow; what it does not know is '
-      + 'listed on the review card.',
+      + 'outlined green; what it only suspects is outlined yellow; what it does not know you '
+      + 'answer yourself. The pill in the corner says it is on.',
     'More fields appearing — a form opening, the next page of one — are filled as they appear.',
-    'You teach it the questions it did not know, once each. From then on they fill on every site.',
+    'When you answer a question it did not know with one of your details, it learns the '
+      + 'question. From then on it fills on every site.',
     'You check the page and press the site’s own Submit button. Then close the tab: on a '
       + 'queue tab that finishes the posting and opens the next.',
   ];
@@ -695,7 +831,7 @@ function initHelp(): void {
   }));
 
   const concepts: Array<keyof typeof CONCEPT_HELP> = [
-    'howItWorks', 'neverSubmits', 'teaching', 'customFields', 'dots', 'picker', 'leftAlone',
+    'howItWorks', 'neverSubmits', 'learning', 'typedAnswers', 'customFields', 'dots', 'leftAlone',
     'sessions', 'queueChip', 'done', 'syncClient',
   ];
   $('help-concepts').replaceChildren(...concepts.map((key) => helpPanel(CONCEPT_HELP[key])));
@@ -705,27 +841,30 @@ function initHelp(): void {
   const trouble: HelpEntry[] = [
     {
       title: 'Nothing was filled at all',
-      body: 'Check “Fill automatically” in Settings, and that your details are on the Profile '
+      body: 'Check the switch in the popup is on, and that your details are on the Profile '
         + 'tab. A page with a password box on its form is left alone on purpose — that is a '
         + 'login or a sign-up. Otherwise press Fill in the popup: it fills the page whatever '
-        + 'the settings say.',
+        + 'the switch says.',
     },
     {
       title: 'A question stayed grey',
-      body: 'Nothing recognised it. Press Teach on its row in the review card and say what it '
-        + 'is — one of your details, one of your own fields, or a new field made there and '
-        + 'then. It is filled at once, and every site asking it the same way is filled from '
-        + 'then on.',
+      body: 'Nothing recognised it. Answer it yourself: if your answer is one of your details, '
+        + 'the question is learned and every site asking it the same way is filled from then '
+        + 'on. If it is not, add it as a field of your own — or save it from Profile → Answers '
+        + 'you’ve typed once you have given it a few times.',
     },
     {
       title: 'It filled a box with the wrong thing',
-      body: 'Press Not this on that row and choose the right field, or “Ignore this question”. '
-        + 'If the wrong answer came from a lesson, forget it under Profile → What it has learned.',
+      body: 'Type the right answer over it. If it is another of your details, the question is '
+        + 'learned as that one; if it is something else, the extension stops filling that '
+        + 'question. If the wrong answer came from a lesson, you can also forget it under '
+        + 'Profile → What it has learned.',
     },
     {
-      title: 'A field is not on the card at all',
-      body: 'Some fields are drawn in ways the extension cannot read as a question. Press '
-        + 'Teach in the popup, tap the field on the page, and Confirm — the card opens on it.',
+      title: 'A field is not filled at all',
+      body: 'Some fields are drawn in ways the extension cannot read as a question — a custom '
+        + 'drop-down, a box hidden behind a button. Fill those yourself; nothing about them is '
+        + 'learned.',
     },
     {
       title: 'The queue opened far too many tabs',
@@ -826,11 +965,19 @@ function guideStep(step: GuideStep, i: number): HTMLLIElement {
 
 async function initSettings(): Promise<void> {
   const fillAuto = $<HTMLInputElement>('fill-auto');
+  const learnTyping = $<HTMLInputElement>('learn-typing');
+  const updateFromEdits = $<HTMLInputElement>('update-from-edits');
+  const rememberTyped = $<HTMLInputElement>('remember-typed');
+  const showPill = $<HTMLInputElement>('show-pill');
   const openCard = $<HTMLInputElement>('open-card-filled');
   const keepInBrowser = $<HTMLInputElement>('keep-in-browser');
 
   const settings = await getSettings();
   fillAuto.checked = settings.fillAutomatically;
+  learnTyping.checked = settings.learnFromTyping;
+  updateFromEdits.checked = settings.updateProfileFromEdits;
+  rememberTyped.checked = settings.rememberTypedAnswers;
+  showPill.checked = settings.showActivePill;
   openCard.checked = settings.openCardWhenFilled;
   keepInBrowser.checked = settings.keepInBrowser;
 
@@ -839,17 +986,30 @@ async function initSettings(): Promise<void> {
     await saveSettings({
       ...s,
       fillAutomatically: fillAuto.checked,
+      learnFromTyping: learnTyping.checked,
+      updateProfileFromEdits: updateFromEdits.checked,
+      rememberTypedAnswers: rememberTyped.checked,
+      showActivePill: showPill.checked,
       openCardWhenFilled: openCard.checked,
       keepInBrowser: keepInBrowser.checked,
     });
     setStatus($('settings-status'), 'Saved', 'ok');
   };
 
-  for (const control of [fillAuto, openCard, keepInBrowser]) {
+  for (const control of [fillAuto, learnTyping, updateFromEdits, rememberTyped, showPill, openCard, keepInBrowser]) {
     control.addEventListener('change', persist);
   }
+  // The popup's and the card's switch write the same setting; this row follows them.
+  chrome.storage.onChanged.addListener((changes, area) => {
+    const next = changes.settings?.newValue as Partial<Settings> | undefined;
+    if (area === 'local' && next && typeof next.fillAutomatically === 'boolean') fillAuto.checked = next.fillAutomatically;
+  });
 
   attachRowHelp(fillAuto, SETTINGS_HELP.fillAutomatically);
+  attachRowHelp(learnTyping, SETTINGS_HELP.learnFromTyping);
+  attachRowHelp(updateFromEdits, SETTINGS_HELP.updateProfileFromEdits);
+  attachRowHelp(rememberTyped, SETTINGS_HELP.rememberTypedAnswers);
+  attachRowHelp(showPill, SETTINGS_HELP.showActivePill);
   attachRowHelp(openCard, SETTINGS_HELP.openCardWhenFilled);
   attachRowHelp(keepInBrowser, SETTINGS_HELP.keepInBrowser);
   attachHelp($('queue-settings-heading'), CONCEPT_HELP.sessions);
@@ -1142,8 +1302,7 @@ function describeScreen(vp: ModelledViewport): string {
 
 /** The preview modal is a mannequin: its buttons must not do anything real. */
 const PREVIEW_CALLBACKS: ModalCallbacks = {
-  onRerun: () => {}, onConfirm: () => {}, onTeach: () => {}, onPoint: () => {},
-  onSkip: () => {}, onClose: () => {},
+  onRerun: () => {}, onSkip: () => {}, onToggle: () => {}, onClose: () => {},
 };
 
 function previewData(layout: ModalLayout): ModalData {
@@ -1162,7 +1321,7 @@ function previewData(layout: ModalLayout): ModalData {
         source: 'none', confidence: 'none', filled: false, required: false,
       },
     ],
-    choices: [],
+    on: true,
     layout,
   };
 }
@@ -2050,7 +2209,7 @@ async function main(): Promise<void> {
   initHelp();
   initGettingStarted();
   await Promise.all([
-    initProfile(), initWordings(), initCustomFields(), initLearned(), initCv(), initCoverLetter(),
+    initProfile(), initWordings(), initCustomFields(), initLearned(), initTypedAnswers(), initCv(), initCoverLetter(),
     initSettings(), initSession(), initUrls(), initSync(),
   ]);
   await renderGettingStarted();

@@ -13,6 +13,14 @@
         <span class="mark" aria-hidden="true">F</span>
         <h1>Chromium Filler</h1>
         <span id="site-status" class="chip">…</span>
+        <!-- The extension's one on/off switch — the same act as the one on the
+             card's header. Off, nothing is filled, learned or drawn on any page of
+             this browser until it is turned back on (Fill below still fills the
+             page in front of you, once). -->
+        <label class="switch" id="on-switch">
+          <input type="checkbox" id="on" class="switch-input" aria-label="Fill and learn on this browser" />
+          <span class="switch-track" aria-hidden="true"><i></i></span>
+        </label>
       </header>
 
       <p id="detail" class="detail">Checking this page…</p>
@@ -41,7 +49,7 @@
            present. Where a thing is is half of knowing it exists.
 
            Fill — the one thing this popup does to the whole page in front of you —
-           gets a row to itself; Teach, Queue and Options share the one below it. -->
+           gets a row to itself; Queue and Options share the one below it. -->
       <div class="actions">
         <button id="primary" class="btn btn-primary" disabled>Fill</button>
       </div>
@@ -49,10 +57,8 @@
       <div class="links">
         <!-- Short labels, and no arrow: these are button-shaped, and the reference's
              secondary row is one-word verbs. As sentences they wrapped onto a second
-             line in a 360px popup and left the row ragged — which matters more now
-             that there are three of them sharing 336px.
+             line in a 360px popup and left the row ragged.
              The arrow stays on `.nudge`, which is a prompt rather than a button. -->
-        <a id="teach" href="#">Teach</a>
         <a id="open-queue" href="#">Queue</a>
         <a id="open-options" href="#">Options</a>
       </div>

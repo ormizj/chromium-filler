@@ -5,7 +5,8 @@
  * There is far less to decide than there was. The extension no longer sends
  * anything, follows anything or waits for a confirmation, so every state is about
  * the filling: done and waiting for the user to submit on the site, nothing
- * recognised yet, nothing in the profile to fill with — or a posting the job
+ * recognised yet, nothing on the page at all (the pill is up because the
+ * extension is on), nothing in the profile to fill with — or a posting the job
  * database already has down as done.
  */
 
@@ -24,7 +25,8 @@ export interface FlowInput {
   /** Rows in the report, rows that took a value, rows nothing recognised. */
   total: number;
   filled: number;
-  toTeach: number;
+  /** Rows nothing recognised yet. */
+  fresh: number;
   /** For the sentence — the page's host. */
   siteName?: string;
 }
@@ -43,11 +45,13 @@ const TONES: Record<FlowKey, FlowTone> = {
   ready: 'quiet',
   nothing: 'quiet',
   empty: 'quiet',
+  watching: 'quiet',
 };
 
 const HELP: Partial<Record<FlowKey, ConceptKey>> = {
   alreadyDone: 'alreadyDone',
-  nothing: 'teaching',
+  nothing: 'learning',
+  watching: 'learning',
   ready: 'neverSubmits',
 };
 
@@ -69,9 +73,11 @@ function classify(input: FlowInput): FlowKey {
   // Only the profile can cause this, so it is worded about the profile — never
   // "no form was found", which blamed the site.
   if (input.profileEmpty) return 'empty';
-  // Questions on the page and none of them recognised: an invitation to teach,
-  // not a failure.
-  if (input.total > 0 && input.filled === 0 && input.toTeach === input.total) return 'nothing';
+  // Nothing on the page at all: the card was opened from the always-on pill.
+  if (input.total === 0) return 'watching';
+  // Questions on the page and none of them recognised: answering them is how they
+  // are learned — not a failure.
+  if (input.filled === 0 && input.fresh === input.total) return 'nothing';
   return 'ready';
 }
 
@@ -83,8 +89,8 @@ function detail(key: FlowKey, base: string, input: FlowInput): string {
     return `${input.siteName ?? 'This posting'} ${base.replace('{when}', when)}`;
   }
   if (key === 'ready') {
-    const teach = input.toTeach ? ` · ${input.toTeach} to teach` : '';
-    return `${input.filled} filled${teach} — ${base}`;
+    const fresh = input.fresh ? ` · ${input.fresh} new` : '';
+    return `${input.filled} filled${fresh} — ${base}`;
   }
   return base;
 }

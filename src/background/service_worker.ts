@@ -37,6 +37,27 @@ chrome.runtime.onStartup.addListener(() => {
 });
 
 chrome.runtime.onMessage.addListener((msg: Message, sender, sendResponse) => {
+  // An embedded form's report, carried to the card the top frame draws. The
+  // sender's frame id is added here — a frame cannot know its own.
+  if (msg.type === MSG.FRAME_REPORT) {
+    const tabId = sender.tab?.id;
+    if (tabId != null && sender.frameId) {
+      chrome.tabs.sendMessage(tabId, { ...msg, frameId: sender.frameId }, { frameId: 0 }).catch(() => {});
+    }
+    return false;
+  }
+  // The card's Fill again reaches every frame of its tab, not only its own.
+  if (msg.type === MSG.FILL_TAB) {
+    const tabId = sender.tab?.id;
+    if (tabId != null) chrome.tabs.sendMessage(tabId, { type: MSG.RUN }).catch(() => {});
+    return false;
+  }
+  // The card's Undo, to whichever frame saved the correction.
+  if (msg.type === MSG.UNDO_TAB) {
+    const tabId = sender.tab?.id;
+    if (tabId != null) chrome.tabs.sendMessage(tabId, { type: MSG.UNDO_SAVE, token: msg.token }).catch(() => {});
+    return false;
+  }
   if (msg.type === MSG.OPEN_URLS) {
     openUrls(msg.urls)
       .then(() => sendResponse({ ok: true }))

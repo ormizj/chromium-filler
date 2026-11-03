@@ -1,19 +1,18 @@
 /**
- * Popup: what the extension did on this page, a Fill button that works on any
- * page, Teach (point at a field the card did not list), and where you are in a
- * running queue session.
+ * Popup: whether the extension is on, what it did on this page, a Fill button
+ * that works on any page, and where you are in a running queue session.
  */
 
 import { MSG, type SessionState, type StatusResponse } from '../shared/messages';
 import { ACTION_LABELS } from '../shared/labels';
 import { BUILD_ID, BUILD_LABEL } from '../shared/buildId';
-import { getProfile } from '../shared/storage';
+import { getProfile, getSettings, setFillingOn } from '../shared/storage';
 import { getCv } from '../shared/cvStore';
 
 const badge = document.getElementById('site-status')!;
 const detail = document.getElementById('detail')!;
 const primary = document.getElementById('primary') as HTMLButtonElement;
-const teachLink = document.getElementById('teach') as HTMLAnchorElement;
+const onSwitch = document.getElementById('on') as HTMLInputElement;
 const resetBtn = document.getElementById('reset') as HTMLButtonElement;
 const openOptions = document.getElementById('open-options') as HTMLAnchorElement;
 const openQueue = document.getElementById('open-queue') as HTMLAnchorElement;
@@ -35,19 +34,30 @@ let tabId: number | undefined;
 let tabUrl: string | undefined;
 let status: StatusResponse | undefined;
 let session: SessionState | undefined;
+/** Filling and learning are on for this browser. */
+let on = true;
 
 async function activeTab(): Promise<chrome.tabs.Tab | undefined> {
   const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
   return tab;
 }
 
+/**
+ * A message to the page. Every frame runs the content script, and only the top one
+ * answers; questions about the page (`STATUS`, `SHOW_REPORT`) go to it alone, while
+ * `RUN` and `RESET` reach every frame, so an embedded form is filled and reset too.
+ */
+const TOP_ONLY = new Set<string>([MSG.STATUS, MSG.SHOW_REPORT]);
+
 function send<T = unknown>(type: string, extra: Record<string, unknown> = {}): Promise<T | undefined> {
   return new Promise((resolve) => {
     if (tabId == null) return resolve(undefined);
-    chrome.tabs.sendMessage(tabId, { type, ...extra }, (resp) => {
+    const done = (resp: unknown) => {
       if (chrome.runtime.lastError) return resolve(undefined);
       resolve(resp as T);
-    });
+    };
+    if (TOP_ONLY.has(type)) chrome.tabs.sendMessage(tabId, { type, ...extra }, { frameId: 0 }, done);
+    else chrome.tabs.sendMessage(tabId, { type, ...extra }, done);
   });
 }
 
@@ -70,14 +80,16 @@ function renderNoContentScript(): void {
 function render(): void {
   renderSession();
   if (!status) return renderNoContentScript();
-  const { filledCount, toTeach, hasRun, inQueue } = status;
-  badge.textContent = inQueue ? 'queue' : hasRun && filledCount ? 'filled' : 'ready';
-  badge.className = inQueue ? 'chip accent' : hasRun && filledCount ? 'chip ok' : 'chip';
-  if (!hasRun) {
+  const { filledCount, fresh, hasRun, inQueue } = status;
+  badge.textContent = !on ? 'paused' : inQueue ? 'queue' : hasRun && filledCount ? 'filled' : 'ready';
+  badge.className = !on ? 'chip' : inQueue ? 'chip accent' : hasRun && filledCount ? 'chip ok' : 'chip';
+  if (!on && !(hasRun && filledCount)) {
+    detail.textContent = 'Paused on this browser — nothing is filled or learned. Fill still fills this page, once.';
+  } else if (!hasRun) {
     detail.textContent = 'Nothing filled on this page yet.';
-  } else if (filledCount || toTeach) {
-    const teach = toTeach ? ` · ${toTeach} to teach` : '';
-    detail.textContent = `${filledCount} filled${teach} on this page. Submit on the site when you are ready.`;
+  } else if (filledCount || fresh) {
+    const extra = fresh ? ` · ${fresh} new` : '';
+    detail.textContent = `${filledCount} filled${extra} on this page. Submit on the site when you are ready.`;
   } else {
     detail.textContent = 'No fields for the extension on this page.';
   }
@@ -128,12 +140,6 @@ function renderSessionChips(open: number, queued: number): void {
     chip('chip ok', `${open} open`),
     chip('chip', `${queued} waiting`),
   );
-}
-
-/** Point at a field on the page to teach it, then close the popup. */
-async function enterTeach(): Promise<void> {
-  await send(MSG.TEACH);
-  window.close();
 }
 
 /**
@@ -193,9 +199,14 @@ sessionSkip.addEventListener('click', async () => {
   window.close();
 });
 
-teachLink.addEventListener('click', async (e) => {
-  e.preventDefault();
-  await enterTeach();
+// The same act as the card's switch: every tab on this browser hears the
+// settings change and stands down (or comes back). The popup stays open to say so.
+onSwitch.addEventListener('change', async () => {
+  on = onSwitch.checked;
+  render();
+  await setFillingOn(on);
+  status = await send<StatusResponse>(MSG.STATUS);
+  render();
 });
 
 // The queue *is* the links, so this lands on the box you paste them into rather
@@ -244,6 +255,8 @@ nudge.addEventListener('click', (e) => {
   // worker that may be asleep — and "add your details first" is exactly what a
   // brand-new install needs before either of those has anything to say.
   void renderNudge();
+  on = (await getSettings()).fillAutomatically;
+  onSwitch.checked = on;
 
   const tab = await activeTab();
   tabId = tab?.id;

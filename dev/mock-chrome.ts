@@ -19,7 +19,7 @@ import {
 } from '../src/shared/messages';
 import { clientProblem, normalizeClient, type SyncClient } from '../src/shared/syncConfig';
 import { DEFAULT_SETTINGS } from '../src/shared/defaults';
-import type { JobUrlEntry, Lesson } from '../src/shared/types';
+import type { JobUrlEntry, Lesson, TypedAnswer } from '../src/shared/types';
 import { applyStatus, makeEntry } from '../src/shared/jobUrls';
 import { nextBatch, queueProgress } from '../src/shared/queue';
 
@@ -49,7 +49,7 @@ function seedIfEmpty(): void {
   const all = readAll();
   // Versioned: bump it whenever the seed's shape changes, or a browser that ran the
   // harness before keeps the old store and shows none of the new data.
-  const mode = FRESH ? 'fresh' : 'full-v4';
+  const mode = FRESH ? 'fresh' : 'full-v6';
   // Keyed on the mode, not on a bare flag: the two share one localStorage, so
   // `?state=fresh` would otherwise inherit whatever the last page seeded — and
   // the page after it would inherit the empty store.
@@ -64,8 +64,10 @@ function seedIfEmpty(): void {
         fullName: 'Ada Lovelace',
         email: 'ada@example.com',
         phone: '+1 555 123 4567',
+        phoneLocal: '(555) 123-4567',
         city: 'London',
         coverLetter: 'I love building widgets.',
+        additionalInfo: 'Available from March; happy to relocate within Europe.',
       },
       keywords: { firstName: ['christian name'] },
       customFields: [
@@ -79,7 +81,21 @@ function seedIfEmpty(): void {
     // which is the part of the UI most worth iterating on.
     jobUrls: seedJobUrls(),
     settings: DEFAULT_SETTINGS,
+    // What Options → Answers you've typed lists — one typed over a fill, so its
+    // Save as starts on that field.
+    typedAnswers: seedTypedAnswers(),
   });
+}
+
+function seedTypedAnswers(): TypedAnswer[] {
+  const now = Date.now();
+  const day = 86_400_000;
+  return [
+    { key: 'software developer', value: 'Software developer', kind: 'text', count: 20, questions: ['Current title', 'Job title', 'Position', 'Current role'], firstAt: now - 30 * day, lastAt: now - day },
+    { key: 'immediately', value: 'Immediately', kind: 'select', count: 6, questions: ['When can you start?'], firstAt: now - 12 * day, lastAt: now - 2 * day },
+    { key: '020 7946 0958', value: '020 7946 0958', kind: 'tel', count: 2, questions: ['Phone number'], field: 'phone', firstAt: now - 5 * day, lastAt: now - 3 * day },
+    { key: 'acme corp', value: 'Acme Corp', kind: 'text', count: 1, questions: ['Current employer'], firstAt: now - day, lastAt: now - day },
+  ];
 }
 
 function seedLessons(): Lesson[] {
@@ -144,7 +160,7 @@ function fakeStatus(): StatusResponse {
   return {
     filledCount: hasRun ? FILLED : 0,
     reportedCount: hasRun ? REPORTED : 0,
-    toTeach: hasRun ? REPORTED - FILLED : 0,
+    fresh: hasRun ? REPORTED - FILLED : 0,
     hasRun,
     inQueue: sessionActive,
   };
@@ -294,8 +310,10 @@ const mockChrome = {
       Promise.resolve([
         { id: 1, active: true, url: 'https://example.com/sample-form.html' },
       ]),
-    // popup uses the callback form of sendMessage.
-    sendMessage(_tabId: number, msg: { type?: string }, cb?: (r: unknown) => void) {
+    // popup uses the callback form of sendMessage — with `{ frameId: 0 }` before the
+    // callback for the questions only the top frame answers.
+    sendMessage(_tabId: number, msg: { type?: string }, ...rest: unknown[]) {
+      const cb = rest.find((r) => typeof r === 'function') as ((r: unknown) => void) | undefined;
       const reply = contentReply(msg);
       cb?.(reply);
       return Promise.resolve(reply);

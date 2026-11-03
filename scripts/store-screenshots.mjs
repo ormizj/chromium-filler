@@ -41,18 +41,18 @@ const PROFILE = {
 /** Postings for the Queue tab, so the stat cards and the list are not empty. */
 const now = Date.now();
 const day = 86_400_000;
-// slow-boards is deliberately NOT `applied`: it is the posting the card
-// screenshots are taken on, and an applied posting leads with that record.
+// slow-boards and questions are deliberately NOT `done`: they are the postings
+// the card screenshots are taken on, and a done posting leads with that record.
 const JOB_URLS = [
-  ['http://localhost:5199/sites/slow-boards.html', 'opened', 0],
-  ['http://localhost:5199/sites/cv-confirm.html', 'applied', 3],
-  ['http://localhost:5199/sites/chaos-form.html', 'applied', 2],
-  ['http://localhost:5199/sites/modal-lever.html', 'applied', 2],
-  ['http://localhost:5199/sites/quick-plain.html', 'skipped', 1],
-  ['http://localhost:5199/sites/questions.html', 'markedDone', 1],
-  ['http://localhost:5199/sites/ats-form.html', 'opened', 0],
-  ['http://localhost:5199/sites/quick-uploads.html', 'new', 0],
-  ['http://localhost:5199/sites/quick-board.html?job=plain&n=2', 'new', 0],
+  ['http://localhost:5199/sites/slow-boards.html', 'new', 0],
+  ['http://localhost:5199/sites/cv-confirm.html', 'done', 3],
+  ['http://localhost:5199/sites/chaos-form.html', 'done', 2],
+  ['http://localhost:5199/sites/modal-lever.html', 'done', 2],
+  ['http://localhost:5199/sites/quick-board.html?job=uploads', 'done', 1],
+  ['http://localhost:5199/sites/questions.html', 'new', 1],
+  ['http://localhost:5199/sites/ats-form.html', 'new', 0],
+  ['http://localhost:5199/sites/quick-board.html?job=plain', 'new', 0],
+  ['http://localhost:5199/sites/embedded.html', 'new', 0],
 ].map(([url, status, ago]) => ({
   url,
   status,
@@ -61,6 +61,17 @@ const JOB_URLS = [
     { status: 'new', at: now - (ago + 1) * day },
     ...(status === 'new' ? [] : [{ status, at: now - ago * day }]),
   ],
+}));
+
+/** Options → Profile → Answers you've typed, as a few weeks of applying leave it. */
+const TYPED_ANSWERS = [
+  ['Software developer', 'text', 14, ['Current title', 'Job title', 'Position'], 20],
+  ['Immediately', 'select', 6, ['When can you start?', 'Notice period'], 12],
+  ['Acme Corp', 'text', 3, ['Current employer', 'Most recent company'], 5],
+  ['LinkedIn', 'select', 2, ['How did you hear about us?'], 2],
+].map(([value, kind, count, questions, ago]) => ({
+  key: value.toLowerCase(), value, kind, count, questions,
+  firstAt: now - ago * day, lastAt: now - day,
 }));
 
 if (!fs.existsSync(path.join(DIST, 'manifest.json'))) {
@@ -123,10 +134,10 @@ async function extensionPage(file) {
 
 const seed = await extensionPage('src/options/options.html');
 await seed.evaluate(
-  async ({ profile, jobUrls }) => {
-    await chrome.storage.local.set({ profile, jobUrls, lessons: [] });
+  async ({ profile, jobUrls, typedAnswers }) => {
+    await chrome.storage.local.set({ profile, jobUrls, lessons: [], typedAnswers });
   },
-  { profile: PROFILE, jobUrls: JOB_URLS },
+  { profile: PROFILE, jobUrls: JOB_URLS, typedAnswers: TYPED_ANSWERS },
 );
 // Through the real file input, so the options page's own encode path runs.
 await seed.setInputFiles('#cv-input', {
@@ -143,26 +154,41 @@ async function shot(page, name) {
   console.log(`  ${path.relative(ROOT, file)}`);
 }
 
-/* ---------------- 1 + 2: the review modal on a real posting ---------------- */
+/** Off the queue the card starts folded, so it is opened the way a user opens it. */
+async function openCard(page) {
+  await page.locator('.cf-pill').click({ timeout: 30_000 });
+  await page.locator('.cf-card').waitFor({ state: 'visible', timeout: 30_000 });
+}
+
+/* ---------------- 1: the review card on a filled posting ---------------- */
 
 const job = await context.newPage();
 await job.setViewportSize(SIZE);
 await job.goto('http://localhost:5199/sites/slow-boards.html');
-// The fixture injects its form ~2s in; the card's pill follows the fill. Off the
-// queue the card starts folded, so it is opened the way a user opens it.
-await job.locator('.cf-pill').click({ timeout: 30_000 });
-await job.locator('.cf-card').waitFor({ state: 'visible', timeout: 30_000 });
-await job.locator('.cf-view', { hasText: 'Job' }).click();
+// The fixture injects its form ~2s in; wait for the fill before opening the card.
+await job.waitForFunction(() => !!document.querySelector('#email')?.value, null, { timeout: 30_000 });
+await openCard(job);
 await job.waitForTimeout(1200);
-await shot(job, '1-review-job');
-
-await job.locator('.cf-view', { hasText: 'Fields' }).click();
-await job.waitForTimeout(500);
-await shot(job, '2-review-fields');
-
+await shot(job, '1-review');
 await job.close();
 
-/* ---------------- 3-5: the options page ---------------- */
+/* ---------------- 2: a question learned from the answer typed ---------------- */
+
+// "Preferred name" is no built-in wording; typing the first name into it and
+// leaving the box (the `change` learning listens for) teaches it, as in the E2E.
+const learn = await context.newPage();
+await learn.setViewportSize(SIZE);
+await learn.goto('http://localhost:5199/sites/questions.html');
+await learn.locator('.cf-pill').waitFor({ timeout: 30_000 });
+await learn.locator('#q-preferred').fill(PROFILE.values.firstName);
+await learn.locator('#q-preferred').press('Tab');
+await learn.waitForTimeout(800);
+await openCard(learn);
+await learn.waitForTimeout(800);
+await shot(learn, '2-learned');
+await learn.close();
+
+/* ---------------- 3-7: the options page ---------------- */
 
 const opts = await extensionPage('src/options/options.html');
 await opts.waitForTimeout(600);
@@ -172,13 +198,17 @@ await opts.locator('#tab-profile').click();
 await opts.waitForTimeout(400);
 await shot(opts, '4-profile');
 
+await opts.locator('#typed-section').scrollIntoViewIfNeeded();
+await opts.waitForTimeout(400);
+await shot(opts, '5-typed');
+
 await opts.locator('#custom-section').scrollIntoViewIfNeeded();
 await opts.waitForTimeout(400);
-await shot(opts, '5-own-fields');
+await shot(opts, '6-own-fields');
 
 await opts.locator('#tab-help').click();
 await opts.waitForTimeout(400);
-await shot(opts, '6-help');
+await shot(opts, '7-help');
 
 await opts.close();
 

@@ -69,7 +69,7 @@
      is what actually shows through. `--icon-dash` is the setup panel's neutral
      "not set", which is not the report's red error. */
   --icon-check: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='3.2' stroke-linecap='round' stroke-linejoin='round'><path d='M5 12.5l4.2 4.2L19 7'/></svg>");
-  /* The "to teach" glyph: a question, not a fault. An unrecognised input is the
+  /* The "new" glyph: a question, not a fault. An unrecognised input is the
      ordinary state of most new questions, and a red ✕ beside each one read as a
      page of failures. */
   --icon-teach: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='3.2' stroke-linecap='round' stroke-linejoin='round'><path d='M8.8 8.6a3.3 3.3 0 1 1 4.6 3c-.9.4-1.4 1-1.4 1.9v.5'/><path d='M12 18.2h.01'/></svg>");

@@ -18,17 +18,19 @@ export interface FieldOutcome {
   filled: boolean;
   /** Left alone because it already held an answer — done, not a failure. */
   kept?: boolean;
-  /** Taught as "ignore this question" — needs nothing. */
+  /** A lesson says to leave it alone — needs nothing. */
   ignored?: boolean;
+  /** The user answered it themselves — needs nothing either. */
+  answered?: boolean;
 }
 
 /**
- * Green when the input holds its answer — ours, or one that was already there —
- * or when the user said to ignore it. A confident match that would not take its
+ * Green when the input holds its answer — ours, one that was already there, or
+ * one the user typed — or when a lesson says to leave it alone. A confident match that would not take its
  * value needs review.
  */
 export function matchStatus(m: FieldOutcome): MatchConfidence {
-  if (m.filled || m.kept || m.ignored) return 'high';
+  if (m.filled || m.kept || m.ignored || m.answered) return 'high';
   return m.confidence === 'high' ? 'low' : m.confidence;
 }
 

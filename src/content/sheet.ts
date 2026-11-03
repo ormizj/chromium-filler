@@ -83,7 +83,7 @@ const TAP_SLOP = 24;
  * of forgetting is silent — the press does nothing on a mouse and, with the handle's
  * `touch-action: none`, may never resolve as a click at all on a phone.
  */
-const NOT_A_DRAG = '.cf-close, .cf-back, .cf-grab';
+const NOT_A_DRAG = '.cf-close, .cf-back, .cf-grab, .cf-switch';
 
 /** What a rebuild would otherwise throw away. See `Sheet.userPlace`. */
 interface UserPlace {
@@ -223,22 +223,6 @@ export abstract class Sheet<D extends SheetData> {
     if (this.collapsed) this.repaint();
   }
 
-  /**
-   * Hide/show the whole surface (used to get it out of the picker's way).
-   *
-   * `display: none` destroys the layout box, so the scroll position goes with it
-   * — and the picker is exactly when it matters, because the row you pressed
-   * Pick on is the row you want to be looking at when you come back. So a hide
-   * captures and a show restores, on top of the capture `paint` already does:
-   * the picker's sequence is hide → pick → show → `refreshSetup`, and only the
-   * hide happens early enough to read the real number.
-   */
-  setHidden(hidden: boolean): void {
-    if (hidden) this.captureUserPlace();
-    this.host.style.display = hidden ? 'none' : '';
-    if (!hidden) this.applyUserPlace();
-  }
-
   /* ---------------- Keeping the user's place ---------------- */
 
   /**
@@ -257,13 +241,8 @@ export abstract class Sheet<D extends SheetData> {
    */
   private userPlace: UserPlace = { scrollTop: 0 };
 
-  /**
-   * Read the current place off the DOM. A no-op while hidden — the numbers there
-   * are all zero, and overwriting a good capture with them is the one way this
-   * makes things worse than not having it.
-   */
+  /** Read the current place off the DOM. */
   private captureUserPlace(): void {
-    if (this.host.style.display === 'none') return;
     const body = this.shadow.querySelector('.cf-body');
     const next: UserPlace = { scrollTop: body?.scrollTop ?? 0 };
 

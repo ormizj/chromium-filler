@@ -79,6 +79,7 @@
           <!-- Behind a closed disclosure on a real page. -->
           <a href="./frame.html?page=options&amp;state=wordings">other wordings for your details</a>
           <a href="./frame.html?page=options&amp;state=learned">what it has learned</a>
+          <a href="./frame.html?page=options&amp;state=typed">answers you’ve typed</a>
           <a href="./frame.html?page=options&amp;state=sync">sync: what syncs</a>
           <a href="./frame.html?page=options&amp;state=sync-guide">help: setting up sync</a>
         </div>
@@ -87,15 +88,16 @@
       <div class="panel phone">
         <h2>Review card · phone <small>(<a href="./frame.html?page=modal">any page</a> · <a href="./frame.html?page=modal&amp;queue=1">queue tab</a>)</small></h2>
         <!-- One link per rendering. Most are reachable on a real page only by
-             pressing something — Teach, a row's Confirm — or by a form arriving
-             late, none of which a screenshot can do. -->
+             typing into it — learning, a set-aside question — or by a form
+             arriving late, none of which a screenshot can do. -->
         <div class="states">
-          <a href="./frame.html?page=modal">filled, two to teach</a>
-          <a href="./frame.html?page=modal&amp;teach=1">teaching a row</a>
-          <a href="./frame.html?page=modal&amp;teach=2&amp;new=1">teaching: a new field on the spot</a>
-          <a href="./frame.html?page=modal&amp;teach=4">Not this, on a filled row</a>
-          <a href="./frame.html?page=modal&amp;state=taught">taught &amp; ignored rows</a>
-          <a href="./frame.html?page=modal&amp;state=confirmed">a guess, confirmed</a>
+          <a href="./frame.html?page=modal">filled, two new</a>
+          <a href="./frame.html?page=modal&amp;state=learned">learned, answered &amp; set-aside rows</a>
+          <a href="./frame.html?page=modal&amp;state=watching">the pill on a page with nothing to fill</a>
+          <a href="./frame.html?page=modal&amp;state=just-learned">the pill naming a field it just learned</a>
+          <a href="./frame.html?page=modal&amp;state=saved">the pill with Undo after a correction is saved</a>
+          <a href="./frame.html?page=modal&amp;state=saved&amp;open=1">the open card’s Undo note</a>
+          <a href="./frame.html?page=modal&amp;state=paused">the pill after the card’s switch</a>
           <a href="./frame.html?page=modal&amp;state=appeared-later">fields that appeared later</a>
           <a href="./frame.html?page=modal&amp;state=failed-fill">matches that would not take</a>
           <a href="./frame.html?page=modal&amp;state=nothing">nothing recognised yet</a>
@@ -119,21 +121,6 @@
           <a href="./frame.html?page=chip&amp;open=1">chip with the card open (hidden on a phone)</a>
         </div>
         <iframe src="./frame.html?page=chip" title="Queue chip harness, phone width"></iframe>
-      </div>
-      <div class="panel phone picker">
-        <h2>Picker · phone</h2>
-        <!-- The click-to-pick toolbar draws on the host page's light DOM rather
-             than in a shadow root, so it is the one surface with no fixture data
-             to render from — it only exists while a pick is running. The posting
-             below is nested on purpose: a click lands on a `span` and the thing
-             worth saving is the `section` three levels out, which is the whole
-             subject of the two-row bar. -->
-        <div class="states">
-          <a href="./frame.html?page=picker">pick the description</a>
-          <a href="./frame.html?page=picker&amp;label=field%20to%20teach">pick a field to teach</a>
-          <a href="./frame.html?page=picker&amp;state=long">pick a full-length description</a>
-        </div>
-        <iframe src="./frame.html?page=picker" title="Element picker harness, phone width"></iframe>
       </div>
       <div class="panel options">
         <h2>Options · desktop</h2>

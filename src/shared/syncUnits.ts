@@ -47,12 +47,15 @@ export interface DeviceState {
  * `modalLayout` is a rectangle measured against *one* screen (`sampleScreen`) —
  * replicating it to a phone or a smaller laptop is exactly the stranding
  * `clampLayout` exists to undo. `syncEnabled` is the switch for this very feature: syncing it
- * would let one device turn sync off on the other.
+ * would let one device turn sync off on the other. `fillAutomatically` is the
+ * on/off switch in the popup and on the card — a pause while the user is not
+ * applying, on the browser in front of them; syncing it would pause the phone
+ * from the laptop.
  *
  * Everything else syncs, including any setting added later — it lands here only
  * by being named.
  */
-export const LOCAL_SETTINGS = ['modalLayout', 'syncEnabled'] as const satisfies ReadonlyArray<keyof Settings>;
+export const LOCAL_SETTINGS = ['modalLayout', 'syncEnabled', 'fillAutomatically'] as const satisfies ReadonlyArray<keyof Settings>;
 
 export type LocalSetting = (typeof LOCAL_SETTINGS)[number];
 export type SyncedSetting = Exclude<keyof Settings, LocalSetting>;

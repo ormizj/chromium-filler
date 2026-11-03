@@ -1,7 +1,7 @@
 /**
  * The design palette as plain literals, for the two places that draw on the
  * HOST page rather than inside a shadow root: the field highlight (`fill.ts`) and
- * the click-to-pick toolbar (`picker.ts`). Those marks live in the page's own
+ * the name chips beside it (`fieldTags.ts`). Those marks live in the page's own
  * light DOM, which never sees `tokens.css`, so they cannot read a `var(--…)` —
  * this is the one legitimate copy of the token values.
  *
@@ -9,7 +9,7 @@
  * every value here still equals the token it mirrors, in both schemes. That is
  * what keeps the duplicate honest; nothing else may hardcode a colour.
  *
- * The keys mirror token names: `ink`/`onInk` are `--fg`/`--bg` (the toolbar is a
+ * The keys mirror token names: `ink`/`onInk` are `--fg`/`--bg` (a name chip is a
  * deliberately inverted chip, exactly like the options toast), `neutral` is
  * `--border-strong`, `onStatus` is `--on-status`.
  */
@@ -65,7 +65,7 @@ export function currentPalette(): Palette {
   return dark ? DARK_PALETTE : LIGHT_PALETTE;
 }
 
-/** A #rrggbb with an alpha, for the translucent picker fill. */
+/** A #rrggbb with an alpha — a name chip's shadow. */
 export function withAlpha(hex: string, alpha: number): string {
   const n = parseInt(hex.slice(1), 16);
   const r = (n >> 16) & 255;

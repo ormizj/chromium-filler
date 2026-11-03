@@ -2,7 +2,7 @@
  * What an input asks — read off the page the way a person reads it.
  *
  * Detection used to read only `<label>`, `aria-labelledby` and a few attributes.
- * That is enough for the sixteen built-in fields, whose names are also in `id`
+ * That is enough for the eighteen built-in fields, whose names are also in `id`
  * and `name` on most forms, and nowhere near enough for the questions a user
  * teaches: "How did you hear about us?" is routinely a `<div>` above an unlabelled
  * box, and "Do you need sponsorship?" is the legend of a radio group whose

@@ -9,7 +9,7 @@
 import { describe, it, expect } from 'vitest';
 import {
   ACTION_LABELS, FLOW_TEXT, JOB_STATUS_LABELS, STATUS_TEXT,
-  queueChipText, type ActionKey,
+  pillText, queueChipText, type ActionKey,
 } from './labels';
 import { STATUS_LABELS } from './fieldStatus';
 import { DOT_LEGEND } from './help';
@@ -32,9 +32,18 @@ describe('labels — the wording catalog', () => {
    * An unrecognised input is the row the user teaches, not a failure — and on most
    * pages it is the commonest row. Worded as a fault it would be cry-wolf.
    */
-  it('calls an unrecognised input something to teach, not a failure', () => {
-    expect(STATUS_TEXT.none.word).toMatch(/teach/);
-    expect(STATUS_TEXT.none.word).not.toMatch(/unmatched|failed|not found/i);
+  it('calls an unrecognised input new, not a failure — and nothing to teach any more', () => {
+    expect(STATUS_TEXT.none.word).toBe('new');
+    expect(STATUS_TEXT.none.word).not.toMatch(/unmatched|failed|not found|teach/i);
+  });
+
+  it('the pill says the extension is on when it has nothing else to say', () => {
+    expect(pillText({ filled: 0, fresh: 0, rows: 0 })).toBe('On · learning');
+    expect(pillText({ filled: 3, fresh: 2, rows: 5 })).toBe('3 filled · 2 new');
+    expect(pillText({ filled: 3, fresh: 0, rows: 3 })).toBe('3 filled');
+    expect(pillText({ filled: 3, fresh: 0, rows: 3, learned: 'Email' })).toBe('Learned · Email');
+    expect(pillText({ filled: 3, fresh: 0, rows: 3, saved: 'First name' })).toBe('Saved · First name');
+    expect(pillText({ filled: 3, fresh: 0, rows: 3, paused: true })).toMatch(/^Paused/);
   });
 
   it('names every action verb', () => {

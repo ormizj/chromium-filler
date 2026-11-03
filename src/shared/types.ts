@@ -11,6 +11,7 @@ export type FieldKey =
   | 'fullName'
   | 'email'
   | 'phone'
+  | 'phoneLocal'
   | 'linkedin'
   | 'github'
   | 'website'
@@ -21,6 +22,7 @@ export type FieldKey =
   | 'zip'
   | 'country'
   | 'coverLetter'
+  | 'additionalInfo'
   | 'resume';
 
 /** Text-valued field keys (everything except the CV file). */
@@ -64,7 +66,7 @@ export interface CvFile {
 }
 
 /**
- * A field the user defined themselves, for the questions the built-in sixteen do
+ * A field the user defined themselves, for the questions the built-in eighteen do
  * not cover — "Years of experience", "Do you need sponsorship?", a salary figure.
  *
  * It is matched by its `keywords`: whole phrases compared against what an input
@@ -151,6 +153,30 @@ export interface Lesson {
   hits: number;
 }
 
+/**
+ * An answer the user typed that none of their fields holds — counted, never filled.
+ * Options → "Answers you've typed" lists them, most used first, so the user can
+ * save the ones they keep giving as a value (`typedAnswers.ts`).
+ *
+ * Kept on this browser only (`chrome.storage.local` → `typedAnswers`, unstamped,
+ * not in the sync snapshot): a count is not a last-writer-wins register, and this
+ * is a record of what was typed on arbitrary sites.
+ */
+export interface TypedAnswer {
+  /** `normalizeAnswer(value)` — the record's identity. */
+  key: string;
+  /** As the user last typed it. */
+  value: string;
+  kind: InputKind;
+  count: number;
+  /** The questions it answered, as the pages worded them — most recent first, a few at most. */
+  questions: string[];
+  /** The field it was typed over, when it replaced one of our fills. */
+  field?: FieldId;
+  firstAt: number;
+  lastAt: number;
+}
+
 export type MatchConfidence = 'high' | 'low' | 'none';
 /**
  * How an input was recognised: a lesson the user taught, the built-in heuristics,
@@ -172,7 +198,7 @@ export interface FieldMatch {
   /** What the input asks, as the page words it (not normalized). */
   question: string;
   kind: InputKind;
-  /** The field it was matched to. Absent: not recognised — a row to teach. */
+  /** The field it was matched to. Absent: not recognised — answered by hand, it may be learned. */
   field?: FieldId;
   /** That field's name, for display — a custom field carries its own. */
   fieldLabel?: string;
@@ -189,9 +215,19 @@ export interface FieldMatch {
    * the user, restored by the browser or set by the site. Counts as done.
    */
   kept?: boolean;
-  /** Taught on this page a moment ago — the row's button retires to "Taught ✓". */
-  taught?: boolean;
-  /** Taught as "ignore this question". Stays in place, needs nothing. */
+  /** Learned on this page a moment ago, from what the user typed — tagged "Learned". */
+  learned?: boolean;
+  /**
+   * The user answered it themselves — whatever is in the box now is theirs. Counts
+   * as done: a question the user filled in needs nothing more from anyone.
+   */
+  answered?: boolean;
+  /**
+   * The user corrected what we filled here, and the profile field took their answer
+   * — tagged "Saved".
+   */
+  saved?: boolean;
+  /** A lesson says to leave this question alone. Stays in place, needs nothing. */
   ignored?: boolean;
 }
 
@@ -261,13 +297,38 @@ export type { ModalLayout } from './modalLayout';
 
 export interface Settings {
   /**
-   * Fill every page as it loads, and every input that appears on it afterwards.
+   * Fill every page as it loads, and every input that appears on it afterwards —
+   * and learn from what the user types there.
    *
    * The engine runs on every site — there is no per-site setup any more — so this is
-   * the one switch over all of it. Off, nothing is touched until the popup's Fill is
-   * pressed on a page.
+   * the one switch over all of it: the popup's switch and the card's both write it
+   * (`setFillingOn`). Off, nothing is filled, learned or drawn until the popup's
+   * Fill is pressed on a page. Stays on this browser (`LOCAL_SETTINGS`): pausing
+   * the laptop is not pausing the phone.
    */
   fillAutomatically: boolean;
+  /**
+   * When the user answers a question with a value their profile already holds,
+   * remember that the question is that field — on every site. See `learning.ts`.
+   */
+  learnFromTyping: boolean;
+  /**
+   * Count the answers the user types that no profile field holds, for Options →
+   * "Answers you've typed". A record is never filled; it waits for the user to save
+   * it as a value.
+   */
+  rememberTypedAnswers: boolean;
+  /**
+   * When the user changes a value the extension filled, the profile field takes the
+   * new value — "Joe" corrected to "John" is the profile being wrong. The card
+   * offers Undo for a moment. See `learning.ts`.
+   */
+  updateProfileFromEdits: boolean;
+  /**
+   * Keep the pill on every page while the extension is on, so the user can always
+   * see that it is filling and learning — not only once something was filled.
+   */
+  showActivePill: boolean;
   /**
    * Open the review card expanded, once, on a page where something was filled.
    * Off by default: the card then waits folded to its pill, because a card over a

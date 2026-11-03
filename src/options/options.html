@@ -114,7 +114,7 @@
           </div>
           <p id="profile-status" class="status" role="status" aria-live="polite"></p>
           <!-- Behind a disclosure: the built-ins already know the common wordings,
-               and sixteen chip editors in the open would bury the form above. -->
+               and eighteen chip editors in the open would bury the form above. -->
           <details id="wordings" class="reference">
             <summary><span>Other ways sites ask for these</span></summary>
             <p class="hint">Add a wording a site uses for one of your details, and that question is filled with it from then on.</p>
@@ -129,7 +129,7 @@
           <h2 id="custom-heading">Your own fields</h2>
           <p class="hint">For the questions you get asked a lot — years of experience, notice period, sponsorship. These save as you change them.</p>
           <div id="custom-fields" class="custom-list"></div>
-          <p id="custom-empty" class="hint empty-note">No fields of your own yet. Add one here, or press Teach → New field on a question the review card did not recognise.</p>
+          <p id="custom-empty" class="hint empty-note">No fields of your own yet. Add one here, or save one from Answers you’ve typed below.</p>
           <div class="row">
             <button id="custom-add" class="btn">+ Add a field</button>
             <span id="custom-status" class="status" role="status" aria-live="polite"></span>
@@ -181,14 +181,25 @@
           </div>
         </section>
 
-        <!-- Everything the user taught the extension on a page, under the field it
-             answers. Last on the tab: it is a record to check and correct, not a
-             form to fill in. -->
+        <!-- Everything the extension learned from what the user typed, under the
+             field it answers. Near the end of the tab: it is a record to check and
+             correct, not a form to fill in. -->
         <section id="learned-section">
           <h2 id="learned-heading">What it has learned</h2>
-          <p class="hint">Every question you have taught, by the field it fills. Forget a lesson and that question is asked again.</p>
+          <p class="hint">Every question it has learned from your answers, by the field it fills. Forget one and that question is left for you again.</p>
           <div id="learned-list" class="learned"></div>
-          <p id="learned-empty" class="hint empty-note">Nothing taught yet. When the review card lists a question it did not recognise, press Teach on it.</p>
+          <p id="learned-empty" class="hint empty-note">Nothing learned yet. Type one of your details into a question it did not know, and it remembers the question.</p>
+        </section>
+
+        <!-- Answers the user typed that no field holds — counted, never filled.
+             Last: they wait for the user, and saving one is the only way any of
+             them is ever used. -->
+        <section id="typed-section">
+          <h2 id="typed-heading">Answers you’ve typed</h2>
+          <p class="hint">What you keep typing that is not in your profile yet, most used first. None of it is filled until you save it.</p>
+          <div id="typed-list" class="learned"></div>
+          <p id="typed-empty" class="hint empty-note">Nothing yet. Short answers you type into questions — a job title, a notice period — are counted here, on this browser only.</p>
+          <p id="typed-status" class="status" role="status" aria-live="polite"></p>
         </section>
       </div>
 
@@ -203,8 +214,24 @@
                something slightly different from the `?` beside them. -->
           <div class="settings-list">
             <div class="setrow">
-              <div class="setrow-text"><h5>Fill automatically</h5></div>
+              <div class="setrow-text"><h5>Fill and learn on this browser</h5></div>
               <label class="switch"><input type="checkbox" id="fill-auto" class="switch-input" /><span class="switch-track" aria-hidden="true"><i></i></span></label>
+            </div>
+            <div class="setrow">
+              <div class="setrow-text"><h5>Learn from what you type</h5></div>
+              <label class="switch"><input type="checkbox" id="learn-typing" class="switch-input" /><span class="switch-track" aria-hidden="true"><i></i></span></label>
+            </div>
+            <div class="setrow">
+              <div class="setrow-text"><h5>Update your details when you correct them</h5></div>
+              <label class="switch"><input type="checkbox" id="update-from-edits" class="switch-input" /><span class="switch-track" aria-hidden="true"><i></i></span></label>
+            </div>
+            <div class="setrow">
+              <div class="setrow-text"><h5>Remember answers you type</h5></div>
+              <label class="switch"><input type="checkbox" id="remember-typed" class="switch-input" /><span class="switch-track" aria-hidden="true"><i></i></span></label>
+            </div>
+            <div class="setrow">
+              <div class="setrow-text"><h5>Show that it is on</h5></div>
+              <label class="switch"><input type="checkbox" id="show-pill" class="switch-input" /><span class="switch-track" aria-hidden="true"><i></i></span></label>
             </div>
             <div class="setrow">
               <div class="setrow-text"><h5>Open the review when a page is filled</h5></div>

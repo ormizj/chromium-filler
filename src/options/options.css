@@ -243,6 +243,10 @@ body:not([data-tab-pos='last']) [role='tabpanel'] > section {
   grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
   gap: var(--space-4);
 }
+/* A prose field (`LONG_TEXT_FIELDS`) takes the whole row of the grid. */
+.grid > .fld.wide {
+  grid-column: 1 / -1;
+}
 
 /* A captioned control. Usually a `<label>`, but not where the caption sits over
    a *row* of controls — a `for=` there makes a click on any of them, Remove
@@ -596,50 +600,6 @@ label.check input {
 label.setrow-text {
   display: flex;
   cursor: pointer;
-}
-.switch {
-  flex: none;
-  position: relative;
-  display: inline-flex;
-  align-items: center;
-  cursor: pointer;
-}
-/* The real control: focusable and clickable, but not painted — the track is. */
-.switch-input {
-  position: absolute;
-  width: 100%;
-  height: 100%;
-  margin: 0;
-  opacity: 0;
-  cursor: pointer;
-  min-height: 0;
-}
-.switch-track {
-  width: 42px;
-  height: 24px;
-  border-radius: var(--radius-pill);
-  background: var(--track-off);
-  transition: background-color 120ms ease;
-}
-.switch-track i {
-  position: absolute;
-  top: 2px;
-  left: 2px;
-  width: 20px;
-  height: 20px;
-  border-radius: 50%;
-  background: #fff;
-  box-shadow: var(--shadow-1);
-  transition: transform 120ms ease;
-}
-.switch-input:checked ~ .switch-track {
-  background: var(--accent);
-}
-.switch-input:checked ~ .switch-track i {
-  transform: translateX(18px);
-}
-.switch-input:focus-visible ~ .switch-track {
-  box-shadow: var(--ring);
 }
 
 label.fld.inline {
@@ -2042,4 +2002,35 @@ input.chipedit-input:focus {
 }
 .learned-remove {
   flex: none;
+}
+
+/* ---------------- Answers you've typed ---------------- */
+
+/* The same rows as What it has learned, with a Save as choice where Forget was.
+   On a phone the choice drops under the answer rather than squeezing it to a
+   word per line. */
+.typed-actions {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+.typed-actions select {
+  max-width: 14rem;
+}
+.typed-replaces {
+  flex: 1 0 100%;
+}
+@media (max-width: 640px) {
+  .typed-row {
+    flex-wrap: wrap;
+  }
+  .typed-actions {
+    flex: 1 1 100%;
+  }
+  .typed-actions select {
+    flex: 1 1 auto;
+    max-width: none;
+    min-width: 0;
+  }
 }

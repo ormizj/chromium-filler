@@ -45,14 +45,58 @@ export interface GroupHelp extends HelpEntry {
 
 export const SETTINGS_HELP: Record<keyof Settings, HelpEntry> = {
   fillAutomatically: {
-    title: 'Fill automatically',
-    short: 'Fill every page as it loads, and every field that appears later',
+    title: 'Fill and learn on this browser',
+    short: 'Fill every page as it loads, and learn from what you type',
     body: 'Every input on every page goes past the extension. The ones it recognises are '
       + 'filled as the page loads — and when more appear, because you pressed “Apply now” '
       + 'or moved to the next page of a form, those are filled too. A box that already '
       + 'has something in it is never touched, and neither is one you have typed in. '
-      + 'Login and sign-up forms, search boxes and card details are always left alone.',
-    when: 'Turn it off to fill only when you press Fill in the popup.',
+      + 'Login and sign-up forms, search boxes and card details are always left alone. '
+      + 'This is the same switch as the one in the popup and on the card.',
+    when: 'Turn it off while you are not applying for anything; press Fill in the popup to fill one page anyway.',
+  },
+  learnFromTyping: {
+    title: 'Learn from what you type',
+    short: 'When your answer is one of your details, remember the question',
+    body: 'When you type one of your own details into a question it did not know — your '
+      + 'email into “Preferred contact”, say — it remembers that question and fills it '
+      + 'next time, on any site. When you replace something it filled with another of '
+      + 'your details, it moves the question to that one; when you empty it, it stops '
+      + 'filling that question. It only ever links a '
+      + 'question to a value you keep in your profile: text you type is never filled '
+      + 'anywhere just because you typed it. Everything it learned is under Profile → '
+      + 'What it has learned, where you can forget any of it.',
+    when: 'Turn it off to keep it from learning anything new.',
+  },
+  updateProfileFromEdits: {
+    title: 'Update your details when you correct them',
+    short: 'Change something it filled, and your profile changes with it',
+    body: 'When you change a value it filled — “Joe” to “John”, a phone number written '
+      + 'another way — the detail it filled from takes your new value, so every form '
+      + 'after this one gets it right. The pill says what was saved, with an Undo for a '
+      + 'few seconds: Undo puts the old value back and stops filling that box, for the '
+      + 'times it filled the wrong detail there — your name in a referee\'s box. Emptying '
+      + 'a box it filled never empties your profile.',
+    when: 'Turn it off to keep your profile exactly as you typed it in Options.',
+  },
+  rememberTypedAnswers: {
+    title: 'Remember answers you type',
+    short: 'Count the answers that are not in your profile yet, as suggestions',
+    body: 'Answers you type that none of your details hold — “Software developer”, “1 month” — '
+      + 'are counted on this browser and listed under Profile → Answers you’ve typed, most '
+      + 'used first, so you can save the ones you keep giving. They are never filled until '
+      + 'you do. Only short, one-line answers are kept: nothing typed into a large text box '
+      + 'or a message editor is ever recorded.',
+    when: 'Turn it off if you would rather nothing you type is kept.',
+  },
+  showActivePill: {
+    title: 'Show that it is on',
+    short: 'Keep the small pill on every page while filling is on',
+    body: 'While the extension is on, a small pill sits in the corner of every page saying '
+      + 'so — “On · learning” — and how much it filled. Press it to see the report, or to '
+      + 'turn the extension off. With this off, the pill appears only on pages where '
+      + 'something was filled.',
+    when: 'Turn it off if you would rather see it only where it did something.',
   },
   openCardWhenFilled: {
     title: 'Open the review when a page is filled',
@@ -89,7 +133,7 @@ export const SETTINGS_HELP: Record<keyof Settings, HelpEntry> = {
     title: 'Sync this browser',
     short: 'Keep this browser and your others the same — everything listed under “What syncs”',
     body: 'Keeps the whole extension the same in two browsers: your job list, your '
-      + 'profile, your own fields, what you have taught it, your CV and cover letter, and '
+      + 'profile, your own fields, what it has learned, your CV and cover letter, and '
       + 'your settings — all of it listed under “What syncs”, along with the few things '
       + 'that stay on each browser. Both browsers connect to the same Google account, and '
       + 'the data is kept in a folder there that only this extension can see. Neither side '
@@ -122,7 +166,7 @@ export const SYNC_SCOPE_TEXT: Record<SyncDomain, ScopeLine> = {
   profile: { title: 'Your details', detail: 'Everything filled in under Profile → Your details.' },
   wordings: { title: 'Other ways sites ask', detail: 'The extra wordings you gave the built-in fields.' },
   customFields: { title: 'Your own fields', detail: 'Their names, answers, and the questions they answer.' },
-  lessons: { title: 'What it has learned', detail: 'Every question you taught it, and what it fills there.' },
+  lessons: { title: 'What it has learned', detail: 'Every question it has learned, and what it fills there.' },
   resume: { title: 'Your CV', detail: 'The file itself.' },
   coverLetter: { title: 'Your cover letter file', detail: 'The file itself.' },
   settings: { title: 'Your settings', detail: 'These, from the Settings tab:' },
@@ -138,6 +182,10 @@ export const LOCAL_SCOPE_TEXT: Record<LocalSetting, ScopeLine> = {
     detail: 'Measured against this screen — another screen needs its own.',
   },
   syncEnabled: { title: 'The “Sync this browser” switch', detail: 'Each browser decides for itself whether to sync.' },
+  fillAutomatically: {
+    title: 'The on/off switch',
+    detail: 'Pausing it here leaves your other browsers filling.',
+  },
 };
 
 /** What stays here that is not a setting at all. */
@@ -146,12 +194,16 @@ export const DEVICE_ONLY_TEXT: ScopeLine[] = [
     title: 'Your Google OAuth client and the connected account',
     detail: 'Each browser has its own redirect address, and signs in for itself.',
   },
+  {
+    title: 'Answers you’ve typed',
+    detail: 'A count of what you type on this browser — save one to your profile and it syncs as a value.',
+  },
 ];
 
 /* ---------------- Concepts ---------------- */
 
 export type ConceptKey =
-  | 'howItWorks' | 'neverSubmits' | 'teaching' | 'customFields' | 'dots' | 'picker'
+  | 'howItWorks' | 'neverSubmits' | 'learning' | 'typedAnswers' | 'customFields' | 'dots'
   | 'coverLetter' | 'leftAlone' | 'sessions' | 'queueChip' | 'done'
   | 'alreadyDone' | 'syncClient';
 
@@ -309,13 +361,14 @@ export const CONCEPT_HELP: Record<ConceptKey, HelpEntry> = {
   howItWorks: {
     title: 'How it works',
     body: 'Every input on every page goes past the extension. It reads what each one asks '
-      + '— the label, or the words written above the box — and checks it against what you '
-      + 'have taught it, its own knowledge of the common fields, and the wordings you gave '
+      + '— the label, or the words written above the box — and checks it against what it '
+      + 'has learned, its own knowledge of the common fields, and the wordings you gave '
       + 'your own fields. What it is sure of is filled straight away and outlined green; '
       + 'what it only suspects is outlined yellow and left for you; what it does not know '
-      + 'is listed on the card for you to teach. When more fields appear — a form opening, '
-      + 'the next page of one — the same happens to them. Then you read it over and press '
-      + 'the site\'s own Submit button.',
+      + 'you answer yourself — and when your answer is one of your details, it learns the '
+      + 'question. When more fields appear — a form opening, the next page of one — the '
+      + 'same happens to them. Then you read it over and press the site\'s own Submit '
+      + 'button. While it is on, a small pill in the corner of every page says so.',
   },
   neverSubmits: {
     title: 'Nothing is ever sent for you',
@@ -323,19 +376,32 @@ export const CONCEPT_HELP: Record<ConceptKey, HelpEntry> = {
       + 'however confident it is. Read the card, fix what it flagged, then submit on the '
       + 'site yourself.',
   },
-  teaching: {
-    title: 'Teaching a question',
-    short: 'Say once what a question is, and it is filled on every site that asks it.',
-    body: 'Press Teach on a question the card did not recognise and say what it is: one of '
-      + 'your details, one of your own fields, a new field made there and then, or a '
-      + 'question to ignore. It is filled at once — and remembered by its wording, so the '
-      + 'next site that asks “Given name” gets your first name without asking you. A '
-      + 'wrong match is corrected the same way, with Not this.',
-    when: 'A lesson names exactly one box. Where a form asks the same thing twice — your '
-      + 'name, and a referee\'s — the lesson also remembers which part of the form it was '
-      + 'in, so the two are never confused; and if a page still has two boxes a lesson '
-      + 'cannot tell apart, it fills neither and lists both. Everything taught is listed '
-      + 'under Options → Profile → What it has learned, where any of it can be removed.',
+  learning: {
+    title: 'How it learns',
+    short: 'Answer a question with one of your details, and it is filled on every site that asks it.',
+    body: 'There is nothing to teach. When you type one of your own details into a question '
+      + 'it did not know — your email into “Preferred contact”, your city into “Where are '
+      + 'you based?” — it remembers that question, by its wording, and fills it next time on '
+      + 'any site. When you correct something it filled — “Joe” to “John” — your profile '
+      + 'takes the new value, with an Undo on the pill for a few seconds; when you replace '
+      + 'it with another of your details, it learns that one instead; when you empty it, '
+      + 'it stops filling that question. It learns as you leave the box, never while '
+      + 'you are still typing, and it never rewrites what you typed.',
+    when: 'It only ever links a question to a value you keep in your profile — an answer '
+      + 'like “Yes” fits too many questions to learn from, and a tick box is never learned. '
+      + 'A lesson names exactly one box: where a form asks the same thing twice — your '
+      + 'name, and a referee\'s — it also remembers which part of the form it was in. '
+      + 'Everything learned is under Options → Profile → What it has learned, where any of '
+      + 'it can be forgotten.',
+  },
+  typedAnswers: {
+    title: 'Answers you’ve typed',
+    short: 'What you keep typing that is not in your profile yet — save the ones you reuse.',
+    body: 'An answer you type that none of your details hold — a job title, a notice '
+      + 'period — is counted here, most used first, with the questions it answered. It is '
+      + 'never filled anywhere until you save it: Save as puts it into one of your details '
+      + 'or a new field of your own, and from then on it is learned like any other. Only '
+      + 'short, one-line answers are kept, and only on this browser.',
   },
   customFields: {
     title: 'Your own fields',
@@ -349,19 +415,12 @@ export const CONCEPT_HELP: Record<ConceptKey, HelpEntry> = {
   },
   dots: {
     title: 'What the dots mean',
-    short: 'Green is done, yellow is worth a look, grey is a question to teach.',
-    body: 'Green: the answer is in the box — filled now, or already there. Yellow: the '
-      + 'extension has a guess, or knows the question but has nothing in your profile for '
-      + 'it — Confirm it, or add the value in Options. Grey: a question it does not '
-      + 'recognise yet — Teach it, once. The same colours outline the fields on the page.',
-  },
-  picker: {
-    title: 'Pointing at a field',
-    short: 'Teach a box the card did not list by pointing at it.',
-    body: 'Some fields are drawn in ways the extension does not read as a question — a '
-      + 'custom drop-down, a box hidden behind a button. Press Teach in the popup (or Pick '
-      + 'on a row), tap the field on the page, and Confirm. The card then opens on it so '
-      + 'you can say what it is.',
+    short: 'Green is done, yellow is worth a look, grey is a question it does not know yet.',
+    body: 'Green: the answer is in the box — filled now, already there, or typed by you. '
+      + 'Yellow: the extension has a guess, or knows the question but has nothing in your '
+      + 'profile for it — type the answer, or add the value in Options. Grey: a question it '
+      + 'does not recognise yet — answer it yourself, and if the answer is one of your '
+      + 'details it is learned. The same colours outline the fields on the page.',
   },
   leftAlone: {
     title: 'What is never touched',
@@ -456,5 +515,5 @@ export const CONCEPT_HELP: Record<ConceptKey, HelpEntry> = {
 export const DOT_LEGEND: Array<{ status: 'high' | 'low' | 'none'; label: string }> = [
   { status: 'high', label: 'the answer is in the box' },
   { status: 'low', label: 'a guess, or nothing in your profile for it' },
-  { status: 'none', label: 'a question to teach, once' },
+  { status: 'none', label: 'a question it does not know yet' },
 ];

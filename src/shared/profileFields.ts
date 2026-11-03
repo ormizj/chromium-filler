@@ -1,5 +1,5 @@
 /**
- * The fields a value can come from — the sixteen built in, and whatever the user
+ * The fields a value can come from — the seventeen built in, and whatever the user
  * added — as one catalog. Every surface that names a field, offers a list of them,
  * or looks a value up goes through here, so a custom field is a field everywhere
  * and not a special case at each call site.
@@ -42,6 +42,19 @@ export function fieldLabel(profile: Profile, id: FieldId): string {
 export function fieldValue(profile: Profile, id: FieldId): string | undefined {
   const v = isCustomId(id) ? custom(profile, id)?.value : profile.values[id as TextFieldKey];
   return v != null && v !== '' ? v : undefined;
+}
+
+/**
+ * The profile with one field's text replaced — a built-in or one of the user's own.
+ * A custom field that has been deleted stays deleted.
+ */
+export function setFieldValue(profile: Profile, id: FieldId, value: string): Profile {
+  if (!isCustomId(id)) return { ...profile, values: { ...profile.values, [id]: value } };
+  if (!custom(profile, id)) return profile;
+  return {
+    ...profile,
+    customFields: (profile.customFields ?? []).map((f) => (f.id === id ? { ...f, value } : f)),
+  };
 }
 
 /**

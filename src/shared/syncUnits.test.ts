@@ -46,8 +46,8 @@ const full = (): DeviceState => device({
 });
 
 describe('the settings split', () => {
-  it('keeps the card layout and the sync switch on the device', () => {
-    expect([...LOCAL_SETTINGS].sort()).toEqual(['modalLayout', 'syncEnabled']);
+  it('keeps the card layout, the sync switch and the on/off switch on the device', () => {
+    expect([...LOCAL_SETTINGS].sort()).toEqual(['fillAutomatically', 'modalLayout', 'syncEnabled']);
   });
 
   it('puts every other setting on the synced side, and none on both', () => {

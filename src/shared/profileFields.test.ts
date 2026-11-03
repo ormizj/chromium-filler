@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import type { Profile } from './types';
 import {
-  fieldChoices, fieldLabel, fieldValue, isCustomId, keywordMatch, newCustomField,
+  fieldChoices, fieldLabel, fieldValue, isCustomId, keywordMatch, newCustomField, setFieldValue,
 } from './profileFields';
 
 const profile = (over: Partial<Profile> = {}): Profile => ({
@@ -31,6 +31,22 @@ describe('fieldLabel / fieldValue', () => {
     expect(fieldValue(p, 'c_visa')).toBe('No');
     expect(fieldValue(p, 'c_missing')).toBeUndefined();
     expect(fieldLabel(p, 'c_missing')).toBe('Deleted field');
+  });
+});
+
+describe('setFieldValue', () => {
+  it('sets a built-in or a custom field, and leaves the profile it was given alone', () => {
+    const p = profile();
+    const next = setFieldValue(setFieldValue(p, 'firstName', 'John'), 'c_visa', 'Yes');
+    expect(fieldValue(next, 'firstName')).toBe('John');
+    expect(fieldValue(next, 'c_visa')).toBe('Yes');
+    expect(fieldValue(p, 'c_visa')).toBe('No');
+    expect(next.customFields!.find((f) => f.id === 'c_visa')?.label).toBe(p.customFields!.find((f) => f.id === 'c_visa')?.label);
+  });
+
+  it('a custom field that no longer exists is not brought back', () => {
+    const p = profile();
+    expect(setFieldValue(p, 'c_missing', 'x')).toEqual(p);
   });
 });
 

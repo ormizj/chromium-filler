@@ -3,6 +3,7 @@
  * content script. Keep payloads structured-clone friendly (no DOM, no functions).
  */
 
+import type { FieldMatch } from './types';
 import type { QueueProgress } from './queue';
 import type { SnapshotSummary } from './syncSnapshot';
 
@@ -14,13 +15,24 @@ export const MSG = {
   RUN: 'CF_RUN',
   /** popup -> content: empty what was filled, clear the marks, start the report over. */
   RESET: 'CF_RESET',
-  /** popup -> content: report what the page has (filled, to teach, card state). */
+  /** popup -> content (top frame): report what the page has (filled, new, card state). */
   STATUS: 'CF_STATUS',
   /**
-   * popup -> content: point at an input to teach — for one the sweep did not list
-   * (a custom widget, something we skip by default). Opens the card on its row.
+   * content (a subframe) -> background -> content (the top frame): this frame's
+   * report. An embedded application form — a Greenhouse or Lever iframe — is filled
+   * where it is, and its rows join the card the top frame draws. The background adds
+   * the sender's `frameId` on the way through.
    */
-  TEACH: 'CF_TEACH',
+  FRAME_REPORT: 'CF_FRAME_REPORT',
+  /** content (the card's Fill again) -> background: send RUN to every frame of this tab. */
+  FILL_TAB: 'CF_FILL_TAB',
+  /**
+   * content (the card's Undo) -> background: send UNDO_SAVE to every frame of this
+   * tab. A correction is undone by the frame that saved it — it holds the input.
+   */
+  UNDO_TAB: 'CF_UNDO_TAB',
+  /** background -> every frame: the frame whose correction carries `token` undoes it. */
+  UNDO_SAVE: 'CF_UNDO_SAVE',
   /** options -> background: open a batch of URLs in new tabs. */
   OPEN_URLS: 'CF_OPEN_URLS',
   /** popup/content -> background: open the options page. */
@@ -85,8 +97,8 @@ export interface StatusResponse {
   filledCount: number;
   /** Rows in the report. */
   reportedCount: number;
-  /** Inputs nothing recognised — the rows to teach. */
-  toTeach: number;
+  /** Inputs nothing recognised yet — answered by hand, they may be learned. */
+  fresh: number;
   /** A sweep has run on this page. */
   hasRun: boolean;
   /** The review card exists and is folded to its pill. */
@@ -123,7 +135,18 @@ export type Message =
   | { type: typeof MSG.RUN }
   | { type: typeof MSG.RESET }
   | { type: typeof MSG.STATUS }
-  | { type: typeof MSG.TEACH }
+  | {
+      type: typeof MSG.FRAME_REPORT;
+      doc: string;
+      rows: FieldMatch[];
+      frameId?: number;
+      learned?: string;
+      /** A correction this frame just saved to the profile — the top frame offers its Undo. */
+      saved?: { label: string; token: string };
+    }
+  | { type: typeof MSG.FILL_TAB }
+  | { type: typeof MSG.UNDO_TAB; token: string }
+  | { type: typeof MSG.UNDO_SAVE; token: string }
   | { type: typeof MSG.OPEN_URLS; urls: string[] }
   // `hash` deep-links to a tab (`profile`, `queue`, `help`, …); `at` names a
   // section on it and `focus` a control inside that, because a tab on its own is

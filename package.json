@@ -1,7 +1,7 @@
 {
   "name": "chromium-filler",
-  "version": "0.1.4",
-  "description": "MV3 Chrome extension that auto-fills job application forms with per-site config, review report, and click-to-pick overrides.",
+  "version": "0.1.5",
+  "description": "MV3 Chrome extension that fills job application forms on any site as they appear, learns from the answers you type, and never submits for you.",
   "type": "module",
   "scripts": {
     "dev": "vite",

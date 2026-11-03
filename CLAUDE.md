@@ -29,28 +29,26 @@ assertion. New MCP servers load on Claude Code restart.
 
 For UI work also start `npm run dev` and open `http://localhost:5173/dev/`, which
 renders every surface against a mocked `chrome.*`, including a **390px phone
-frame**. `dev/frame.html?page=…` takes `popup`, `options`, `modal`, `chip` and
-`picker`. The mock's seed is versioned (`full-v4` in `dev/mock-chrome.ts`): bump it
+frame**. `dev/frame.html?page=…` takes `popup`, `options`, `modal` and `chip`.
+The mock's seed is versioned (`full-v6` in `dev/mock-chrome.ts`): bump it
 whenever its shape changes, or a browser that ran the harness before keeps the old
 store.
 
 - **`page=modal`** renders the real review card over a fake posting.
-  `&state=` picks the rendering: `long`, `flush`, `failed-fill`,
-  `confirmed`, `taught`, `appeared-later`, `already-done`, `nothing`, `empty`,
-  `bare`, `pill-only`. `&teach=<n>` opens the Teach chooser on row n (and `&new=1`
-  with it opens "New field…"); `&queue=1` (or `&session=1`) makes it a queue tab.
-  Most of these are reachable on a real page
-  only by pressing something, which a screenshot cannot do.
+  `&state=` picks the rendering: `long`, `flush`, `failed-fill`, `learned`
+  (learned, saved, answered and set-aside rows), `appeared-later`, `already-done`,
+  `nothing`, `empty`, `bare`, `pill-only`, and the pill's own states `watching`
+  ("On · learning"), `just-learned`, `saved` (with Undo; `&open=1` for the
+  card's note) and `paused`. `&queue=1` (or `&session=1`)
+  makes it a queue tab. Most of these are reachable on a real page only by typing
+  into it, which a screenshot cannot do.
 - **`page=chip`** is the queue chip beside the card's folded pill — the two marks
   the extension leaves on a queue tab. `&open=1` expands the card (on a phone the
   chip then hides).
-- **`page=options`** takes `&state=profile|custom-fields|wordings|learned` (the
+- **`page=options`** takes `&state=profile|custom-fields|wordings|learned|typed` (the
   Profile tab's sections, via the same `#tab&at=` deep links the extension uses),
   `sync` (the Sync tab at its "What syncs" lists), `sync-guide`, and `fresh` (an
   empty store — the getting-started checklist).
-- **`page=picker`** runs the real click-to-pick toolbar over a deliberately
-  nested posting; `&label=` names what it says it is picking, `&state=long`
-  previews a full-length description.
 
 Add a state whenever a surface gains a distinct rendering — **and link it from
 `dev/index.html`**, or it is a state nobody looks at.
@@ -61,8 +59,9 @@ once). Always `npm run build` before `npm run test:e2e` — the suite loads `dis
 ## Architecture
 
 MV3 Chrome extension that fills job-application forms — **on every site, with no
-per-site setup, and it never submits anything**. The user presses the site's own
-submit button; the extension's job ends at a filled, reviewed form.
+per-site setup, and it never submits anything** — and **learns from what the user
+types**, with nothing to press. The user presses the site's own submit button; the
+extension's job ends at a filled, reviewed form.
 
 It used to be much more: per-site configs, a recorder and a six-step setup wizard,
 prep clicks, two-step redirect following, and an Apply that pressed the site's
@@ -70,26 +69,48 @@ Send button and watched for a confirmation. All of that is gone (October 2026):
 real sites have too much custom logic for the automation to pay for itself. What
 stayed is the fill, the queue and the sync. Do not reintroduce submit automation
 or per-site configs. (The Archive export and the posting capture behind it went
-too, the same month: nothing else read the captured text.)
+too, the same month: nothing else read the captured text.) In November 2026 the
+Teach button, its chooser, Confirm and the click-to-pick picker went as well: the
+extension learns from the answers the user types (see Learning), and has no
+controls on a row. Do not reintroduce a Teach flow or the picker.
 
 ### How a page is filled
 
-1. **The content script runs everywhere** (`<all_urls>`, `document_idle`).
-   `Controller` (`src/content/main.ts`) loads the profile, the lessons, the
-   settings and the two documents, asks the background whether the queue opened
-   this tab (`MSG.QUEUE_TAB`), and — unless `settings.fillAutomatically` is off —
-   starts the engine.
+1. **The content script runs everywhere, in every frame** (`<all_urls>`,
+   `document_idle`, `all_frames`, `match_about_blank`). `Controller`
+   (`src/content/main.ts`) loads the profile, the lessons, the settings and the two
+   documents, asks the background whether the queue opened this tab
+   (`MSG.QUEUE_TAB`), and — unless the on/off switch (`settings.fillAutomatically`)
+   is off — starts the engine.
 2. **The engine** (`src/content/fillEngine.ts`) sweeps the page: collect the
    candidate inputs, classify the ones not seen before, fill the confident empty
    ones, add a report row for each. A DOM-only `watchPageChange` (400ms settle,
    no scroll/resize) re-sweeps as the page changes, so the form behind "Apply now"
    and step 2 of a wizard are filled as they appear. It pauses while the tab is
-   hidden and stands down after ten idle minutes.
+   hidden and stands down after ten minutes with no new input — but a trusted
+   `pointerdown`/`keydown` brings it back and sweeps at once (`wake`, throttled
+   to one re-arm per `WAKE_THROTTLE_MS`), because a long step one is not a quiet
+   page: step two behind "Next" is still to come.
 3. **The card** (`src/content/modal/modal.ts`) shows the report. It appears as a
-   folded pill, and only when something was filled (on a queue tab, as soon as
-   there is a row). With `settings.openCardWhenFilled` (off by default) it opens
-   expanded the first time something is filled — decided on every report, not when
-   the card is made, and once only, so a × afterwards is the user's word.
+   folded pill — **on every page while the extension is on**
+   (`settings.showActivePill`, on by default, read only in `shouldShow`), saying
+   "On · learning" until there is something to count, so the user can always see
+   that it is reading the page. With the setting off it appears only where
+   something was filled (on a queue tab, as soon as there is a row). With
+   `settings.openCardWhenFilled` (off by default) it opens expanded the first time
+   something is filled — decided on every report, once only, so a × afterwards is
+   the user's word.
+
+### Embedded forms (frames)
+Greenhouse, Lever, iCIMS and others embed the application form in an iframe from
+another origin, which a top-frame script cannot see into. Every frame runs the
+content script; **only the top frame draws** (`IS_TOP`). A subframe fills and
+learns where it is and posts its rows upward (`MSG.FRAME_REPORT`, throttled); the
+background adds `sender.frameId` and forwards to `{frameId: 0}`, which appends
+them after its own rows (keyed `frameId:doc`, ids prefixed — the report still
+holds still). The popup asks `STATUS`/`SHOW_REPORT` of `{frameId: 0}` only, and
+sends `RUN`/`RESET` to every frame; a subframe acts on those but never answers.
+The card's Fill again goes through `MSG.FILL_TAB` so it reaches every frame.
 
 ### What is a candidate, and what never is
 `collectCandidates` (`src/content/fieldDetect.ts`): text-like inputs, textareas,
@@ -134,7 +155,7 @@ enclosing legend or the nearest heading above.
 **A lesson must name exactly one input**, because a lesson is global and wording
 alone collides ("Name" for you and for a referee). `uniqueSignature` starts from
 `{question, kind}` and adds `name` (only if it looks stable), then `section`, then
-`options` until exactly one input on the teaching page matches; failing that it
+`options` until exactly one input on the page it is learned on matches; failing that it
 stores `index`. An input with no words and no usable name is pinned to its `host`
 — a global lesson on "an unlabelled box" would match one on every site. On any
 later page a lesson matches only when **every stored part is equal**; the more
@@ -143,61 +164,118 @@ fills **neither** (`'ambiguous'`). Exact matching only — never fuzzy: a wrong 
 in an employer's form is worse than a blank one.
 
 ### The report
-One row per **input** (`FieldMatch`): `question`, `kind`, `field?` (absent = to
-teach), `source` (`lesson`/`heuristic`/`keyword`/`none`), `confidence`, `filled`,
-`kept` (left alone because it already held an answer), `taught`, `ignored`,
-`later`. `matchStatus` makes `filled`/`kept`/`ignored` green.
+One row per **input** (`FieldMatch`): `question`, `kind`, `field?` (absent = not
+recognised yet), `source` (`lesson`/`heuristic`/`keyword`/`none`), `confidence`,
+`filled`, `kept` (left alone because it already held an answer), `learned`,
+`answered` (the user typed the answer), `ignored`, `later`. `matchStatus` makes
+`filled`/`kept`/`ignored`/`answered` green. **A row has no buttons** — the report
+only reports; its tag says Learned / Saved / Yours / Won't fill when typing changed it.
 
-**The report holds still.** Rows are banded once, at the first sweep (to teach,
-then to check, then filled); inputs that arrive later are appended under an
-"Appeared later" head. A row's status may change *in place* — Confirm and Teach
-fill it — but no row ever moves under the finger working the list.
+**The report holds still.** Rows are banded once, at the first sweep (new, then
+to check, then filled); inputs that arrive later are appended under an
+"Appeared later" head — including an input the user answered that no sweep had
+listed. A row's status may change *in place* — typing and learning change it —
+but no row ever moves under the eye reading the list.
 
 **Never write over an answer.** The engine fills only inputs where `hasValue` is
 false (a select whose selected option is a prompt counts as empty), and marks an
 input the user has typed in (a *trusted* `input`/`change` — our own fills dispatch
 untrusted events) as never to be written again. `reconsider()` (on a profile or
-lesson change, or a Teach) re-classifies only rows still open and untouched.
-Confirm and Teach are the user asking, so they write regardless.
+lesson change) re-classifies only rows still open, unanswered and untouched.
+Learning never writes either: the box holds the user's answer.
 
 On the page: recognised inputs get an outline; **unrecognised ones get none** (on
-every site that would be a ring round every search box); name chips are drawn
-only where the user is working (`showLabels`: a queue tab, or after Fill/Teach).
+every site that would be a ring round every search box); every recognised input
+also gets its name chip, on every page (as in 0.1.4 — the chip is what makes an
+outline readable without opening the card).
 
-### Teaching
-On the card, a to-teach row has **Teach**; a matched row has **Not this** (plus
-Confirm on a low guess with a value). Both open the same inline chooser under the
-row (`.cf-teach`, never a popover — it has to work at 390px): a `<select>` grouped
-"Your details" / "Your own fields" / "Something else" (`New field…`, `Ignore this
-question`). `Controller.teach` creates the new field if asked, builds the
-signature against `engine.allCandidates()`, stores the lesson (`shared/lessons.ts`
-— one lesson per signature; teaching again replaces), and `engine.applyTeaching`
-fills the row in place. The popup's **Teach** and the card's footer **Teach** (one
-word, one action) start the picker for an input no sweep listed; Confirm there opens the card on that
-input's chooser (`engine.rowForElement` adds a row for it).
+### Learning
+There is nothing to teach. When the user **commits** an answer — a trusted
+`change`, which the browser fires on blur only if the value changed (or, for a
+contenteditable, `focusout` after a trusted `input`, compared with its text at
+`focusin`) — the engine reads it back (`content/answer.ts` `readAnswer`) and hands
+`onAnswer` the row as it was. Never a plain `blur`: `fillTextField` focuses and
+blurs every box it fills, and those focus events are *trusted*.
+
+`fieldsAnswering` asks which fields would have produced that answer, by the
+fill's own rules (`optionFor`/`radioFor` for a select or radio group, normalized
+equality for text, the file name for an upload). `decideLearning`
+(`shared/learning.ts`, pure; `learningPolicy` is the one place the three learning
+settings are read) decides:
+
+- **typed over our fill** (`updateProfileFromEdits`, on by default) — another
+  field's value, if exactly one holds it and it is distinctive → a lesson to that
+  field; the filled field's own value or several fields → nothing; anything else →
+  a **correction**: the filled field's profile value becomes the answer ("Joe" →
+  "John"), whatever the shape of the edit. `Controller.saveCorrection` writes it
+  through `mutateProfile` (stamped, so it syncs) and the pill says
+  "Saved · <field>" with an **Undo** beside it for `UNDO_FLASH_MS` (a sibling of
+  the pill's button, `.cf-pill-pair`; the open card shows the same note in its
+  footer). Undo restores the old value (only if the field still holds the new
+  one) and writes an `ignore` lesson for that input — an undone correction says
+  the box was not that field (a referee's name typed over yours). The frame that
+  saved it keeps `lastSave`; a subframe's Undo is reached by `MSG.UNDO_TAB` →
+  background → `MSG.UNDO_SAVE` to every frame, and the one holding the token acts.
+  A box we did *not* fill never changes the profile — an empty field typed into is
+  a record, not a value.
+- **exactly one field holds it** (and the row was not already a confident match
+  to it) → a lesson to that field. A low guess the user answered becomes a lesson
+  — what Confirm used to do.
+- **several fields hold it** → nothing; it fails closed.
+- **no field holds it** → a typed-answer *record*, never a lesson
+  (`rememberTypedAnswers`); with corrections off, if **we had filled it** and the
+  new value is not an edit of ours (`looksLikeEdit`: one contains the other, or a
+  phone's last 7 digits) → also an `ignore` lesson: we filled the wrong thing there.
+- **emptied after we filled it** → an `ignore` lesson. Emptying never empties the
+  profile.
+- **a checkbox** → nothing (one "Yes" field would learn to tick every consent
+  box); **an answer that is not distinctive** (under 3 characters, yes/no/none,
+  1–2 digits) → record only, never a lesson.
+
+**A lesson only ever links a question to a value the user keeps in their
+profile.** Text the user typed into a box we did not fill is never filled anywhere
+on the strength of having been typed; typing over our fill is a correction of the
+profile, which the user sees and can undo. A row a lesson decided keeps that lesson's signature when relearned
+(otherwise a fresh, less specific signature would sit beside it and the old one
+keep winning). `Controller.learn` serializes through a promise chain, stores the
+lesson (`teach` in `lessons.ts` — one per signature, replacing), and
+`engine.learned` updates the row in place without writing. The pill says
+"Learned · <field>" for a moment, even for a lesson learned in a subframe.
+
+**Typed answers** (`shared/typedAnswers.ts`, storage key `typedAnswers`) count
+what was typed that no field holds — keyed by normalized value, up to 5 question
+labels each, capped at `MAX_ANSWERS`. Only one-line text, select and radio answers
+of ≤120 characters: nothing from a textarea or a rich-text editor (emails, chat)
+is ever recorded. Once per element per value per page. **This browser only** —
+unstamped and out of the snapshot: a count is not a last-writer-wins register,
+and it is a record of what was typed on arbitrary sites. Options → Profile →
+"Answers you've typed" lists them most-used first, with **Save as…** (a built-in,
+one of your own fields, or a new field named after the question, its other
+questions as wordings; it says what it would replace) and **Dismiss**.
 
 Lessons and custom fields **sync**, like the profile (see Syncing).
 Options → Profile lists them: "Your own fields" (cards: name, kind, answer,
 "Answers questions like" chips), "Other ways sites ask for these" (extra wordings
-for the built-ins, behind a disclosure), and "What it has learned" (lessons by
-field, with Forget; `index`/`host` lessons are flagged).
+for the built-ins, behind a disclosure), "What it has learned" (lessons by field,
+with Forget; `index`/`host` lessons are flagged), and "Answers you've typed".
 
 ### The card
 `FillerModal` extends `Sheet`. It is the report and nothing else — the Job view
 (the posting, re-read from the page), the fullscreen toggle and the ⋯ menu are gone
 (October 2026). Header: site name · `Done` chip · the report's worst-status dot ·
-×. Footer: `Fill again` (sweep again, never over an answer), `Teach` (point at a
-field), and on a queue tab `Skip → next`. **There is no coral primary** — the one thing left
+the on/off switch · ×. Footer: `Fill again` (sweep again, in every frame, never
+over an answer) and on a queue tab `Skip → next`. **There is no coral primary** — the one thing left
 to do is the user's own submit on the site. **Reset is deliberately not on the
 card**: it blanks every field just filled and throws the report away; it lives on
 the popup as a quiet "Reset this page" link.
 
 ### The flow banner
-`src/shared/flowState.ts` (pure) picks one of four states, worded in
+`src/shared/flowState.ts` (pure) picks one of five states, worded in
 `labels.FLOW_TEXT`: `alreadyDone` (the job database has this URL as `done` —
 shown first, Skip retired), `empty` (the profile has nothing to fill with —
 worded about the profile, never the page), `nothing` (a page whose questions are
-all new — an invitation to teach), `ready` ("Filled — submit on the site when you
+all new — answer them and they are learned), `watching` (nothing on the page at
+all — the card opened from the always-on pill), `ready` ("Filled — submit on the site when you
 are ready"). The quiet states ride in the footer.
 
 ### The queue knows its tabs
@@ -221,8 +299,10 @@ bottom-right; on a phone it rises one row above the centred pill and hides while
 the bottom sheet is open). Pressing it opens the card.
 
 ### Surfaces
-- **Popup** — Fill (100%, or "Show report" when the card is folded), then Teach ·
-  Queue · Options in equal thirds, never hidden; "Reset this page" under the
+- **Popup** — the on/off switch in the header (the same act as the card's; off
+  reads "Paused on this browser"), Fill (100%, or "Show report" when the card is
+  folded — it fills one page even while paused), then Queue · Options in equal
+  halves, never hidden; "Reset this page" under the
   detail line once something was filled; the session card with Skip enabled only
   on a queue tab. Queue deep-links to the URL importer.
 - **Options** — five tabs: Queue · Profile · Settings · Sync · Help, following the
@@ -282,13 +362,13 @@ item makes it a stack of boxes.
 The popup is itself a panel (`--bg`), not a page, so its progress card has
 something to recess into. Labels *inside* a surface are sentence case: uppercase
 plus letter-spacing is reserved for page furniture. Secondary actions are labelled
-in **one or two words** ("Teach", "Queue", "Options"), not sentences — as prose
+in **one or two words** ("Fill again", "Queue", "Options"), not sentences — as prose
 they wrapped inside a 360px popup and left the row ragged.
 
 `src/shared/labels.ts` is the wording counterpart to help.ts: `STATUS_TEXT` (tile
-/ word / aria for each `MatchConfidence` — `none` is **"to teach"**, never
-"unmatched": an unrecognised question is an invitation, not a failure), `FLOW_TEXT`
-(the four banner states), `ACTION_LABELS` and `queueChipText`, typed `Record<>` so
+/ word / aria for each `MatchConfidence` — `none` is **"new"**, never
+"unmatched": an unrecognised question is not a failure), `FLOW_TEXT`
+(the five banner states), `ACTION_LABELS`, `pillText` and `queueChipText`, typed `Record<>` so
 a new status or action fails `npm run typecheck` until it is worded. Every surface
 renders its status words and button verbs from here.
 
@@ -297,8 +377,8 @@ not the red ✕ it was: a page of red crosses beside new questions read as a pag
 of failures.
 
 `src/ui/palette.ts` is the **one** legitimate copy of the token colours, for the
-three marks drawn on the *host* page (the field highlight in `fill.ts`, the name
-chips beside it in `fieldTags.ts`, and the click-to-pick toolbar in `picker.ts`) —
+two marks drawn on the *host* page (the field highlight in `fill.ts`, the name
+chips beside it in `fieldTags.ts`) —
 content-script light-DOM never sees tokens.css, so it cannot read a `var(--…)`.
 
 `src/ui/designSystem.test.ts` is the guardrail that makes "zero inconsistencies,
@@ -367,7 +447,7 @@ disclosure wraps into a second column and hangs off the card.
 `src/shared/types.ts` is the source of truth. Everything persists in
 `chrome.storage.local` via typed wrappers in `storage.ts`:
 
-- `profile` — `values` (the 15 built-in text fields), `keywords` (extra wordings
+- `profile` — `values` (the 17 built-in text fields), `keywords` (extra wordings
   per built-in field), `customFields` (`CustomField`: `c_` id, label, kind
   `text`/`longText`/`yesNo`, value, keywords). `normalizeProfile` reads any older
   shape (the old unused `custom` map is dropped).
@@ -375,6 +455,8 @@ disclosure wraps into a second column and hangs off the card.
   label, taughtOn, hits. Hits are counted, batched, by the content script.
 - `jobUrls`, `settings`; the CV and cover letter in `cvStore.ts` (base64 —
   content scripts share the *page's* origin, so not extension IndexedDB).
+- `typedAnswers` — `TypedAnswer[]` (see Learning). This browser only: written raw,
+  never stamped, never in the snapshot.
 - `profileStamps`, `lessonStamps`, `settingsStamps`, `docStamps` — when each
   synced unit last changed (see Syncing). Written in the same `set` as the data,
   by `stampedSet`; every save of synced state goes through it.
@@ -382,7 +464,14 @@ disclosure wraps into a second column and hangs off the card.
   `siteConfigs`, and the `RETIRED_SETTINGS` inside the settings (`exportOptions`,
   `openCardOnQueueTabs`, `modalFullscreen`, …).
 
-`FieldKey` is the built-in sixteen (`resume` = the CV file); `FieldId` is a
+`FieldKey` is the built-in eighteen (`resume` = the CV file; `additionalInfo` is
+the box most forms end on — Lever's `name="comments"`, "Additional information" —
+a `LONG_TEXT_FIELDS` member, a text area in Options, matched in a text area or a
+one-line box alike, but never on the singular "comment" (a blog's box); `phone` is
+the **international** number and `phoneLocal` the local one — a box that only says
+"Phone" takes `phone`, one that says local/national (or `autocomplete=tel-national`)
+takes `phoneLocal`, by `FIELD_EXCLUDES`, and `phoneLocal` is last in `TEXT_FIELDS`
+because that order is the tie-break); `FieldId` is a
 `FieldKey` or a custom id. `shared/profileFields.ts` is the one catalog over both
 (`fieldLabel`, `fieldValue`, `fieldChoices`, `keywordMatch`) so a custom field is
 a field everywhere. The cover letter is both a text field and a file; the page
@@ -405,24 +494,19 @@ three resize grips, collapse-to-pill and `destroy` all live there once.
 `.cf-card`, which is how these surfaces show any change at all — so without
 `captureUserPlace`/`applyUserPlace` every edit also scrolled to the top, dropped
 focus and wiped anything typed but not committed. Picking the 14th of sixteen
-field rows put you back at the first one. Four rules, each with a test:
+field rows put you back at the first one. Three rules, each with a test:
 
 - **Identity is `data-k`, stamped by the subclass** on what a control *is*
-  (`teach:choice`, `teach:label`), never on where it sits — position is exactly
+  (`switch:on`), never on where it sits — position is exactly
   what a rebuild changes. A key that no longer resolves restores nothing and is
   not an error: the edit being rendered may have deleted that row.
 - **Scroll is restored after `applyLayout()`**, never before. The card is sized
   there, and a `scrollTop` written to an element with no height yet clamps to 0.
-- **`setHidden` captures and restores too.** `display: none` destroys the layout
-  box and the scroll offset with it, and the picker's sequence is hide → pick →
-  show → render — only the hide happens early enough to read the real number. A capture while hidden is skipped, or it would overwrite a good one
-  with zeroes.
 - **Uncommitted text comes back for the focused control only.** These inputs
   commit on `change`, i.e. on blur. Writing a remembered value into an *unfocused*
   field would be the opposite bug — stale data beating a fresh render.
   (`selectionStart` throws on `type="number"`; the caret is a nicety and must not
-  cost the value.) The Teach chooser keeps what is typed into it on the instance
-  too, because the engine re-renders the card while the user works in it.
+  cost the value.)
 
 `designSystem.test.ts` fails the build if any surface stylesheet sets a box
 property on `.cf-card`, which would beat the 640px bottom-sheet rules.
@@ -523,8 +607,9 @@ from it.
 Two browser profiles on different Google accounts, one state: **everything**,
 except the card's `modalLayout` (a rectangle measured
 against *one* screen — replicating it is the stranding `clampLayout` exists to
-undo), the `syncEnabled` switch itself, and the OAuth client and tokens. Those
-are `LOCAL_SETTINGS` (`syncUnits.ts`) and `DEVICE_ONLY_TEXT`; every other
+undo), the `syncEnabled` switch itself, the on/off switch (`fillAutomatically` — a
+pause on the browser in front of you), the typed answers, and the OAuth client and
+tokens. Those are `LOCAL_SETTINGS` (`syncUnits.ts`) and `DEVICE_ONLY_TEXT`; every other
 setting syncs, including one added later, unless it is named there.
 
 **The Sync tab says what syncs** (a "What syncs" disclosure, folded by default: synced vs stays
@@ -664,14 +749,22 @@ deep-links there rather than carrying a copy, and `CONCEPT_HELP.syncClient` says
   Never add fuzzy matching — a wrong value in an employer's form is worse than a
   blank one.
 - **Never write over an answer.** The engine fills only empty inputs, and never
-  again one the user typed in (detected by `isTrusted`). Only an explicit Confirm
-  or Teach writes over a value.
+  again one the user typed in (detected by `isTrusted`). Nothing writes over a
+  value — learning least of all: the box holds the answer it learned from. (A
+  correction writes the *profile*, never the box.)
+- **Learn on a committed answer, never on a plain blur**, and only ever link a
+  question to a value the user keeps in their profile. A value typed over our
+  fill corrects that field in the profile, always with an Undo. Our own fills focus and
+  blur every box with *trusted* focus events; `change` is the signal (see
+  Learning). Typed text that no field holds is a record, never filled.
+- **Only the top frame draws.** Every frame fills and learns; a subframe reports
+  upward (`MSG.FRAME_REPORT`) and never answers the popup.
 - **Leave other forms alone.** Password-bearing forms, search, card fields,
   one-time codes and our own UI are never candidates (`collectCandidates`). The
   engine runs on every site; this is what makes that acceptable.
-- **Unrecognised inputs are not marked on the page**, and name chips appear only
-  on pages the user is working on (`showLabels`). A ring round every unknown box on
-  every site is the extension talking over the web.
+- **Unrecognised inputs are not marked on the page**; recognised ones carry an
+  outline and their name chip. A ring round every unknown box on every site is
+  the extension talking over the web.
 - **The report holds still.** Rows are ordered once and later arrivals are
   appended; statuses change in place, rows never move.
 - **Two statuses: `new` and `done`.** Do not add more without asking; `done` is
@@ -719,66 +812,14 @@ deep-links there rather than carrying a copy, and `CONCEPT_HELP.syncClient` says
   `chrome.tabs.create` would launch the app — a dead end where nothing can be
   filled. An `intent://` link is rewritten to its `browser_fallback_url`,
   re-checked through `webOnly`.
-- **Selectors are resolved in exactly one place, `shared/query.ts`.** Six copies of
-  the same guarded `querySelector` had grown across `content/` and `shared/`, and a
-  malformed selector must never throw out of a sweep. The resolver also understands one extension to CSS,
-  `button:-cf-text("Apply now")`, kept to elements whose collapsed text *equals* the
-  literal. CSS cannot say "the button labelled Apply now", and on a board with no
-  ids, hashed classes and a re-render between visits that label is the only durable
-  handle there is. It is **terminal-only and at most one per selector** — which is
-  what keeps the resolver a `split` rather than a parser, and costs nothing because
-  `pickSelector` only ever emits it last. A selector breaking that rule resolves to
-  *nothing*, never to a guess.
-- **Never read a job container with `textContent`.** It welds every heading,
-  paragraph and bullet into one string and preserves the HTML source's own
-  indentation. `shared/jobText.ts` walks it into blocks instead (the picker's
-  preview reads through it) — and drops `form`/`nav`/`aside`/`footer`, because a
-  broad container (`main`, `article`, `[class*="content"]`) otherwise quotes the
-  application form and the decoy sidebar back at the user.
-  `clip` lives there too — one line, cut to *n* — because every place that shows a
-  snippet of page text (the picker's preview among them) is making the same
-  decision about the same text.
 - **Closing the review modal must never destroy it.** `onClose` minimizes to the
   pill (`FillerModal.minimize`); destroying it left "Reset & Re-run" as the only
   way back, which wipes every field just filled.
-- **The picker never commits on a click, on any pointer.** A click *selects* and
-  Confirm saves — one flow, no `pointerType` branch. What is under the pointer is
-  not what the user checked.
-- **A point gives a run of elements, not one.** `document.elementFromPoint` hands
-  back a single node and it is routinely not the one meant — the description is
-  the `<div>` around the `<span>` you can see, and the Send button is the
-  `<button>` around the `<span>` the click lands on. `shared/elementChain.ts` is
-  the pure half: the hit-test stack, **outermost first**, with `<html>`/`<body>`
-  and everything the extension drew removed, capped at `MAX_CHAIN` above the
-  innermost. Clicking the same spot again steps one level *in* and wraps; Wider /
-  Deeper and the arrow keys walk it both ways. It reads outermost-first because
-  the outer element is usually the one that can name itself and the inner one is
-  usually an unnamed `<span>` — which is also why the toolbar reads back
-  `describeElement` plus the `pickSelector` strength for the current step: the
-  choice being made is which depth gives a handle that still resolves next month.
-  **A wrapper drawing the same box as its child is dropped**, because that click
-  moves nothing on screen and reads as the picker being broken.
-- **And it reads back the words, not only the structure.** `div.job-description`
-  says where a thing is and nothing about whether it is the right thing, so the
-  toolbar reads back what the selection says. The `preview` row is `blocksToText(extractBlocks(el))`, the
-  real reading path rather than `textContent`, falling back to the element's own
-  words when that returns nothing: `extractBlocks` refuses a root that is chrome,
-  which is *every control worth marking*, so without the fallback the Send button
-  and the apply link preview as blank. It is **memoized on the element** — `paint`
-  runs off a capture-phase `scroll` listener and reading a posting is a full walk —
-  and clipped by `clip` plus a three-line clamp, because the bar is
-  `width: max-content` and an unclamped description stretches it to the viewport.
-  A third row, *below* the controls: the two rows above it must not move when a
-  selection appears.
-- **The picker's chrome is created once and repainted, never rebuilt**, and its
-  capture-phase suppression covers `pointerdown`/`mousedown`/`mouseup`/`dblclick`/
-  `contextmenu` and not just `click`: a site that acts on `mousedown` would
-  otherwise act once per step of a multi-click pick.
 - **Every mark the extension draws on the host page carries an `OWN_SELECTOR`
   attribute and contains no form control.** `fieldTags.ts`'s chips and the queue
   chip are in the page's DOM; without `TAG_ATTR`/`QUEUE_CHIP_HOST_ID` in
-  `extensionUi.ts` they are pickable by `elementChain` and — if one ever wrapped
-  an `<input>` — a candidate for the engine to fill. `pointer-events: none` is the
+  `extensionUi.ts` they would be — if one ever wrapped an `<input>` — a candidate
+  for the engine to fill. `pointer-events: none` is the
   belt, not the braces.
 - **A label-less `highlight` re-colours an existing chip; it must never remove one.**
   `confirmField` re-colours a field's outline after a Confirm and passes no label,
@@ -808,13 +849,16 @@ fixture has a config — there are none.
 
 The server listens on **two ports** so there are three origins — `localhost:5199`
 (board), `127.0.0.1:5199` (employer), `127.0.0.1:5200`. A different port is a
-different site to the extension, which is what proves a lesson taught on one site
+different site to the extension, which is what proves a lesson learned on one site
 fills on another (`questions.html` served from both). `/queue-seed.txt` serves the
 URL list the session E2E uses.
 
 Off the queue the card starts **folded to its pill**, so an E2E that reads the
-card opens it the way a user does (`openCard`). Rows that need teaching are listed
-*first* — locate a row by its question or its buttons, never by position.
+card opens it the way a user does (`openCard`). New rows are listed *first* —
+locate a row by its question, never by position. A test that learns types the way
+a user does (`answer`: `fill`, then Tab — CDP's events are trusted, and the blur
+fires the `change` learning listens for). A switch is pressed on its track, as a
+user presses it: the knob sits over the invisible checkbox.
 
 **Wait for `document.body.dataset.ready` before writing storage under an options
 page.** `main()` ends by setting it; `load` fires long before, while the boot is

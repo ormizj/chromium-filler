@@ -8,7 +8,7 @@
  * starts, and the page underneath is what the user is working in. So the outline
  * gets a label.
  *
- * Drawn the way `picker.ts` draws its box — the host page's own light DOM, styled
+ * Drawn on the host page's own light DOM, styled
  * inline from `ui/palette.ts` (a content script cannot see `tokens.css`, so a
  * `var(--…)` resolves to nothing out here), `pointer-events: none`, and positioned
  * from `getBoundingClientRect()`.
@@ -16,8 +16,7 @@
  * **`position: fixed`, not `absolute`.** Page coordinates scroll for free, which is
  * tempting — and wrong for a field inside a scrollable subtree or under a CSS
  * transform, both routine on a multi-step ATS form. A rectangle read from the
- * viewport is right in every case; the cost is one pass per frame over ~10 chips,
- * which is what the picker already pays for one.
+ * viewport is right in every case; the cost is one pass per frame over ~10 chips.
  *
  * **The chip is the only extrinsic half of a mark.** `highlight` draws the outline
  * as an inline style on the element itself, so it moves with the page whatever
@@ -34,9 +33,7 @@ import { watchPageChange } from './pageChange';
 import type { MatchConfidence } from '../shared/types';
 
 /**
- * Under the recorder bar (`…645`) and the picker's box (`…646`), over everything a
- * page is likely to draw. A chip must never sit on the one control that can stop
- * the recording it is helping with.
+ * Over everything a page is likely to draw, and under the review card's own layer.
  */
 const Z = '2147483644';
 
@@ -77,16 +74,15 @@ export function tagElement(el: HTMLElement, label: string, confidence: MatchConf
   // These sit in the *page's* DOM, so without this a screen reader reads them in the
   // form's own reading order — a second, worse copy of every label the page already
   // has. The panel's rows are the accessible surface for this; the chip is the
-  // sighted shortcut to them, exactly as the picker's box is.
+  // sighted shortcut to them.
   tag.setAttribute('aria-hidden', 'true');
   tag.textContent = label;
   Object.assign(tag.style, {
     position: 'fixed',
     zIndex: Z,
     pointerEvents: 'none',
-    // Deliberately the picker toolbar's inverted chip: these two are the only things
-    // the extension draws directly on someone else's page, and one treatment between
-    // them is what stops the page looking like it has two extensions on it.
+    // An inverted chip, like the options toast: it is drawn directly on someone
+    // else's page and has to read as ours against whatever is under it.
     background: p.ink,
     color: p.onInk,
     font: '11px/1.4 system-ui, sans-serif',

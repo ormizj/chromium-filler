@@ -24,7 +24,8 @@ async function mountPopup(
   document.body.innerHTML = BODY;
   chrome.runtime.lastError = undefined;
   chrome.tabs.query = vi.fn().mockResolvedValue([{ id: 1, url }]) as unknown as typeof chrome.tabs.query;
-  chrome.tabs.sendMessage = vi.fn((_tabId: number, _msg: unknown, cb?: (r: unknown) => void) => {
+  chrome.tabs.sendMessage = vi.fn((_tabId: number, _msg: unknown, ...rest: unknown[]) => {
+    const cb = rest.find((r) => typeof r === 'function') as ((r: unknown) => void) | undefined;
     if (status === undefined) chrome.runtime.lastError = { message: 'no receiving end' };
     cb?.(status);
     chrome.runtime.lastError = undefined;
@@ -39,7 +40,7 @@ async function mountPopup(
 const matched = (over: Partial<StatusResponse> = {}): StatusResponse => ({
   filledCount: 0,
   reportedCount: 0,
-  toTeach: 0,
+  fresh: 0,
   hasRun: false,
   ...over,
 });
@@ -65,7 +66,8 @@ const session = (over: Partial<SessionState['progress']> = {}): SessionState => 
 /** Swap in a recording sendMessage after mount (mountPopup installs its own). */
 function recordTabMessages(reply: StatusResponse): unknown[] {
   const sent: unknown[] = [];
-  chrome.tabs.sendMessage = vi.fn((_tabId: number, msg: unknown, cb?: (r: unknown) => void) => {
+  chrome.tabs.sendMessage = vi.fn((_tabId: number, msg: unknown, ...rest: unknown[]) => {
+    const cb = rest.find((r) => typeof r === 'function') as ((r: unknown) => void) | undefined;
     sent.push(msg);
     cb?.(reply);
   }) as unknown as typeof chrome.tabs.sendMessage;
@@ -95,9 +97,9 @@ describe('popup render', () => {
   });
 
   it('after a fill: the counts, a reminder to submit, and a Reset beside them', async () => {
-    await mountPopup(matched({ hasRun: true, filledCount: 5, reportedCount: 7, toTeach: 2 }));
+    await mountPopup(matched({ hasRun: true, filledCount: 5, reportedCount: 7, fresh: 2 }));
     const detail = document.getElementById('detail')!.textContent!;
-    expect(detail).toContain('5 filled · 2 to teach');
+    expect(detail).toContain('5 filled · 2 new');
     expect(detail).toMatch(/submit on the site/i);
     expect(document.getElementById('site-status')!.className).toContain('ok');
     expect((document.getElementById('primary') as HTMLButtonElement).textContent).toBe('Fill');
@@ -140,18 +142,36 @@ describe('popup render', () => {
     expect((document.getElementById('reset') as HTMLButtonElement).hidden).toBe(true);
   });
 
-  it('Teach starts pointing at a field in the tab', async () => {
+  it('the switch pauses this browser, and says so', async () => {
     await mountPopup(matched());
-    const sent = recordTabMessages(matched());
-    (document.getElementById('teach') as HTMLAnchorElement).click();
+    const sw = document.getElementById('on') as HTMLInputElement;
+    expect(sw.checked).toBe(true);
+    sw.checked = false;
+    sw.dispatchEvent(new Event('change'));
     await flush();
-    expect(sent).toContainEqual(expect.objectContaining({ type: MSG.TEACH }));
-    expect(window.close).toHaveBeenCalled();
+    await flush();
+    expect((await chrome.storage.local.get('settings')).settings).toMatchObject({ fillAutomatically: false });
+    expect(document.getElementById('detail')!.textContent).toMatch(/Paused/);
+    expect(document.getElementById('site-status')!.textContent).toBe('paused');
+    expect(window.close).not.toHaveBeenCalled();
+  });
+
+  it('opens on the switch as stored', async () => {
+    await chrome.storage.local.set({ settings: { fillAutomatically: false } });
+    await mountPopup(matched());
+    expect((document.getElementById('on') as HTMLInputElement).checked).toBe(false);
+  });
+
+  it('asks only the top frame about the page', async () => {
+    await mountPopup(matched());
+    const calls = (chrome.tabs.sendMessage as unknown as { mock: { calls: unknown[][] } }).mock.calls;
+    const status = calls.find((c) => (c[1] as { type: string }).type === MSG.STATUS)!;
+    expect(status[2]).toEqual({ frameId: 0 });
   });
 
   /** The action rows are furniture, not a report on the page: always all there. */
   it('keeps every action visible whatever the page and the session are doing', async () => {
-    const visible = () => ['primary', 'open-queue', 'teach', 'open-options']
+    const visible = () => ['primary', 'open-queue', 'open-options', 'on-switch']
       .filter((id) => !(document.getElementById(id) as HTMLElement).hidden);
 
     await mountPopup(matched());
@@ -162,10 +182,10 @@ describe('popup render', () => {
     expect(visible()).toHaveLength(4);
   });
 
-  it('puts Teach, Queue and Options in one row, in order', async () => {
+  it('puts Queue and Options in one row, in order', async () => {
     await mountPopup(matched());
     expect([...document.querySelector('.links')!.children].map((el) => el.id))
-      .toEqual(['teach', 'open-queue', 'open-options']);
+      .toEqual(['open-queue', 'open-options']);
     expect([...document.querySelector('.actions')!.children].map((el) => el.id))
       .toEqual(['primary']);
   });
