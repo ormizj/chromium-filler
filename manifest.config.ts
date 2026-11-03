@@ -3,7 +3,7 @@ import { defineManifest } from '@crxjs/vite-plugin';
 export default defineManifest({
   manifest_version: 3,
   name: 'Chromium Filler',
-  version: '0.1.5',
+  version: '0.2.0',
   description: 'Fills job application forms on any site as they appear, learns from the answers you type, and never submits for you.',
   // `identity` is for syncing through a Google Drive app folder (see
   // src/shared/syncConfig.ts). Deliberately no `alarms`: sync runs when the user

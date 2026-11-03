@@ -1,6 +1,6 @@
 {
   "name": "chromium-filler",
-  "version": "0.1.5",
+  "version": "0.2.0",
   "description": "MV3 Chrome extension that fills job application forms on any site as they appear, learns from the answers you type, and never submits for you.",
   "type": "module",
   "scripts": {
